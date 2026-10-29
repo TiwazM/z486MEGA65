@@ -1,0 +1,55 @@
+## z486 for MEGA65
+##
+## Core specific constraints (M2M/common.xdc and M2M/MEGA65-R6.xdc hold the framework's)
+##
+## Based on the M2M template, Megamiga's and pc10-iii's CORE/CORE.xdc; licensed under GPL v3
+
+## The PC's clock, 66.667 MHz, also M2M's video clock (CORE/vhdl/clk.vhd), and the audio clock
+## (24.615 MHz) for OPL3 and the Sound Blaster
+create_generated_clock -name main_clk  [get_pins CORE/clk_gen/i_clk_main/CLKOUT1]
+create_generated_clock -name pc_audio_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
+
+## ascal asynchronous FIFO data crossings (Megamiga CORE.xdc, framework paths): i_dpram is
+## written on i_clk (= main_clk) and read on avl_clk (= hr_clk), o_dpram is written on avl_clk
+## and read on o_clk (= hdmi_clk). Bound them to one destination period instead of the
+## impossible edge-alignment requirement (and its hold-fix detours).
+set_max_delay -datapath_only 10.000 \
+   -from [get_pins -hierarchical -regexp {.*/i_ascal/i_dpram_reg.*/CLK}] \
+   -to   [get_cells -hierarchical -regexp {.*/i_ascal/avl_dr_reg\[[0-9]+\]}]
+set_max_delay -datapath_only 13.400 \
+   -from [get_pins -hierarchical -regexp {.*/i_ascal/o_dpram_reg.*/CLK}] \
+   -to   [get_cells -hierarchical -regexp {.*/i_ascal/o_dr_reg\[[0-9]+\]}]
+
+## qnice_clk (50 MHz) <-> main_clk: all crossings are synchronizers, cdc_stable or the
+## framework's own CDCs; bound them to one qnice period (max_delay, not false_path, so the
+## tighter cdc_stable bounds of common.xdc stay in force).
+set_max_delay -datapath_only 20.000 -from [get_clocks qnice_clk] -to [get_clocks main_clk]
+set_max_delay -datapath_only 20.000 -from [get_clocks main_clk] -to [get_clocks qnice_clk]
+
+## main_clk <-> pc_audio_clk (common.xdc's audio_clk is the framework's HDMI audio clock): one
+## MMCM, but no useful common period (66.667 / 24.615 MHz). The PC crosses with its own
+## synchronizers and FIFOs (sound.v, opl3), mega65.vhd with cdc_stable; bound them to one
+## main_clk period.
+set_max_delay -datapath_only 15.000 -from [get_clocks main_clk]  -to [get_clocks pc_audio_clk]
+set_max_delay -datapath_only 15.000 -from [get_clocks pc_audio_clk] -to [get_clocks main_clk]
+
+## M2M-UPSTREAM rtg-framebuffer (Megamiga's rule for its RTG registers): z486's SVGA framebuffer
+## descriptor (z486_mega65.sv, main clock) drives ascal's framebuffer-mode inputs, which ascal
+## samples in its Avalon (hr_clk) and output (hdmi_clk) domains. The descriptor only changes on
+## a mode switch; a torn value lasts one frame at most (MiSTer's sys_top.sdc false-paths FB_*
+## too). The palette writes stay timed: ascal's palette RAM is written on fb_pal_clk = main_clk.
+set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/fb_*}] -to [get_clocks {hr_clk hdmi_clk}]
+
+## z486_mister.sdc: the reset and boot hand-over registers are asynchronous by design
+set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*cpu_reset_n*}]
+set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*boot_done*}]
+
+## SDRAM (R6: IS42S16320F) pin registers in the IOBs (Megamiga's rule). The I/O timing itself
+## (the SDRAM clock's phase against the board's traces) is not constrained yet: it has to be
+## measured on a board.
+set_property IOB TRUE [get_ports {sdram_a_o[*] sdram_ba_o[*] sdram_ras_n_o sdram_cas_n_o sdram_we_n_o sdram_cs_n_o sdram_dqml_o sdram_dqmh_o sdram_dq_io[*]}]
+
+## M2M-UPSTREAM sd-host: the native 4-bit SD bus needs pull-ups on CMD and DAT0..DAT3 of both
+## slots. Port names are the SPI ones of the board XDCs: mosi = CMD, miso = DAT0, reset = DAT3.
+set_property -dict {PULLUP TRUE} [get_ports {sd_mosi_o sd_miso_i sd_d1_i sd_d2_i sd_reset_o}]
+set_property -dict {PULLUP TRUE} [get_ports {sd2_mosi_o sd2_miso_i sd2_d1_i sd2_d2_i sd2_reset_o}]

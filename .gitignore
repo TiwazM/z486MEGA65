@@ -36,6 +36,23 @@ xsim.dir/
 ooc/build-*/
 ooc/run_*.out
 
+# Core build: the Vivado 2022.2 source copies, reports, the firmware build's outputs
+CORE/gen/
+CORE/reports/
+CORE/build_r6*.out
+CORE/m2m-rom/.tools/
+CORE/m2m-rom/asm.log
+CORE/m2m-rom/globals.asm
+CORE/m2m-rom/osm_const.asm
+CORE/m2m-rom/shell_fh_ptrs.asm
+CORE/m2m-rom/shell_fhandles.asm
+CORE/m2m-rom/m2m-rom.def
+CORE/m2m-rom/m2m-rom.lis
+CORE/m2m-rom/m2m-rom.out
+CORE/m2m-rom/m2m-rom.rom
+CORE/m2m-rom/m2m-banks.rom
+M2M/QNICE/dist_kit/sysdef.asm
+
 # Bitstreams and core files are published as release assets, not committed
 *.bit
 *.cor

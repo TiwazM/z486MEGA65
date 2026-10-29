@@ -4,3 +4,7 @@
 [submodule "z486_MiSTer"]
 	path = z486_MiSTer
 	url = https://github.com/nand2mario/z486_MiSTer.git
+[submodule "M2M/QNICE"]
+	path = M2M/QNICE
+	url = https://github.com/johansmolinski/QNICE-FPGA
+	branch = fat32-fastseek
