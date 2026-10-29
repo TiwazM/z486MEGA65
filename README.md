@@ -5,8 +5,8 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 Status: the MEGA65 shell exists, and the whole core synthesizes, places and
-routes for the R6 (MiSTer2MEGA65, Megamiga's fork). It misses 66.667 MHz by
-1.2 ns (about 61.7 MHz), all inside the CPU. There is no bitstream, and it
+routes for the R6 (MiSTer2MEGA65, Megamiga's fork). With the CPU floorplanned
+it misses 66.667 MHz by 0.39 ns (about 65.0 MHz), all inside the CPU. There is no bitstream, and it
 cannot boot yet: no boot image loader, no drives, no keyboard.
 
 ## Plan
@@ -106,7 +106,16 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core, placed and routed (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt):
+The whole core, placed and routed at 66.667 MHz (CORE-R6.xpr,
+Performance_ExplorePostRoutePhysOpt), with and without the CPU's pblock
+(`pblock_z486_cpu` in CORE.xdc: clock regions X0Y1..X1Y2, rows 50..149):
+
+| `main_clk` (15.000 ns) | Without pblock | With pblock |
+|---|---|---|
+| Setup slack | -1.202 ns | **-0.392 ns** |
+| Est. Fmax | ~61.7 MHz | **~65.0 MHz** |
+| Failing endpoints | 1,848 | 508 |
+| Total negative slack | -826 ns | -83 ns |
 
 | | Used | Of the FPGA |
 |---|---|---|
@@ -115,23 +124,19 @@ The whole core, placed and routed (CORE-R6.xpr, Performance_ExplorePostRoutePhys
 | Block RAM | 140.5 tiles | 38% |
 | DSPs | 86 | 12% |
 
-| Clock | Period | Setup slack | Est. Fmax |
-|---|---|---|---|
-| `main_clk` (the PC) | 15.000 ns | **-1.202 ns** (1,848 endpoints) | ~61.7 MHz |
-| `hr_clk` (HyperRAM) | 10.000 ns | +0.279 ns | |
-| `hdmi_clk` | 13.468 ns | +1.865 ns | |
-| `qnice_clk` | 20.000 ns | +0.820 ns | |
-| `pc_audio_clk` | 40.625 ns | +7.130 ns | |
+Every other clock meets (with the pblock: `hr_clk` +0.163 ns, `hdmi_clk`
++1.485 ns, `qnice_clk` +1.038 ns, `pc_audio_clk` +10.253 ns), hold is met
+(+0.024 ns), routing is complete and every clock crossing meets.
 
-Hold is met everywhere (+0.013 ns), routing is complete, every clock crossing
-meets. Every failing endpoint is inside the CPU, in three families: the data
-unit's write-back into the registers (27-28 levels), the x87 multiplier into its
-work register (28 levels), and the data-cache address into the decoder's PLA
-ROM (18-19 levels). Routing is 76-82% of the integer paths' delay, about 1 ns
-more than in the CPU-alone build: the CPU spreads out next to the framework.
+Without the pblock the CPU spread over six clock regions across the full chip
+width. With it, what still fails is a flat wall of CPU paths between -0.29 and
+-0.39 ns: the data-cache address into the decoder's PLA ROM (18-19 logic
+levels), the segment unit into the TLB and into itself (19-26), the data
+unit's write-back (23-28). Routing is still 76-84 % of their delay; the x87
+multiplier no longer fails.
 
-At 60 MHz (16.667 ns) the same placement would have +0.46 ns; 62.5 MHz would
-still miss by about 0.2 ns.
+At this placement 64 MHz (15.625 ns) would have about +0.23 ns, 65 MHz about
+0 ns.
 
 Out of context, placed and routed:
 

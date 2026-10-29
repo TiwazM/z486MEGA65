@@ -51,10 +51,20 @@ set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ 
 set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*cpu_reset_n*}]
 set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*boot_done*}]
 
+## Floorplan: the CPU in the middle of the chip, clock regions X0Y1..X1Y2 (rows 50..149), next
+## to the SDRAM controller (bank 34, X1Y2). Unconstrained, it spread over six clock regions across
+## the full width (slice columns 6..163, rows 13..131) and its critical paths were 76-82 %
+## routing. Columns 0..5 stay out: pblock_vga (MEGA65-R6.xdc) holds them in rows 75..99. About
+## 15.6K slices for the CPU's 42K LUTs (67 %), 180 RAMB36 for its 21 + 10/2, 360 DSPs for 25.
+create_pblock pblock_z486_cpu
+add_cells_to_pblock pblock_z486_cpu [get_cells CORE/i_z486/core/z486_cpu]
+resize_pblock pblock_z486_cpu -add {SLICE_X6Y50:SLICE_X163Y149 RAMB18_X0Y20:RAMB18_X8Y59 RAMB36_X0Y10:RAMB36_X8Y29 DSP48_X0Y20:DSP48_X8Y59}
+
 ## SDRAM (R6: IS42S16320F) pin registers in the IOBs (Megamiga's rule). The I/O timing itself
 ## (the SDRAM clock's phase against the board's traces) is not constrained yet: it has to be
-## measured on a board.
-set_property IOB TRUE [get_ports {sdram_a_o[*] sdram_ba_o[*] sdram_ras_n_o sdram_cas_n_o sdram_we_n_o sdram_cs_n_o sdram_dqml_o sdram_dqmh_o sdram_dq_io[*]}]
+## measured on a board. Not sdram_cs_n_o: sdram.v only selects between two chips of a 128 MB
+## module, so with one 64 MB chip it is a constant 0 without a flip-flop (Place 30-722).
+set_property IOB TRUE [get_ports {sdram_a_o[*] sdram_ba_o[*] sdram_ras_n_o sdram_cas_n_o sdram_we_n_o sdram_dqml_o sdram_dqmh_o sdram_dq_io[*]}]
 
 ## M2M-UPSTREAM sd-host: the native 4-bit SD bus needs pull-ups on CMD and DAT0..DAT3 of both
 ## slots. Port names are the SPI ones of the board XDCs: mosi = CMD, miso = DAT0, reset = DAT3.
