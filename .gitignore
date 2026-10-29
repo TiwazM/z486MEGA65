@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon?
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+.DocumentRevisions-V100
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Vivado output
+.Xil/
+*.jou
+*.log
+*.str
+*.pb
+*.dcp
+*.backup.*
+hs_err_pid*.log
+webtalk*
+usage_statistics_webtalk.*
+*.cache/
+*.runs/
+*.hw/
+*.gen/
+*.sim/
+*.ip_user_files/
+xsim.dir/
+*.wdb
+
+# Out-of-context build results (reports stay local; numbers go in the README)
+ooc/build-*/
+ooc/run_*.out
+
+# Bitstreams and core files are published as release assets, not committed
+*.bit
+*.cor
+
+# Editors and tools
+.vscode/
+.idea/
+*.swp
+*~
+__pycache__/
+*.pyc
