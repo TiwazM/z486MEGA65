@@ -20,6 +20,13 @@ set_max_delay -datapath_only 13.400 \
    -from [get_pins -hierarchical -regexp {.*/i_ascal/o_dpram_reg.*/CLK}] \
    -to   [get_cells -hierarchical -regexp {.*/i_ascal/o_dr_reg\[[0-9]+\]}]
 
+## ascal's reset: common.xdc false-paths it "-through .../i_ascal/reset_na", a pin that synthesis
+## optimizes away (CRITICAL WARNING 12-4739). reset_na combines the video reset (main_clk here)
+## and the HyperRAM reset and clears ascal's per-domain reset registers asynchronously; without
+## the cut their recovery checks fail by up to 6.6 ns. The same cut, by pin names that survive
+## synthesis: the CLR pins of i_reset_na_reg (i_clk), o_reset_na_reg (o_clk) and their siblings.
+set_false_path -to [get_pins -hierarchical -filter {NAME =~ i_framework/i_av_pipeline/i_digital_pipeline/i_ascal/*_reset_na_reg/CLR}]
+
 ## qnice_clk (50 MHz) <-> main_clk: all crossings are synchronizers, cdc_stable or the
 ## framework's own CDCs; bound them to one qnice period (max_delay, not false_path, so the
 ## tighter cdc_stable bounds of common.xdc stay in force).

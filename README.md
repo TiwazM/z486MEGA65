@@ -4,10 +4,10 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 486DX2-class PC built around the [z486](https://github.com/nand2mario/z486) CPU,
 to the MEGA65 R6.
 
-Status: the MEGA65 shell exists and the whole core synthesizes for the R6
-(MiSTer2MEGA65, Megamiga's fork). It has not been placed and routed as a
-whole, there is no bitstream, and it cannot boot yet: no boot image loader, no
-drives, no keyboard.
+Status: the MEGA65 shell exists, and the whole core synthesizes, places and
+routes for the R6 (MiSTer2MEGA65, Megamiga's fork). It misses 66.667 MHz by
+1.2 ns (about 61.7 MHz), all inside the CPU. There is no bitstream, and it
+cannot boot yet: no boot image loader, no drives, no keyboard.
 
 ## Plan
 
@@ -70,11 +70,14 @@ Vivado 2022.2 in the vivado-on-mac Docker setup (`m65build` image):
 ```sh
 tools/build_r6.sh            # synthesize the core; reports in CORE/reports/synth/
 tools/build_r6.sh reports    # re-report the last synthesis after constraint changes
+tools/build_r6.sh impl       # synthesize if needed, then place and route; CORE/reports/impl/
+tools/build_r6.sh finish     # only the post-route phys_opt_design and reports of the last impl
 ```
 
 `build_r6.sh` regenerates `CORE/CORE-R6.xpr` and the source copies in
-`CORE/gen/`, then runs `CORE/build_synth.tcl`. Synthesis only: nothing here
-writes a bitstream. To open the project in the Vivado GUI, run
+`CORE/gen/`, then runs `CORE/build_synth.tcl` or `CORE/build_impl.tcl`.
+Implementation stops after the strategy's post-route `phys_opt_design`:
+nothing here writes a bitstream. To open the project in the Vivado GUI, run
 `python3 tools/gen_xpr.py` first.
 
 Out-of-context builds of the CPU or of `system.sv` alone:
@@ -103,18 +106,32 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core, synthesis (CORE-R6.xpr, 66.667 MHz):
+The whole core, placed and routed (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt):
 
 | | Used | Of the FPGA |
 |---|---|---|
-| LUTs | 67.1K | 50% |
-| Registers | 36.3K | 14% |
+| LUTs | 66.4K | 50% |
+| Registers | 32.7K | 12% |
 | Block RAM | 140.5 tiles | 38% |
 | DSPs | 86 | 12% |
 
-Post-synthesis timing (an estimate before placement): every clock crossing and
-every framework clock meets; `main_clk` misses by 1.76 ns, all in the CPU (the
-segment descriptor cache to the TLB, 29 logic levels).
+| Clock | Period | Setup slack | Est. Fmax |
+|---|---|---|---|
+| `main_clk` (the PC) | 15.000 ns | **-1.202 ns** (1,848 endpoints) | ~61.7 MHz |
+| `hr_clk` (HyperRAM) | 10.000 ns | +0.279 ns | |
+| `hdmi_clk` | 13.468 ns | +1.865 ns | |
+| `qnice_clk` | 20.000 ns | +0.820 ns | |
+| `pc_audio_clk` | 40.625 ns | +7.130 ns | |
+
+Hold is met everywhere (+0.013 ns), routing is complete, every clock crossing
+meets. Every failing endpoint is inside the CPU, in three families: the data
+unit's write-back into the registers (27-28 levels), the x87 multiplier into its
+work register (28 levels), and the data-cache address into the decoder's PLA
+ROM (18-19 levels). Routing is 76-82% of the integer paths' delay, about 1 ns
+more than in the CPU-alone build: the CPU spreads out next to the framework.
+
+At 60 MHz (16.667 ns) the same placement would have +0.46 ns; 62.5 MHz would
+still miss by about 0.2 ns.
 
 Out of context, placed and routed:
 
