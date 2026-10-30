@@ -77,8 +77,12 @@ constant VRAM_ADDR_WIDTH      : natural := f_log2(CHAR_MEM_SIZE);
 constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     -- Reserved for the M2M framework
 
 ----------------------------------------------------------------------------------------------------------
--- QNICE devices of the core (ids >= 0x0100): none yet
+-- QNICE devices of the core (ids >= 0x0100)
 ----------------------------------------------------------------------------------------------------------
+
+-- The PC's control register (mega65.vhd), address 0, bit 0: the BIOS ROMs are in HyperRAM
+-- (m2m-rom.asm, PREP_START). Until QNICE sets it, the PC stays in reset.
+constant C_DEV_PC_CTL         : std_logic_vector(15 downto 0) := x"0100";
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System: not used
@@ -90,8 +94,9 @@ constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"EEEE";
 constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
--- System for handling simulated cartridges and ROM loaders: none yet (the boot image will be an
--- auto-loaded ROM into HyperRAM)
+-- System for handling simulated cartridges and ROM loaders: not used. The framework's auto-loader
+-- writes one byte per HyperRAM word; z486 reads its BIOS ROMs packed, so m2m-rom.asm loads them
+-- itself (PREP_START).
 ----------------------------------------------------------------------------------------------------------
 
 type crtrom_buf_array is array(natural range<>) of std_logic_vector;

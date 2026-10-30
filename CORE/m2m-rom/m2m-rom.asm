@@ -7,8 +7,8 @@
 ; callbacks below are the ones the Megamiga fork's Shell needs: the M2M
 ; template's plus HANDLE_CORE_IO (core-io-hook), BROWSE_EXTRA (cfg-strings),
 ; FAR_CALL (code-banks) and CFG_SIGCHECK / CFG_SIGSET (the settings file
-; signature). No ROMs, drives or devices yet: they come with the boot image,
-; the IDE/floppy bridge and the keyboard.
+; signature). PREP_START loads the PC's BIOS ROMs. No drives yet: they come
+; with the IDE/floppy bridge.
 ;
 ; Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's
 ; firmware (Johan Smolinski); licensed under GPL v3
@@ -67,16 +67,180 @@ BROWSE_EXTRA    XOR     R8, R8
 ; ----------------------------------------------------------------------------
 ; Core specific callback functions: Core startup
 ;
-; PREP_START is called after the ROMs were auto-loaded and before the Shell
-; releases the core's reset. Nothing to check yet.
+; PREP_START is called after the Shell's reset management, before it connects
+; keyboard and joysticks. It loads the PC's BIOS ROMs. z486's boot loader
+; copies the ROM window 0xC0000..0xFFFFF (256 KB) from its DDR3 window into
+; the SDRAM the moment the PC leaves reset (on MiSTer, Main_MiSTer stages the
+; ROMs there). Here that window is HyperRAM 0x2C0000 (globals.vhd,
+; mega65.vhd), and the PC stays in reset until PC_DEV_CTL says the ROMs are
+; in:
+;
+;   /z486/boot1.rom  the VGA BIOS     at 0xC0000
+;   /z486/boot0.rom  the system BIOS  at 0xF0000 (0xE0000 above 64 KB)
+;
+; from the SD card of the settings file. The window is cleared first: the PC
+; copies all of it, and the BIOS scans the rest for option ROMs.
 ;
 ; Output: R8: 0 = OK, else pointer to the error message (fatal)
 ;         R9: 0 = OK, else error code
 ; ----------------------------------------------------------------------------
 
-PREP_START      XOR     R8, R8
+PC_ROM_WIN      .EQU    0x0160                  ; HyperRAM 0x2C0000 = 0xC0000
+PC_ROM_WINS     .EQU    0x0020                  ; 32 4K word windows: 256 KB
+PC_BIOS_WIN     .EQU    0x0178                  ; 0xF0000
+PC_BIOS128_WIN  .EQU    0x0170                  ; 0xE0000
+
+PREP_START      INCRB
+                MOVE    R10, R0                 ; R10..R12 preserved
+                MOVE    R11, R1
+                MOVE    R12, R2
+
+                ; clear the window
+                MOVE    PC_ROM_WIN, R3          ; R3: 4K window
+                MOVE    PC_ROM_WINS, R4         ; R4: windows left
+_PCS_CLR1       MOVE    M2M$RAMROM_DEV, R5
+                MOVE    M2M$HYPERRAM, @R5
+                MOVE    M2M$RAMROM_4KWIN, R5
+                MOVE    R3, @R5
+                MOVE    M2M$RAMROM_DATA, R5
+                MOVE    0x1000, R6
+_PCS_CLR2       MOVE    0, @R5++
+                SUB     1, R6
+                RBRA    _PCS_CLR2, !Z
+                ADD     1, R3
+                SUB     1, R4
+                RBRA    _PCS_CLR1, !Z
+
+                ; the SD card
+                RSUB    WAIT_FOR_SD, 1          ; stability workaround
+                RSUB    SDC$HOMEDEV, 1          ; R8: device handle
+                CMP     0, R9                   ; R9: error code
+                RBRA    _PCS_VGA, Z
+                MOVE    ERR_PC_NOSD, R8
+                RBRA    _PCS_RET, 1
+
+                ; the VGA BIOS from 0xC0000 (at most 128 KB), the system BIOS
+                ; up to 0xFFFFF
+_PCS_VGA        MOVE    R8, R7                  ; R7: device handle
+                MOVE    ERR_PC_BOOT1, R9
+                MOVE    PC_BOOT1, R10
+                MOVE    PC_ROM_WIN, R11
+                MOVE    PC_ROM_WIN, R12
+                RSUB    PC_ROM_LOAD, 1
+                RBRA    _PCS_RET, C
+                MOVE    R7, R8
+                MOVE    ERR_PC_BOOT0, R9
+                MOVE    PC_BOOT0, R10
+                MOVE    PC_BIOS_WIN, R11
+                MOVE    PC_BIOS128_WIN, R12
+                RSUB    PC_ROM_LOAD, 1
+                RBRA    _PCS_RET, C
+
+                ; the PC may leave reset
+                MOVE    M2M$RAMROM_DEV, R8
+                MOVE    PC_DEV_CTL, @R8
+                MOVE    M2M$RAMROM_4KWIN, R8
+                MOVE    0, @R8
+                MOVE    M2M$RAMROM_DATA, R8
+                MOVE    1, @R8
+                XOR     R8, R8
                 XOR     R9, R9
+
+_PCS_RET        MOVE    R0, R10
+                MOVE    R1, R11
+                MOVE    R2, R12
+                DECRB
                 RET
+
+; PC_ROM_LOAD: loads the file R10 (its path) from the device R8 into HyperRAM:
+; from 4K window R11 if it has at most 64 KB, from R12 if it has up to 128 KB.
+; Two bytes per word, the first one in the low byte: z486 reads the window as
+; little-endian 64-bit words. Output: C=0: loaded; C=1: R8 = R9 (the message
+; for the error), R9 = the error code (FAT32's; 0: larger than 128 KB).
+; R10..R12 preserved.
+PC_ROM_LOAD     INCRB
+                MOVE    R9, R0                  ; R0: the message
+                MOVE    R10, R1                 ; R1..R3: preserved
+                MOVE    R11, R2
+                MOVE    R12, R3
+                MOVE    PC_ROM_FILE, R9
+                XOR     R11, R11                ; / separates the path
+                SYSCALL(f32_fopen, 1)
+                CMP     0, R10                  ; R10: error code
+                RBRA    _PRL_ERR, !Z
+
+                ; the size in 64 KB, rounded up, chooses the window
+                MOVE    PC_ROM_FILE, R4
+                ADD     FAT32$FDH_SIZE_HI, R4
+                MOVE    @R4, R4                 ; R4: 64 KB units
+                MOVE    PC_ROM_FILE, R5
+                ADD     FAT32$FDH_SIZE_LO, R5
+                CMP     0, @R5
+                RBRA    _PRL_1, Z
+                ADD     1, R4
+_PRL_1          MOVE    R2, R6                  ; R6: 4K window
+                CMP     R4, 1                   ; above 64 KB?
+                RBRA    _PRL_2, !N              ; no
+                MOVE    R3, R6
+                CMP     R4, 2                   ; above 128 KB?
+                RBRA    _PRL_2, !N              ; no
+                XOR     R10, R10
+                RBRA    _PRL_ERR, 1
+
+_PRL_2          MOVE    M2M$RAMROM_DATA, R5     ; R5: target address
+                MOVE    M2M$RAMROM_DATA, R7
+                ADD     0x1000, R7              ; R7: end of the 4K window
+_PRL_RD         MOVE    PC_ROM_FILE, R8
+                SYSCALL(f32_fread, 1)           ; R9: the low byte
+                CMP     FAT32$EOF, R10
+                RBRA    _PRL_OK, Z
+                CMP     0, R10
+                RBRA    _PRL_ERR, !Z
+                MOVE    R9, R4                  ; R4: the word
+                MOVE    PC_ROM_FILE, R8
+                SYSCALL(f32_fread, 1)           ; R9: the high byte
+                CMP     FAT32$EOF, R10          ; odd size: 0
+                RBRA    _PRL_WR, Z
+                CMP     0, R10
+                RBRA    _PRL_ERR, !Z
+                SWAP    R9, R9
+                OR      R9, R4
+_PRL_WR         MOVE    M2M$RAMROM_DEV, R8      ; (the FAT32 routines use
+                MOVE    M2M$HYPERRAM, @R8       ; devices of their own)
+                MOVE    M2M$RAMROM_4KWIN, R8
+                MOVE    R6, @R8
+                MOVE    R4, @R5++
+                CMP     R5, R7                  ; end of the window?
+                RBRA    _PRL_RD, !Z
+                MOVE    M2M$RAMROM_DATA, R5     ; yes: the next one
+                ADD     1, R6
+                RBRA    _PRL_RD, 1
+
+_PRL_OK         MOVE    R1, R10
+                MOVE    R2, R11
+                MOVE    R3, R12
+                DECRB
+                AND     0xFFFB, SR              ; C=0
+                RET
+
+_PRL_ERR        MOVE    R0, R8
+                MOVE    R10, R9
+                MOVE    R1, R10
+                MOVE    R2, R11
+                MOVE    R3, R12
+                DECRB
+                OR      0x0004, SR              ; C=1
+                RET
+
+PC_BOOT1        .ASCII_W "/z486/boot1.rom"
+PC_BOOT0        .ASCII_W "/z486/boot0.rom"
+
+ERR_PC_NOSD     .ASCII_P "z486 loads its BIOS from /z486 on\n"
+                .ASCII_W "the SD card, but cannot mount one.\n"
+ERR_PC_BOOT1    .ASCII_P "Cannot load the VGA BIOS\n"
+                .ASCII_W "/z486/boot1.rom (at most 128 KB).\n"
+ERR_PC_BOOT0    .ASCII_P "Cannot load the system BIOS\n"
+                .ASCII_W "/z486/boot0.rom (at most 128 KB).\n"
 
 ; ----------------------------------------------------------------------------
 ; Core specific callback functions: OSM selections
@@ -226,6 +390,9 @@ END_OF_ROM      .DW 0
 #endif
 
 #include "../../M2M/rom/shell_vars.asm"
+
+; PREP_START's file handle for the BIOS ROMs
+PC_ROM_FILE     .BLOCK  FAT32$FDH_STRUCT_SIZE
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
 ; for this 14-line menu: 20 + 167 item characters + 1 + 4 x 14 + 1 + (1

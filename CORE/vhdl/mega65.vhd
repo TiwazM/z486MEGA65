@@ -345,6 +345,8 @@ signal video_clk              : std_logic;
 signal video_rst              : std_logic;
 signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
+signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
+signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
 
 ---------------------------------------------------------------------------------------------
 -- z486's MiSTer DDR3 port (main clock) and its way into HyperRAM (hr clock)
@@ -578,8 +580,10 @@ begin
    ---------------------------------------------------------------------------------------------
 
    -- The PC is reset with the machine, by the Shell (cores start in reset until the firmware
-   -- releases them) and by "Reset the PC" (m2m-rom.asm, through the CSR)
-   main_pc_reset <= main_rst or main_reset_m2m_i or main_reset_core_i;
+   -- releases them) and by "Reset the PC" (m2m-rom.asm, through the CSR). It also stays in
+   -- reset until its BIOS ROMs are in HyperRAM: z486's boot loader copies them from there the
+   -- moment it leaves reset, and the Shell releases the core before PREP_START loads them.
+   main_pc_reset <= main_rst or main_reset_m2m_i or main_reset_core_i or not main_pc_roms_ok(0);
 
    -- Power LED: green; blue while the reset button is held long. Drive LED: off (no drives yet).
    main_power_led_o     <= '1';
@@ -784,7 +788,34 @@ begin
    qnice_ascal_triplebuf_o    <= '0';
    qnice_flip_joyports_o      <= '0';
 
-   qnice_dev_data_o <= x"EEEE";
+   -- C_DEV_PC_CTL (globals.vhd): address 0, bit 0 = the PC's BIOS ROMs are in HyperRAM. Written
+   -- by m2m-rom.asm (PREP_START); cleared with QNICE, whose firmware then loads them again.
+   p_qnice_pc_ctl : process (qnice_clk_i)
+   begin
+      if falling_edge(qnice_clk_i) then
+         if qnice_dev_ce_i = '1' and qnice_dev_we_i = '1' and qnice_dev_id_i = C_DEV_PC_CTL and
+            qnice_dev_addr_i = x"0000000" then
+            qnice_pc_roms_ok(0) <= qnice_dev_data_i(0);
+         end if;
+         if qnice_rst_i = '1' then
+            qnice_pc_roms_ok(0) <= '0';
+         end if;
+      end if;
+   end process p_qnice_pc_ctl;
+
+   qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0) when qnice_dev_id_i = C_DEV_PC_CTL
+                  else x"EEEE";
    qnice_dev_wait_o <= '0';
+
+   -- A level that changes once per boot
+   i_cdc_pc_roms_ok : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 1
+      )
+      port map (
+         src_data_i => qnice_pc_roms_ok,
+         dst_clk_i  => main_clk,
+         dst_data_o => main_pc_roms_ok
+      ); -- i_cdc_pc_roms_ok
 
 end architecture synthesis;

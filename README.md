@@ -8,8 +8,8 @@ Status: the MEGA65 shell exists, and the whole core synthesizes, places and
 routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
 with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
 over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
-0.25 ns (about 65.6 MHz), all inside the CPU. There is no bitstream, and it
-cannot boot yet: no boot image loader, no drives, no keyboard.
+0.25 ns (about 65.6 MHz), all inside the CPU. The firmware loads the BIOS from
+the SD card. There is no bitstream yet, and no drives or keyboard.
 
 ## Plan
 
@@ -46,12 +46,34 @@ cannot boot yet: no boot image loader, no drives, no keyboard.
   MMCM at VCO 1280 MHz.
 - The SDRAM clock is the PC clock inverted, through an ODDR; the right phase
   for the R6's traces still has to be found on a board.
-- Menu: HDMI mode, help, "Reset the PC". The firmware
-  (`CORE/m2m-rom/m2m-rom.asm`) has the fork's callbacks as stubs.
+- BIOS: at startup the firmware (`CORE/m2m-rom/m2m-rom.asm`, `PREP_START`)
+  loads `boot1.rom` (VGA BIOS, to `0xC0000`) and `boot0.rom` (system BIOS, to
+  `0xF0000`, or `0xE0000` if above 64 KB) from the SD card into the HyperRAM
+  window z486's boot loader copies from (`0x2C0000`, 256 KB, cleared first).
+  The PC stays in reset until they are in (QNICE device `C_DEV_PC_CTL`,
+  `mega65.vhd`). A missing or unreadable ROM stops with a message on screen.
+  The framework's own ROM auto-loader is not used: it writes one byte per
+  HyperRAM word, and z486 reads the ROMs packed.
+- Menu: HDMI mode, help, "Reset the PC".
 
 Not wired yet: the IDE/floppy management bus, PS/2 keyboard and mouse,
-joysticks, the boot image loader (QNICE loading `boot0.rom`/`boot1.rom` into
-HyperRAM at `0x2C0000`).
+joysticks.
+
+## SD card
+
+```
+/z486/boot0.rom   the system BIOS
+/z486/boot1.rom   the VGA BIOS
+```
+
+Both come with z486_MiSTer, in
+[`z486_MiSTer/verilator/`](https://github.com/nand2mario/z486_MiSTer/tree/main/verilator)
+(the same files MiSTer users put in `/media/fat/games/Z486`). `boot0.rom` is
+the Bochs BIOS (LGPL), as in ao486; `boot1.rom` is Tseng Labs' ET4000 VGA
+BIOS, which matches the core's ET4000 and is Tseng's code: neither is part of
+this repository. The firmware takes them from the card the settings file is on;
+without one, from the external microSD slot if it has a card, else from the
+internal SD card.
 
 ## Layout
 
@@ -113,28 +135,28 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core at **64 MHz** (`impl strong`, CPU pblock, `main_clk`
-over-constrained by 0.3 ns during implementation): **all timing constraints
-met** with **+0.302 ns** on the PC's clock, no failing endpoint out of 95,615,
-hold +0.031 ns, routing complete.
+The whole core at **64 MHz** with the BIOS loader (`impl strong`, CPU pblock,
+`main_clk` over-constrained by 0.3 ns during implementation): **all timing
+constraints met** with **+0.303 ns** on the PC's clock, no failing endpoint
+out of 95,608, hold +0.020 ns, routing complete.
 
-| Clock | Period | Setup slack | Without the over-constraint |
-|---|---|---|---|
-| `main_clk` (the PC) | 15.625 ns | **+0.302 ns** (~65.3 MHz) | +0.016 ns |
-| `hr_clk` (HyperRAM) | 10.000 ns | +0.180 ns | +0.182 ns |
-| `hdmi_clk` | 13.468 ns | +1.448 ns | +1.854 ns |
-| `qnice_clk` | 20.000 ns | +0.862 ns | +0.999 ns |
-| `pc_audio_clk` | 40.723 ns | +10.151 ns | +7.557 ns |
+| Clock | Period | Setup slack | Before the loader | Without the over-constraint |
+|---|---|---|---|---|
+| `main_clk` (the PC) | 15.625 ns | **+0.303 ns** (~65.3 MHz) | +0.302 ns | +0.016 ns |
+| `hr_clk` (HyperRAM) | 10.000 ns | +0.194 ns | +0.180 ns | +0.182 ns |
+| `hdmi_clk` | 13.468 ns | +1.599 ns | +1.448 ns | +1.854 ns |
+| `qnice_clk` | 20.000 ns | +1.198 ns | +0.862 ns | +0.999 ns |
+| `pc_audio_clk` | 40.723 ns | +8.900 ns | +10.151 ns | +7.557 ns |
 
 Vivado stops optimizing a clock once it meets timing, so without help the
 64 MHz build ended at +0.016 ns, where the next build's variation could tip it
 over. `CORE/CORE-impl.xdc` (implementation only) adds 0.3 ns of setup
 uncertainty to `main_clk`: place, route and phys_opt aim for 15.325 ns
-(65.25 MHz) and reached it (+0.002 ns there). `build_impl.tcl` takes the extra
-uncertainty out before the final checkpoint and the reports, so they judge
-against the real 64 MHz; `summary.txt` lists `main_clk` against both. The
-other clocks' slack moves with placement and stays clean; utilization is
-unchanged (66.5K LUTs).
+(65.25 MHz) and reach it (+0.002 and +0.003 ns there in the two builds so
+far). `build_impl.tcl` takes the extra uncertainty out before the final
+checkpoint and the reports, so they judge against the real 64 MHz;
+`summary.txt` lists `main_clk` against both. The other clocks' slack moves
+with placement and stays clean; utilization is unchanged (66.6K LUTs).
 
 The slowest paths are still the CPU's, now all within a few ps of each other
 at +0.30 ns: the prefetch pointer into the decoder's group ROM (18-22 logic
