@@ -9,7 +9,8 @@ routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
 with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
 over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
 0.25 ns (about 65.6 MHz), all inside the CPU. The firmware loads the BIOS from
-the SD card. There is no bitstream yet, and no drives or keyboard.
+the SD card. The first bitstream has not run on a MEGA65 yet; there are no
+drives or keyboard.
 
 ## Plan
 
@@ -84,7 +85,7 @@ internal SD card.
 - `z486/` - the CPU (submodule, nand2mario/z486)
 - `z486_MiSTer/` - the MiSTer PC core (submodule, nand2mario/z486_MiSTer)
 - `ooc/` - out-of-context Vivado builds of the CPU and of `system.sv`
-- `tools/` - `build_r6.sh` (the core's synthesis in Docker), `gen_xpr.py` (the
+- `tools/` - `build_r6.sh` (the core's build in Docker), `gen_xpr.py` (the
   project), `z486_sources.py` (the source list and the Vivado 2022.2 copies)
 
 Clone with `git clone --recursive`, or run `git submodule update --init` after
@@ -101,13 +102,17 @@ tools/build_r6.sh impl       # synthesize if needed, then place and route; CORE/
 tools/build_r6.sh finish     # only the post-route phys_opt_design and reports of the last impl
 tools/build_r6.sh impl strong   # the same with place ExtraTimingOpt and a post-route
                                 # AggressiveExplore phys_opt pass
+tools/build_r6.sh bit        # the last impl's bitstream and core file, CORE/bitstream/z486-R6.cor
 ```
 
 `build_r6.sh` regenerates `CORE/CORE-R6.xpr` and the source copies in
 `CORE/gen/`, then runs `CORE/build_synth.tcl` or `CORE/build_impl.tcl`.
-Implementation stops after the strategy's post-route `phys_opt_design`:
-nothing here writes a bitstream. To open the project in the Vivado GUI, run
-`python3 tools/gen_xpr.py` first.
+Implementation stops after the strategy's post-route `phys_opt_design`; `bit`
+writes the bitstream from its checkpoint (`CORE/build_bit.tcl`) and makes the
+`.cor` with `coretool` from the MEGA65 tools release (`CORETOOL=path`, default
+`~/Downloads/m65tools-release-1.00-macos/coretool`). MEGAFLASH shows it as
+"z486", version "WIP-" and the commit. To open the project in the Vivado GUI,
+run `python3 tools/gen_xpr.py` first.
 
 Out-of-context builds of the CPU or of `system.sv` alone:
 
