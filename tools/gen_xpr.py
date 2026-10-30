@@ -4,8 +4,8 @@
 Keeps the project settings, the run strategies, the synth_pre.tcl hook, the constraint set and
 every source under M2M/ (the vendored framework), drops Megamiga's own sources and adds the
 z486 core: CORE/vhdl, the SystemVerilog wrapper and z486 / z486_MiSTer (tools/z486_sources.py,
-with the Vivado 2022.2 copies in CORE/gen). Megamiga hard rule 2: SFType only VHDL2008,
-SVerilog or none.
+with the Vivado 2022.2 copies in CORE/gen), and CORE/CORE-impl.xdc to the constraints, for
+implementation only. Megamiga hard rule 2: SFType only VHDL2008, SVerilog or none.
 
   tools/gen_xpr.py [tools/megamiga-CORE-R6.xpr] [CORE/CORE-R6.xpr]
 
@@ -26,6 +26,11 @@ CORE_SV = ["sv/z486_mega65.sv"]
 # Verilog include directories, relative to CORE/
 INCLUDE_DIRS = ["../z486", "../z486/x87", "../z486_MiSTer/src"]
 DEFINES = [("Z486_XILINX", "1")]
+
+# The implementation-only constraints (the over-constraint of main_clk), relative to CORE/
+IMPL_XDC = ('      <File Path="$PPRDIR/CORE-impl.xdc">\n        <FileInfo>\n'
+            '          <Attr Name="UsedIn" Val="implementation"/>\n'
+            '        </FileInfo>\n      </File>\n')
 
 
 def sftype(path):
@@ -73,6 +78,11 @@ def main():
     tail = tail.replace("      <Config>", "      <Config>" + opts, 1)
 
     x = x[:m.start()] + head + "".join(keep) + tail + x[m.end():]
+
+    # CORE-impl.xdc after CORE.xdc, for implementation only
+    constrs_end = '      <Config>\n        <Option Name="ConstrsType" Val="XDC"/>'
+    assert x.count(constrs_end) == 1
+    x = x.replace(constrs_end, IMPL_XDC + constrs_end)
     open(dst, "w").write(x)
     print("%s: %d framework sources, %d core sources" % (os.path.relpath(dst, ROOT),
                                                          len(keep) - len(core), len(core)))

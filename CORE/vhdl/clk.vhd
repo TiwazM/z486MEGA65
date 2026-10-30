@@ -3,14 +3,16 @@
 --
 -- Clock generator, one MMCM:
 --
---    main_clk  = 100 MHz * 10 / 15     = 66.667 MHz   CLKOUT1   the PC (a DX2-66's clock)
---    audio_clk = 100 MHz * 10 / 40.625 = 24.615 MHz   CLKOUT0   OPL3 / Sound Blaster; MiSTer's
---                                                               CLK_AUDIO is 24.576 MHz, this
---                                                               is 0.16 % fast (fractional
---                                                               divide only exists on CLKOUT0)
+--    main_clk  = 100 MHz * 64 / 5 / 20     = 64.000 MHz   CLKOUT1   the PC
+--    audio_clk = 100 MHz * 64 / 5 / 52.125 = 24.556 MHz   CLKOUT0   OPL3 / Sound Blaster; MiSTer's
+--                                                                   CLK_AUDIO is 24.576 MHz, this
+--                                                                   is 0.08 % slow (fractional
+--                                                                   divide only on CLKOUT0)
 --    video_clk = main_clk: system.sv's VGA runs on clk_sys with a pixel clock enable
 --
--- VCO 1000 MHz (600..1440 MHz for -2), PFD 100 MHz.
+-- VCO 1280 MHz (600..1440 MHz for -2), PFD 20 MHz. 64 MHz, not a DX2-66's 66.667 MHz: with the
+-- framework in, the CPU's paths close at about 65.6 MHz (README). Implementation aims 0.3 ns
+-- above 64 MHz (CORE-impl.xdc), which keeps that margin against build-to-build variation.
 --
 -- Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's clk.vhd
 -- (Johan Smolinski); licensed under GPL v3
@@ -29,11 +31,11 @@ entity clk is
    port (
       sys_clk_i       : in  std_logic;   -- expects 100 MHz
 
-      main_clk_o      : out std_logic;   -- 66.667 MHz
+      main_clk_o      : out std_logic;   -- 64 MHz
       main_rst_o      : out std_logic;   -- main's reset, synchronized
       video_clk_o     : out std_logic;   -- the same clock
       video_rst_o     : out std_logic;   -- video reset, synchronized
-      audio_clk_o     : out std_logic    -- 24.615 MHz
+      audio_clk_o     : out std_logic    -- 24.556 MHz
    );
 end entity clk;
 
@@ -56,15 +58,15 @@ begin
          STARTUP_WAIT         => FALSE,
          CLKIN1_PERIOD        => 10.0,       -- INPUT @ 100 MHz
          REF_JITTER1          => 0.010,
-         DIVCLK_DIVIDE        => 1,          -- PFD 100 MHz
-         CLKFBOUT_MULT_F      => 10.000,     -- VCO 1000 MHz
+         DIVCLK_DIVIDE        => 5,          -- PFD 20 MHz
+         CLKFBOUT_MULT_F      => 64.000,     -- VCO 1280 MHz
          CLKFBOUT_PHASE       => 0.000,
          CLKFBOUT_USE_FINE_PS => FALSE,
-         CLKOUT0_DIVIDE_F     => 40.625,     -- 24.615 MHz (audio)
+         CLKOUT0_DIVIDE_F     => 52.125,     -- 24.556 MHz (audio)
          CLKOUT0_PHASE        => 0.000,
          CLKOUT0_DUTY_CYCLE   => 0.500,
          CLKOUT0_USE_FINE_PS  => FALSE,
-         CLKOUT1_DIVIDE       => 15,         -- 66.667 MHz (main = video)
+         CLKOUT1_DIVIDE       => 20,         -- 64 MHz (main = video)
          CLKOUT1_PHASE        => 0.000,
          CLKOUT1_DUTY_CYCLE   => 0.500,
          CLKOUT1_USE_FINE_PS  => FALSE

@@ -7,6 +7,8 @@
 #   tools/build_r6.sh impl       place and route (CORE/build_impl.tcl; reports in CORE/reports/impl/),
 #                                stopping before write_bitstream
 #   tools/build_r6.sh finish     only the post-route phys_opt_design and reports of the last impl
+#   tools/build_r6.sh impl strong   the same with place ExtraTimingOpt and a post-route
+#                                   AggressiveExplore phys_opt pass
 
 set -e
 root=${0:A:h:h}
@@ -25,7 +27,7 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
         cd /core &&
         if [ \"${1:-synth}\" = impl ] || [ \"${1:-synth}\" = finish ]; then
             vivado -mode batch -nojournal -log CORE/reports/vivado_impl.log -source CORE/build_impl.tcl \
-                -tclargs ${1:-synth}
+                -tclargs $*
         else
             vivado -mode batch -nojournal -log CORE/reports/vivado_synth.log \
                 -source CORE/build_synth.tcl -tclargs ${1:-synth}

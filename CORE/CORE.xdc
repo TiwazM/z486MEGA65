@@ -4,8 +4,8 @@
 ##
 ## Based on the M2M template, Megamiga's and pc10-iii's CORE/CORE.xdc; licensed under GPL v3
 
-## The PC's clock, 66.667 MHz, also M2M's video clock (CORE/vhdl/clk.vhd), and the audio clock
-## (24.615 MHz) for OPL3 and the Sound Blaster
+## The PC's clock, 64 MHz, also M2M's video clock (CORE/vhdl/clk.vhd), and the audio clock
+## (24.556 MHz) for OPL3 and the Sound Blaster
 create_generated_clock -name main_clk  [get_pins CORE/clk_gen/i_clk_main/CLKOUT1]
 create_generated_clock -name pc_audio_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
 
@@ -34,7 +34,7 @@ set_max_delay -datapath_only 20.000 -from [get_clocks qnice_clk] -to [get_clocks
 set_max_delay -datapath_only 20.000 -from [get_clocks main_clk] -to [get_clocks qnice_clk]
 
 ## main_clk <-> pc_audio_clk (common.xdc's audio_clk is the framework's HDMI audio clock): one
-## MMCM, but no useful common period (66.667 / 24.615 MHz). The PC crosses with its own
+## MMCM, but no useful common period (64 / 24.556 MHz). The PC crosses with its own
 ## synchronizers and FIFOs (sound.v, opl3), mega65.vhd with cdc_stable; bound them to one
 ## main_clk period.
 set_max_delay -datapath_only 15.000 -from [get_clocks main_clk]  -to [get_clocks pc_audio_clk]

@@ -18,7 +18,7 @@
 `default_nettype none
 
 module z486_mega65 #(
-    parameter int CLK_HZ = 66_666_667
+    parameter int CLK_HZ = 64_000_000
 ) (
     input  wire        clk_sys,
     input  wire        clk_audio,          // 24.576 MHz (OPL3, SB)

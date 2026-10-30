@@ -34,9 +34,9 @@ constant QNICE_CODE_BANKS         : string  := "";
 -- Clock Speed(s)
 ----------------------------------------------------------------------------------------------------------
 
--- The PC's clock, 100 MHz * 10 / 15 (clk.vhd). The framework derives the MEGA65 keyboard link
+-- The PC's clock, 100 MHz * 64 / 5 / 20 (clk.vhd). The framework derives the MEGA65 keyboard link
 -- (m2m_keyb) from it: a wrong value runs the link at the wrong speed and the keyboard drops it.
-constant CORE_CLK_SPEED       : natural := 66_666_667;
+constant CORE_CLK_SPEED       : natural := 64_000_000;
 
 -- System clock speed (crystal that is driving the FPGA) and QNICE clock speed
 -- !!! Do not touch !!!

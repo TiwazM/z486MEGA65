@@ -5,8 +5,10 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 Status: the MEGA65 shell exists, and the whole core synthesizes, places and
-routes for the R6 (MiSTer2MEGA65, Megamiga's fork). With the CPU floorplanned
-it misses 66.667 MHz by 0.39 ns (about 65.0 MHz), all inside the CPU. There is no bitstream, and it
+routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
+with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
+over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
+0.25 ns (about 65.6 MHz), all inside the CPU. There is no bitstream, and it
 cannot boot yet: no boot image loader, no drives, no keyboard.
 
 ## Plan
@@ -15,7 +17,9 @@ cannot boot yet: no boot image loader, no drives, no keyboard.
   ([doc/m2m-provenance.md](doc/m2m-provenance.md)).
 - **Memory:** the R6's 64 MB SDRAM for system RAM; HyperRAM for the SVGA
   framebuffer (VRAM) and the boot image.
-- **Clock:** 66.667 MHz (a DX2-66's).
+- **Clock:** 64 MHz. A DX2-66 runs at 66.667 MHz, which the CPU's paths miss by
+  0.25 ns with the framework in; 64 MHz meets timing with room for
+  build-to-build variation.
 - **Disks:** a hardware replacement for MiSTer's ARM-side IDE/floppy handling,
   after `mgmt_bridge.sv` in
   [PCXT-EGA-MEGA65](https://github.com/silent-command/PCXT-EGA-MEGA65)
@@ -37,8 +41,9 @@ cannot boot yet: no boot image loader, no drives, no keyboard.
   rest (the boot image at `0x300C0000`) into `0x200000`-`0x3FFFFF`, through
   `avm_fifo` and `avm_decrease` (64 to 16 bits). ascal shows the framebuffer
   from HyperRAM (M2M-UPSTREAM rtg-framebuffer).
-- Clocks (`CORE/vhdl/clk.vhd`): 66.667 MHz for the PC and the video, 24.615 MHz
-  for OPL3/SB (MiSTer uses 24.576 MHz; 0.16 % fast).
+- Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
+  for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
+  MMCM at VCO 1280 MHz.
 - The SDRAM clock is the PC clock inverted, through an ODDR; the right phase
   for the R6's traces still has to be found on a board.
 - Menu: HDMI mode, help, "Reset the PC". The firmware
@@ -51,8 +56,8 @@ HyperRAM at `0x2C0000`).
 ## Layout
 
 - `CORE/` - the MEGA65 core: `vhdl/`, `sv/`, the firmware (`m2m-rom/`), the
-  constraints (`CORE.xdc`), the project (`CORE-R6.xpr`, generated) and
-  `build_synth.tcl`
+  constraints (`CORE.xdc`; `CORE-impl.xdc` for implementation only), the
+  project (`CORE-R6.xpr`, generated), `build_synth.tcl` and `build_impl.tcl`
 - `M2M/` - the framework (vendored from Megamiga, QNICE as a submodule)
 - `z486/` - the CPU (submodule, nand2mario/z486)
 - `z486_MiSTer/` - the MiSTer PC core (submodule, nand2mario/z486_MiSTer)
@@ -72,6 +77,8 @@ tools/build_r6.sh            # synthesize the core; reports in CORE/reports/synt
 tools/build_r6.sh reports    # re-report the last synthesis after constraint changes
 tools/build_r6.sh impl       # synthesize if needed, then place and route; CORE/reports/impl/
 tools/build_r6.sh finish     # only the post-route phys_opt_design and reports of the last impl
+tools/build_r6.sh impl strong   # the same with place ExtraTimingOpt and a post-route
+                                # AggressiveExplore phys_opt pass
 ```
 
 `build_r6.sh` regenerates `CORE/CORE-R6.xpr` and the source copies in
@@ -106,16 +113,49 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core, placed and routed at 66.667 MHz (CORE-R6.xpr,
-Performance_ExplorePostRoutePhysOpt), with and without the CPU's pblock
-(`pblock_z486_cpu` in CORE.xdc: clock regions X0Y1..X1Y2, rows 50..149):
+The whole core at **64 MHz** (`impl strong`, CPU pblock, `main_clk`
+over-constrained by 0.3 ns during implementation): **all timing constraints
+met** with **+0.302 ns** on the PC's clock, no failing endpoint out of 95,615,
+hold +0.031 ns, routing complete.
 
-| `main_clk` (15.000 ns) | Without pblock | With pblock |
-|---|---|---|
-| Setup slack | -1.202 ns | **-0.392 ns** |
-| Est. Fmax | ~61.7 MHz | **~65.0 MHz** |
-| Failing endpoints | 1,848 | 508 |
-| Total negative slack | -826 ns | -83 ns |
+| Clock | Period | Setup slack | Without the over-constraint |
+|---|---|---|---|
+| `main_clk` (the PC) | 15.625 ns | **+0.302 ns** (~65.3 MHz) | +0.016 ns |
+| `hr_clk` (HyperRAM) | 10.000 ns | +0.180 ns | +0.182 ns |
+| `hdmi_clk` | 13.468 ns | +1.448 ns | +1.854 ns |
+| `qnice_clk` | 20.000 ns | +0.862 ns | +0.999 ns |
+| `pc_audio_clk` | 40.723 ns | +10.151 ns | +7.557 ns |
+
+Vivado stops optimizing a clock once it meets timing, so without help the
+64 MHz build ended at +0.016 ns, where the next build's variation could tip it
+over. `CORE/CORE-impl.xdc` (implementation only) adds 0.3 ns of setup
+uncertainty to `main_clk`: place, route and phys_opt aim for 15.325 ns
+(65.25 MHz) and reached it (+0.002 ns there). `build_impl.tcl` takes the extra
+uncertainty out before the final checkpoint and the reports, so they judge
+against the real 64 MHz; `summary.txt` lists `main_clk` against both. The
+other clocks' slack moves with placement and stays clean; utilization is
+unchanged (66.5K LUTs).
+
+The slowest paths are still the CPU's, now all within a few ps of each other
+at +0.30 ns: the prefetch pointer into the decoder's group ROM (18-22 logic
+levels), the address unit into the TLB (18) and into the data unit's
+registers (21-23), the data unit's write-back (30).
+
+The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
+with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
+X0Y1..X1Y2, rows 50..149):
+
+| `main_clk` (15.000 ns) | Without pblock | With pblock | Pblock, `impl strong` |
+|---|---|---|---|
+| Setup slack | -1.202 ns | -0.392 ns | **-0.249 ns** |
+| Est. Fmax | ~61.7 MHz | ~65.0 MHz | **~65.6 MHz** |
+| Failing endpoints | 1,848 | 508 | 317 |
+| Total negative slack | -826 ns | -83 ns | -28.6 ns |
+
+`impl strong` places with `-directive ExtraTimingOpt` (worse after placement,
+-2.27 against -1.26 ns, better after routing, -1.16 against -1.56 ns) and adds a
+post-route `phys_opt_design -directive AggressiveExplore` after the strategy's
+`Explore` pass (-0.475 -> -0.249 ns).
 
 | | Used | Of the FPGA |
 |---|---|---|
@@ -124,9 +164,8 @@ Performance_ExplorePostRoutePhysOpt), with and without the CPU's pblock
 | Block RAM | 140.5 tiles | 38% |
 | DSPs | 86 | 12% |
 
-Every other clock meets (with the pblock: `hr_clk` +0.163 ns, `hdmi_clk`
-+1.485 ns, `qnice_clk` +1.038 ns, `pc_audio_clk` +10.253 ns), hold is met
-(+0.024 ns), routing is complete and every clock crossing meets.
+In all of these runs every other clock, hold, routing and every clock
+crossing are clean.
 
 Without the pblock the CPU spread over six clock regions across the full chip
 width. With it, what still fails is a flat wall of CPU paths between -0.29 and
@@ -135,8 +174,8 @@ levels), the segment unit into the TLB and into itself (19-26), the data
 unit's write-back (23-28). Routing is still 76-84 % of their delay; the x87
 multiplier no longer fails.
 
-At this placement 64 MHz (15.625 ns) would have about +0.23 ns, 65 MHz about
-0 ns.
+From the 66.667 MHz `impl strong` result, 65 MHz would have had about
++0.14 ns and 64 MHz about +0.38 ns; 64 MHz then met timing as above.
 
 Out of context, placed and routed:
 

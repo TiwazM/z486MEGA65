@@ -2,10 +2,16 @@
 # before write_bitstream: no bitstream. Synthesizes first if synth_1 is not current (e.g. after a
 # constraint change). Reports go to CORE/reports/impl/.
 #
-#   vivado -mode batch -source CORE/build_impl.tcl [-tclargs finish]   (from the repository root)
+#   vivado -mode batch -source CORE/build_impl.tcl [-tclargs finish] [strong]   (from the repository root)
 #
 # "finish" skips synthesis and place-and-route and continues from impl_1's routed design: the
 # post-route phys_opt_design and the reports.
+# "strong": place_design -directive ExtraTimingOpt (for this run only; the project keeps its
+# strategy) and one more post-route phys_opt_design, -directive AggressiveExplore.
+#
+# Implementation reads CORE/CORE-impl.xdc too: extra setup uncertainty on main_clk, so that it
+# aims above 64 MHz. It is taken out after the last phys_opt_design: the checkpoint and the
+# reports here are against the real clock, summary.txt has main_clk against both.
 
 set root [file normalize [file join [file dirname [info script]] ..]]
 set reports [file join $root CORE reports impl]
@@ -16,7 +22,8 @@ file mkdir $reports
 catch {config_webtalk -user off}
 
 open_project [file join $root CORE CORE-R6.xpr]
-set finish [expr {[llength $argv] > 0 && [lindex $argv 0] eq "finish"}]
+set finish [expr {"finish" in $argv}]
+set strong [expr {"strong" in $argv}]
 
 set synth [get_runs synth_1]
 if {!$finish && ([get_property NEEDS_REFRESH $synth] || ![string match "*Complete*" [get_property STATUS $synth]])} {
@@ -32,9 +39,14 @@ if {!$finish && ([get_property NEEDS_REFRESH $synth] || ![string match "*Complet
 # The strategy (Performance_ExplorePostRoutePhysOpt) ends with a phys_opt_design after routing,
 # which launch_runs -to_step cannot name in 2022.2: run to route_design, then do that step here
 set impl [get_runs impl_1]
+set place_directive [get_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $impl]
 if {!$finish} {
     reset_run impl_1
+    if {$strong} {
+        set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt $impl
+    }
     launch_runs impl_1 -to_step route_design -jobs 8
+    set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
     wait_on_run impl_1
 }
 
@@ -58,6 +70,18 @@ set_false_path -to [get_pins -hierarchical -filter {NAME =~ i_framework/i_av_pip
 if {$post_route_phys_opt} {
     phys_opt_design -directive Explore
 }
+if {$strong} {
+    phys_opt_design -directive AggressiveExplore
+}
+
+# main_clk against CORE-impl.xdc's target, then back to the real 64 MHz requirement
+set fh [open [file join $root CORE CORE-impl.xdc]]
+if {![regexp -line {^set_clock_uncertainty -setup ([0-9.]+)} [read $fh] -> margin]} { set margin 0 }
+close $fh
+set target_wns [get_property SLACK [get_timing_paths -delay_type max -group main_clk]]
+set target_fail [llength [get_timing_paths -quiet -delay_type max -group main_clk -max_paths 100000 -slack_lesser_than 0]]
+set_clock_uncertainty -setup 0 [get_clocks main_clk]
+
 write_checkpoint -force [file join $reports mega65_r6_routed.dcp]
 report_timing_summary -max_paths 20 -report_unconstrained -file [file join $reports timing_summary.rpt]
 report_timing -delay_type max -max_paths 50 -nworst 1 -sort_by group \
@@ -71,6 +95,12 @@ report_methodology -file [file join $reports methodology.rpt]
 
 # One line per clock: WNS, its estimated Fmax, failing setup endpoints; hold
 set summary [open [file join $reports summary.txt] w]
+puts $summary [format "mode: %s (place directive %s; post-route phys_opt Explore%s)" \
+    [expr {$strong ? "strong" : "strategy"}] [expr {$strong ? "ExtraTimingOpt" : $place_directive}] \
+    [expr {$strong ? " + AggressiveExplore" : ""}]]
+puts $summary [format "main_clk at the implementation target (+%s ns setup uncertainty, CORE-impl.xdc): WNS %7.3f ns  failing endpoints %d" \
+    $margin $target_wns $target_fail]
+puts $summary "against the real clocks:"
 foreach clk [lsort [get_clocks]] {
     set p [get_timing_paths -quiet -delay_type max -group $clk]
     if {![llength $p]} { continue }

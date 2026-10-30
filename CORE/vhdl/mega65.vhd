@@ -3,7 +3,7 @@
 --
 -- MEGA65 main file that contains the whole machine
 --
--- * clk.vhd: the PC's 66.667 MHz clock (also the video clock) and the 24.615 MHz audio clock
+-- * clk.vhd: the PC's 64 MHz clock (also the video clock) and the 24.556 MHz audio clock
 -- * CORE/sv/z486_mega65.sv: z486_MiSTer's system.sv and SDRAM backend: CPU, chipset,
 --   VGA/ET4000, OPL3/SB, IDE, floppy; system RAM in the R6's 64 MB SDRAM
 -- * z486's MiSTer DDR3 port (the boot image and the SVGA framebuffer) in HyperRAM: an address
@@ -395,7 +395,7 @@ signal main_mgmt_readdata     : std_logic_vector(15 downto 0);
 
 component z486_mega65 is
    generic (
-      CLK_HZ             : integer := 66_666_667
+      CLK_HZ             : integer := 64_000_000
    );
    port (
       clk_sys            : in    std_logic;
@@ -561,11 +561,11 @@ begin
    clk_gen : entity work.clk
       port map (
          sys_clk_i         => clk_i,           -- expects 100 MHz
-         main_clk_o        => main_clk,        -- 66.667 MHz
+         main_clk_o        => main_clk,        -- 64 MHz
          main_rst_o        => main_rst,
          video_clk_o       => video_clk,       -- the same clock
          video_rst_o       => video_rst,
-         audio_clk_o       => audio_clk        -- 24.615 MHz
+         audio_clk_o       => audio_clk        -- 24.556 MHz
       ); -- clk_gen
 
    main_clk_o  <= main_clk;
