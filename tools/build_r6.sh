@@ -9,6 +9,8 @@
 #   tools/build_r6.sh finish     only the post-route phys_opt_design and reports of the last impl
 #   tools/build_r6.sh impl strong   the same with place ExtraTimingOpt and a post-route
 #                                   AggressiveExplore phys_opt pass
+#   tools/build_r6.sh impl [strong] incr   incremental place and route from the routed
+#                                   checkpoint in CORE/reports/ref/ (CORE/build_impl.tcl)
 #   tools/build_r6.sh bit        the last impl's bitstream (CORE/build_bit.tcl) and its core file,
 #                                CORE/bitstream/z486-R6.bit and .cor; the .cor needs coretool from
 #                                the MEGA65 tools release (CORETOOL=path)

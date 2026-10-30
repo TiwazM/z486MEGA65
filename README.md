@@ -8,9 +8,9 @@ Status: the MEGA65 shell exists, and the whole core synthesizes, places and
 routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
 with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
 over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
-0.25 ns (about 65.6 MHz), all inside the CPU. The firmware loads the BIOS from
-the SD card. The first bitstream has not run on a MEGA65 yet; there are no
-drives or keyboard.
+0.25 ns (about 65.6 MHz), all inside the CPU. On an R6 the PC boots its BIOS
+from the SD card to the end of POST: the VGA BIOS, the Bochs BIOS banner, then
+"No bootable device", as there are no drives yet, nor a keyboard.
 
 ## Plan
 
@@ -45,8 +45,10 @@ drives or keyboard.
 - Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
   for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
   MMCM at VCO 1280 MHz.
-- The SDRAM clock is the PC clock inverted, through an ODDR; the right phase
-  for the R6's traces still has to be found on a board.
+- The SDRAM clock is a third output of that MMCM at 292.5 degrees, through an
+  ODDR (see [SDRAM clock](#sdram-clock)). `sdram.v`'s shortcut below 75 MHz
+  (one cycle for tRCD and tRP, 15.6 ns at 64 MHz, under the chip's 18 ns) is
+  patched out in the build copy (`tools/z486_sources.py`): two cycles each.
 - BIOS: at startup the firmware (`CORE/m2m-rom/m2m-rom.asm`, `PREP_START`)
   loads `boot1.rom` (VGA BIOS, to `0xC0000`) and `boot0.rom` (system BIOS, to
   `0xF0000`, or `0xE0000` if above 64 KB) from the SD card into the HyperRAM
@@ -56,6 +58,13 @@ drives or keyboard.
   The framework's own ROM auto-loader is not used: it writes one byte per
   HyperRAM word, and z486 reads the ROMs packed.
 - Menu: HDMI mode, help, "Reset the PC".
+- Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
+  of the PC's state (boot stage, POST code, CS:EIP, VGA frame count) and a
+  4096-entry log of the BIOS's debug port 0x402, z486's stall watchdog and
+  POST code changes; `mega65.vhd` has the map. They are read with the M2M
+  debug monitor over the JTAG adapter's serial port (115200 baud): hold
+  Run/Stop + Cursor Up, then press Help, and run `tools/qmon.py status`
+  (`boot` and `sweep` reset the PC at other SDRAM clock phases).
 
 Not wired yet: the IDE/floppy management bus, PS/2 keyboard and mouse,
 joysticks.
@@ -76,6 +85,18 @@ this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
 
+## SDRAM clock
+
+`sdram.v` (z486_MiSTer) reads its data three clocks after each READ command.
+MiSTer runs it at 85 MHz with the SDRAM clock at 180 degrees; at 64 MHz on the
+R6 that phase puts the read outside the data window, and the first bitstream
+ran garbage from F000:FFF0 on (black screen). With the phase swept at run
+time (the MMCM's dynamic phase shift, in 13.95 ps steps), the PC boots for
+every phase from 180 degrees + 130 steps to + 570 steps (1.81 to 7.95 ns
+later), and fails at +120 and +580. The core uses the middle, +350 steps =
+4.88 ns = 292.5 degrees, 3.07 ns from either edge. That window is one board's;
+another R6 can be measured the same way.
+
 ## Layout
 
 - `CORE/` - the MEGA65 core: `vhdl/`, `sv/`, the firmware (`m2m-rom/`), the
@@ -86,7 +107,8 @@ internal SD card.
 - `z486_MiSTer/` - the MiSTer PC core (submodule, nand2mario/z486_MiSTer)
 - `ooc/` - out-of-context Vivado builds of the CPU and of `system.sv`
 - `tools/` - `build_r6.sh` (the core's build in Docker), `gen_xpr.py` (the
-  project), `z486_sources.py` (the source list and the Vivado 2022.2 copies)
+  project), `z486_sources.py` (the source list and the Vivado 2022.2 copies),
+  `qmon.py` (the debug registers through the M2M debug monitor)
 
 Clone with `git clone --recursive`, or run `git submodule update --init` after
 cloning (z486_MiSTer's own submodules are not needed).
@@ -102,6 +124,7 @@ tools/build_r6.sh impl       # synthesize if needed, then place and route; CORE/
 tools/build_r6.sh finish     # only the post-route phys_opt_design and reports of the last impl
 tools/build_r6.sh impl strong   # the same with place ExtraTimingOpt and a post-route
                                 # AggressiveExplore phys_opt pass
+tools/build_r6.sh impl incr  # incremental place and route from CORE/reports/ref/
 tools/build_r6.sh bit        # the last impl's bitstream and core file, CORE/bitstream/z486-R6.cor
 ```
 
@@ -111,8 +134,12 @@ Implementation stops after the strategy's post-route `phys_opt_design`; `bit`
 writes the bitstream from its checkpoint (`CORE/build_bit.tcl`) and makes the
 `.cor` with `coretool` from the MEGA65 tools release (`CORETOOL=path`, default
 `~/Downloads/m65tools-release-1.00-macos/coretool`). MEGAFLASH shows it as
-"z486", version "WIP-" and the commit. To open the project in the Vivado GUI,
-run `python3 tools/gen_xpr.py` first.
+"z486", version "WIP-" and the commit. `incr` places and routes incrementally
+(directive TimingClosure) from the routed checkpoint in `CORE/reports/ref/`:
+copy a good build's `CORE/reports/impl/mega65_r6_routed.dcp` there, and the
+next small change keeps the rest of its placement and routing. Synthesis takes
+about 8 minutes, a full `impl strong` about an hour more. To open the project
+in the Vivado GUI, run `python3 tools/gen_xpr.py` first.
 
 Out-of-context builds of the CPU or of `system.sv` alone:
 
@@ -140,18 +167,25 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core at **64 MHz** with the BIOS loader (`impl strong`, CPU pblock,
-`main_clk` over-constrained by 0.3 ns during implementation): **all timing
-constraints met** with **+0.303 ns** on the PC's clock, no failing endpoint
-out of 95,608, hold +0.020 ns, routing complete.
+The whole core at **64 MHz** as it boots on the R6 (BIOS loader, SDRAM clock at
+292.5 degrees, debug registers; incremental from the previous build, CPU
+pblock, `main_clk` over-constrained by 0.3 ns during implementation): **all
+timing constraints met** with **+0.327 ns** on the PC's clock, no failing
+endpoint out of 97,745, hold +0.012 ns, routing complete. 67.1K LUTs (50%),
+33.8K registers, 141.5 block RAM tiles, 86 DSPs.
 
-| Clock | Period | Setup slack | Before the loader | Without the over-constraint |
+| Clock | Period | Setup slack | BIOS loader build | Without the over-constraint |
 |---|---|---|---|---|
-| `main_clk` (the PC) | 15.625 ns | **+0.303 ns** (~65.3 MHz) | +0.302 ns | +0.016 ns |
-| `hr_clk` (HyperRAM) | 10.000 ns | +0.194 ns | +0.180 ns | +0.182 ns |
-| `hdmi_clk` | 13.468 ns | +1.599 ns | +1.448 ns | +1.854 ns |
-| `qnice_clk` | 20.000 ns | +1.198 ns | +0.862 ns | +0.999 ns |
-| `pc_audio_clk` | 40.723 ns | +8.900 ns | +10.151 ns | +7.557 ns |
+| `main_clk` (the PC) | 15.625 ns | **+0.327 ns** (~65.4 MHz) | +0.303 ns | +0.016 ns |
+| `hr_clk` (HyperRAM) | 10.000 ns | +0.179 ns | +0.194 ns | +0.182 ns |
+| `hdmi_clk` | 13.468 ns | +2.032 ns | +1.599 ns | +1.854 ns |
+| `qnice_clk` | 20.000 ns | +0.635 ns | +1.198 ns | +0.999 ns |
+| `pc_audio_clk` | 40.723 ns | +7.496 ns | +8.900 ns | +7.557 ns |
+
+The debug build before it (a full `impl strong` with the phase still at 180
+degrees) ended at +0.134 ns, short of the 0.3 ns target; the incremental run
+(`impl incr`, 99.97 % of cells and nets reused, 38 minutes with synthesis)
+reached it.
 
 Vivado stops optimizing a clock once it meets timing, so without help the
 64 MHz build ended at +0.016 ns, where the next build's variation could tip it
@@ -161,10 +195,10 @@ uncertainty to `main_clk`: place, route and phys_opt aim for 15.325 ns
 far). `build_impl.tcl` takes the extra uncertainty out before the final
 checkpoint and the reports, so they judge against the real 64 MHz;
 `summary.txt` lists `main_clk` against both. The other clocks' slack moves
-with placement and stays clean; utilization is unchanged (66.6K LUTs).
+with placement and stays clean.
 
-The slowest paths are still the CPU's, now all within a few ps of each other
-at +0.30 ns: the prefetch pointer into the decoder's group ROM (18-22 logic
+The slowest paths are still the CPU's, within a few ps of each other at the
+target: the prefetch pointer into the decoder's group ROM (18-22 logic
 levels), the address unit into the TLB (18) and into the data unit's
 registers (21-23), the data unit's write-back (30).
 

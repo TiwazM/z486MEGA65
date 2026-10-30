@@ -2,12 +2,16 @@
 # before write_bitstream: no bitstream. Synthesizes first if synth_1 is not current (e.g. after a
 # constraint change). Reports go to CORE/reports/impl/.
 #
-#   vivado -mode batch -source CORE/build_impl.tcl [-tclargs finish] [strong]   (from the repository root)
+#   vivado -mode batch -source CORE/build_impl.tcl [-tclargs finish] [strong] [incr]   (from the repository root)
 #
 # "finish" skips synthesis and place-and-route and continues from impl_1's routed design: the
 # post-route phys_opt_design and the reports.
 # "strong": place_design -directive ExtraTimingOpt (for this run only; the project keeps its
 # strategy) and one more post-route phys_opt_design, -directive AggressiveExplore.
+# "incr": incremental implementation (directive TimingClosure) from the routed checkpoint in
+# CORE/reports/ref/: the unchanged parts keep their placement and routing, so a small change
+# places and routes in a fraction of the time. Copy a good build's
+# CORE/reports/impl/mega65_r6_routed.dcp there to make it the reference.
 #
 # Implementation reads CORE/CORE-impl.xdc too: extra setup uncertainty on main_clk, so that it
 # aims above 64 MHz. It is taken out after the last phys_opt_design: the checkpoint and the
@@ -24,6 +28,11 @@ catch {config_webtalk -user off}
 open_project [file join $root CORE CORE-R6.xpr]
 set finish [expr {"finish" in $argv}]
 set strong [expr {"strong" in $argv}]
+set incr   [expr {"incr" in $argv}]
+set ref    [file join $root CORE reports ref mega65_r6_routed.dcp]
+if {$incr && ![file exists $ref]} {
+    error "incr: no reference checkpoint $ref"
+}
 
 set synth [get_runs synth_1]
 if {!$finish && ([get_property NEEDS_REFRESH $synth] || ![string match "*Complete*" [get_property STATUS $synth]])} {
@@ -45,8 +54,13 @@ if {!$finish} {
     if {$strong} {
         set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt $impl
     }
+    if {$incr} {
+        set_property INCREMENTAL_CHECKPOINT $ref $impl
+        set_property INCREMENTAL_CHECKPOINT.DIRECTIVE TimingClosure $impl
+    }
     launch_runs impl_1 -to_step route_design -jobs 8
     set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
+    set_property INCREMENTAL_CHECKPOINT "" $impl
     wait_on_run impl_1
 }
 
@@ -95,8 +109,9 @@ report_methodology -file [file join $reports methodology.rpt]
 
 # One line per clock: WNS, its estimated Fmax, failing setup endpoints; hold
 set summary [open [file join $reports summary.txt] w]
-puts $summary [format "mode: %s (place directive %s; post-route phys_opt Explore%s)" \
-    [expr {$strong ? "strong" : "strategy"}] [expr {$strong ? "ExtraTimingOpt" : $place_directive}] \
+puts $summary [format "mode: %s%s (place directive %s; post-route phys_opt Explore%s)" \
+    [expr {$strong ? "strong" : "strategy"}] [expr {$incr ? ", incremental" : ""}] \
+    [expr {$strong ? "ExtraTimingOpt" : $place_directive}] \
     [expr {$strong ? " + AggressiveExplore" : ""}]]
 puts $summary [format "main_clk at the implementation target (+%s ns setup uncertainty, CORE-impl.xdc): WNS %7.3f ns  failing endpoints %d" \
     $margin $target_wns $target_fail]

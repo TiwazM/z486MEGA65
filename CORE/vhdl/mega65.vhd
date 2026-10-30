@@ -348,6 +348,44 @@ signal main_pc_reset          : std_logic;
 signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
 signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
 
+-- The SDRAM clock (clk.vhd) and its phase, set from QNICE (C_DEV_PC_CTL, address 1)
+signal main_sdram_clk         : std_logic;
+signal qnice_sdram_ps_target  : std_logic_vector(15 downto 0) := (others => '0');
+signal sdram_ps_pos           : std_logic_vector(15 downto 0);  -- clk_i
+signal qnice_sdram_ps_pos     : std_logic_vector(15 downto 0);
+
+---------------------------------------------------------------------------------------------
+-- Debug (C_DEV_PC_CTL): the PC's boot and POST state, CS:EIP, and a log of its debug port
+---------------------------------------------------------------------------------------------
+
+signal main_dbg_boot_stage    : std_logic_vector(2 downto 0);
+signal main_dbg_bios_loaded   : std_logic;
+signal main_dbg_vga_checked   : std_logic;
+signal main_dbg_vga_bad       : std_logic;
+signal main_dbg_first_instr   : std_logic;
+signal main_dbg_post_code     : std_logic_vector(7 downto 0);
+signal main_dbg_post_write    : std_logic;
+signal main_dbg_cpu_pe        : std_logic;
+signal main_dbg_cpu_cs        : std_logic_vector(15 downto 0);
+signal main_dbg_cpu_eip       : std_logic_vector(31 downto 0);
+signal main_dbg_log_byte      : std_logic_vector(7 downto 0);
+signal main_dbg_log_we        : std_logic;
+signal main_dbg_mem_busy      : std_logic;
+
+signal main_dbg_tick          : unsigned(19 downto 0) := (others => '0');
+signal main_dbg_post_cnt      : unsigned(7 downto 0) := (others => '0');
+signal main_dbg_log_cnt       : unsigned(15 downto 0) := (others => '0');
+signal main_dbg_vs_cnt        : unsigned(15 downto 0) := (others => '0');
+signal main_dbg_snap_cnt      : unsigned(15 downto 0) := (others => '0');
+signal main_dbg_vs_d          : std_logic := '0';
+signal main_dbg_post_last     : std_logic_vector(7 downto 0) := x"00";
+signal main_dbg_post_new      : std_logic;
+signal main_dbg_snap          : std_logic_vector(127 downto 0) := (others => '0');
+signal qnice_dbg_snap         : std_logic_vector(127 downto 0);
+signal main_dbg_log_wr        : std_logic;
+signal main_dbg_log_entry     : std_logic_vector(8 downto 0);
+signal qnice_dbg_log_q        : std_logic_vector(8 downto 0);
+
 ---------------------------------------------------------------------------------------------
 -- z486's MiSTer DDR3 port (main clock) and its way into HyperRAM (hr clock)
 ---------------------------------------------------------------------------------------------
@@ -402,6 +440,7 @@ component z486_mega65 is
    port (
       clk_sys            : in    std_logic;
       clk_audio          : in    std_logic;
+      clk_sdram          : in    std_logic;
       reset              : in    std_logic;
       video_ce           : out   std_logic;
       video_r            : out   std_logic_vector(7 downto 0);
@@ -458,7 +497,20 @@ component z486_mega65 is
       ps2_mouse_data_in  : in    std_logic;
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
-      ram_size           : in    std_logic_vector(1 downto 0)
+      ram_size           : in    std_logic_vector(1 downto 0);
+      dbg_boot_stage     : out   std_logic_vector(2 downto 0);
+      dbg_bios_loaded    : out   std_logic;
+      dbg_vga_sig_checked : out  std_logic;
+      dbg_vga_sig_bad    : out   std_logic;
+      dbg_first_instr    : out   std_logic;
+      dbg_post_code      : out   std_logic_vector(7 downto 0);
+      dbg_post_write     : out   std_logic;
+      dbg_cpu_pe         : out   std_logic;
+      dbg_cpu_cs         : out   std_logic_vector(15 downto 0);
+      dbg_cpu_eip        : out   std_logic_vector(31 downto 0);
+      dbg_log_byte       : out   std_logic_vector(7 downto 0);
+      dbg_log_we         : out   std_logic;
+      dbg_mem_busy       : out   std_logic
    );
 end component z486_mega65;
 
@@ -567,7 +619,10 @@ begin
          main_rst_o        => main_rst,
          video_clk_o       => video_clk,       -- the same clock
          video_rst_o       => video_rst,
-         audio_clk_o       => audio_clk        -- 24.556 MHz
+         audio_clk_o       => audio_clk,       -- 24.556 MHz
+         sdram_clk_o       => main_sdram_clk,  -- 64 MHz, 292.5 degrees + the fine phase
+         sdram_ps_target_i => qnice_sdram_ps_target,
+         sdram_ps_pos_o    => sdram_ps_pos
       ); -- clk_gen
 
    main_clk_o  <= main_clk;
@@ -598,6 +653,7 @@ begin
       port map (
          clk_sys            => main_clk,
          clk_audio          => audio_clk,
+         clk_sdram          => main_sdram_clk,
          reset              => main_pc_reset,
 
          video_ce           => video_ce_o,
@@ -662,8 +718,98 @@ begin
          ps2_mouse_clk_out  => open,
          ps2_mouse_data_out => open,
 
-         ram_size           => C_RAM_SIZE
+         ram_size           => C_RAM_SIZE,
+
+         dbg_boot_stage     => main_dbg_boot_stage,
+         dbg_bios_loaded    => main_dbg_bios_loaded,
+         dbg_vga_sig_checked => main_dbg_vga_checked,
+         dbg_vga_sig_bad    => main_dbg_vga_bad,
+         dbg_first_instr    => main_dbg_first_instr,
+         dbg_post_code      => main_dbg_post_code,
+         dbg_post_write     => main_dbg_post_write,
+         dbg_cpu_pe         => main_dbg_cpu_pe,
+         dbg_cpu_cs         => main_dbg_cpu_cs,
+         dbg_cpu_eip        => main_dbg_cpu_eip,
+         dbg_log_byte       => main_dbg_log_byte,
+         dbg_log_we         => main_dbg_log_we,
+         dbg_mem_busy       => main_dbg_mem_busy
       ); -- i_z486
+
+   -- Debug: every 2^20 clocks (16 ms) a snapshot of the PC's state, still for long enough to
+   -- cross to QNICE whole (cdc_stable). The log keeps the last 4096 bytes of the PC's debug
+   -- port (the BIOS's port 0x402, the watchdog's stall messages) and POST codes (bit 8 set),
+   -- these only when they change: the Bochs BIOS writes port 0x80 as an I/O delay, thousands
+   -- of zeros. Each PC reset starts the counters and the log afresh.
+   p_main_dbg : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         main_dbg_tick <= main_dbg_tick + 1;
+         main_dbg_vs_d <= video_vs_o;
+         if video_vs_o = '1' and main_dbg_vs_d = '0' then
+            main_dbg_vs_cnt <= main_dbg_vs_cnt + 1;
+         end if;
+         if main_dbg_post_write = '1' then
+            main_dbg_post_cnt <= main_dbg_post_cnt + 1;
+         end if;
+         if main_dbg_log_wr = '1' then
+            main_dbg_log_cnt <= main_dbg_log_cnt + 1;
+         end if;
+         if main_dbg_tick = 0 then
+            main_dbg_snap_cnt <= main_dbg_snap_cnt + 1;
+            main_dbg_snap <= std_logic_vector(main_dbg_snap_cnt) &
+                             std_logic_vector(main_dbg_vs_cnt) &
+                             std_logic_vector(main_dbg_log_cnt) &
+                             main_dbg_cpu_eip &
+                             main_dbg_cpu_cs &
+                             std_logic_vector(main_dbg_post_cnt) & main_dbg_post_code &
+                             "000000" & main_pc_reset & main_dbg_mem_busy & main_dbg_cpu_pe &
+                             main_dbg_first_instr & main_dbg_vga_bad & main_dbg_vga_checked &
+                             main_dbg_bios_loaded & main_dbg_boot_stage;
+         end if;
+         if main_dbg_post_write = '1' then
+            main_dbg_post_last <= main_dbg_post_code;
+         end if;
+         if main_pc_reset = '1' then
+            main_dbg_post_last <= x"00";
+            main_dbg_post_cnt <= (others => '0');
+            main_dbg_log_cnt  <= (others => '0');
+            main_dbg_vs_cnt   <= (others => '0');
+         end if;
+      end if;
+   end process p_main_dbg;
+
+   main_dbg_post_new  <= '1' when main_dbg_post_write = '1' and main_dbg_post_code /= main_dbg_post_last
+                    else '0';
+   main_dbg_log_wr    <= main_dbg_post_new or main_dbg_log_we;
+   main_dbg_log_entry <= '1' & main_dbg_post_code when main_dbg_post_new = '1' else
+                         '0' & main_dbg_log_byte;
+
+   i_dbg_log : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 12,
+         DATA_WIDTH => 9,
+         FALLING_B  => true                    -- QNICE's device convention
+      )
+      port map (
+         clock_a    => main_clk,
+         address_a  => std_logic_vector(main_dbg_log_cnt(11 downto 0)),
+         data_a     => main_dbg_log_entry,
+         wren_a     => main_dbg_log_wr,
+         q_a        => open,
+         clock_b    => qnice_clk_i,
+         address_b  => qnice_dev_addr_i(11 downto 0),
+         q_b        => qnice_dbg_log_q
+      ); -- i_dbg_log
+
+   i_cdc_dbg_snap : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 128
+      )
+      port map (
+         src_data_i => main_dbg_snap,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_dbg_snap
+      ); -- i_cdc_dbg_snap
 
    -- One pixel clock enable for the picture and the OSM: the OSM canvas is the VGA's 640 wide
    video_ce_ovl_o <= video_ce_o;
@@ -788,14 +934,26 @@ begin
    qnice_ascal_triplebuf_o    <= '0';
    qnice_flip_joyports_o      <= '0';
 
-   -- C_DEV_PC_CTL (globals.vhd): address 0, bit 0 = the PC's BIOS ROMs are in HyperRAM. Written
-   -- by m2m-rom.asm (PREP_START); cleared with QNICE, whose firmware then loads them again.
+   -- C_DEV_PC_CTL (globals.vhd):
+   --    0x0000      bit 0 = the PC's BIOS ROMs are in HyperRAM. Written by m2m-rom.asm
+   --                (PREP_START); cleared with QNICE, whose firmware then loads them again.
+   --                Clearing and setting it resets the PC.
+   --    0x0001      the SDRAM clock's phase, signed fine steps from 292.5 degrees (clk.vhd)
+   --    0x0002      read: where the phase shift is
+   --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
+   --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
+   --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
+   --                log count, VGA vsync count, snapshot count
+   --    0x1000..1FFF read: the log, entry n at 0x1000 + n mod 4096
    p_qnice_pc_ctl : process (qnice_clk_i)
    begin
       if falling_edge(qnice_clk_i) then
-         if qnice_dev_ce_i = '1' and qnice_dev_we_i = '1' and qnice_dev_id_i = C_DEV_PC_CTL and
-            qnice_dev_addr_i = x"0000000" then
-            qnice_pc_roms_ok(0) <= qnice_dev_data_i(0);
+         if qnice_dev_ce_i = '1' and qnice_dev_we_i = '1' and qnice_dev_id_i = C_DEV_PC_CTL then
+            if qnice_dev_addr_i = x"0000000" then
+               qnice_pc_roms_ok(0) <= qnice_dev_data_i(0);
+            elsif qnice_dev_addr_i = x"0000001" then
+               qnice_sdram_ps_target <= qnice_dev_data_i;
+            end if;
          end if;
          if qnice_rst_i = '1' then
             qnice_pc_roms_ok(0) <= '0';
@@ -803,9 +961,36 @@ begin
       end if;
    end process p_qnice_pc_ctl;
 
-   qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0) when qnice_dev_id_i = C_DEV_PC_CTL
-                  else x"EEEE";
+   p_qnice_dev_data : process (all)
+      variable v_word : natural range 0 to 7;
+   begin
+      v_word := to_integer(unsigned(qnice_dev_addr_i(2 downto 0)));
+      qnice_dev_data_o <= x"EEEE";
+      if qnice_dev_id_i = C_DEV_PC_CTL then
+         if qnice_dev_addr_i = x"0000000" then
+            qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0);
+         elsif qnice_dev_addr_i = x"0000001" then
+            qnice_dev_data_o <= qnice_sdram_ps_target;
+         elsif qnice_dev_addr_i = x"0000002" then
+            qnice_dev_data_o <= qnice_sdram_ps_pos;
+         elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000010" then
+            qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 15 downto 16 * v_word);
+         elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
+            qnice_dev_data_o <= "0000000" & qnice_dbg_log_q;
+         end if;
+      end if;
+   end process p_qnice_dev_data;
    qnice_dev_wait_o <= '0';
+
+   i_cdc_sdram_ps_pos : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 16
+      )
+      port map (
+         src_data_i => sdram_ps_pos,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_sdram_ps_pos
+      ); -- i_cdc_sdram_ps_pos
 
    -- A level that changes once per boot
    i_cdc_pc_roms_ok : entity work.cdc_stable

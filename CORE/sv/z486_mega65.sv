@@ -22,6 +22,7 @@ module z486_mega65 #(
 ) (
     input  wire        clk_sys,
     input  wire        clk_audio,          // 24.576 MHz (OPL3, SB)
+    input  wire        clk_sdram,          // clk_sys's frequency, the SDRAM's phase (clk.vhd)
     input  wire        reset,              // asynchronous to clk_sys
 
     // Video (clk_sys, CE per pixel)
@@ -93,7 +94,23 @@ module z486_mega65 #(
     output wire        ps2_mouse_clk_out,
     output wire        ps2_mouse_data_out,
 
-    input  wire  [1:0] ram_size            // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
+    input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
+
+    // Debug (clk_sys): system.sv's boot and POST state, the CPU's CS:EIP, and the bytes of its
+    // debug port (the BIOS's port 0x402 and the stall watchdog's messages)
+    output wire  [2:0] dbg_boot_stage,     // 1 copying, 2-3 reading HyperRAM, 4 copied, 5 running
+    output wire        dbg_bios_loaded,
+    output wire        dbg_vga_sig_checked,
+    output wire        dbg_vga_sig_bad,
+    output wire        dbg_first_instr,    // the CPU executed F000:FFF0
+    output wire  [7:0] dbg_post_code,      // the last write to port 0x80 or 0x190
+    output wire        dbg_post_write,
+    output wire        dbg_cpu_pe,
+    output wire [15:0] dbg_cpu_cs,
+    output wire [31:0] dbg_cpu_eip,
+    output wire  [7:0] dbg_log_byte,
+    output wire        dbg_log_we,
+    output wire        dbg_mem_busy        // the SDRAM controller (initialization, refresh)
 );
 
 // z486_mister.sv's build: 8 KB + 8 KB L1, critical-word-first line reads, x87 on, no CMS
@@ -191,22 +208,24 @@ split_sdram_backend #(
     .sdram_cke(sdram_cke)
 );
 
-// The SDRAM clock: clk_sys inverted, forwarded through an ODDR, so commands and write data
-// (launched on the rising edge) are centred on the SDRAM's sampling edge. MiSTer uses a PLL
-// phase instead; the right phase for the R6's traces still has to be found on the board.
+// The SDRAM clock, forwarded through an ODDR: clk_sdram is clk_sys at 292.5 degrees, the
+// middle of the window measured on an R6 (clk.vhd; MiSTer's PLL uses 180 at 85 MHz), plus a fine
+// phase QNICE can set to measure it again.
 ODDR #(
     .DDR_CLK_EDGE("SAME_EDGE"),
     .INIT(1'b0),
     .SRTYPE("SYNC")
 ) sdram_clk_oddr (
     .Q(sdram_clk),
-    .C(clk_sys),
+    .C(clk_sdram),
     .CE(1'b1),
-    .D1(1'b0),
-    .D2(1'b1),
+    .D1(1'b1),
+    .D2(1'b0),
     .R(1'b0),
     .S(1'b0)
 );
+
+assign dbg_mem_busy = guest_mem_busy;
 
 // ------------------------------------------------------------------------------------------
 // The PC
@@ -368,8 +387,8 @@ system #(
     .zsst_memory_enable  (),
     .zsst_init_enable    (),
 
-    .dbg_uart_byte       (),
-    .dbg_uart_we         (),
+    .dbg_uart_byte       (dbg_log_byte),
+    .dbg_uart_we         (dbg_log_we),
     .mpu_uart_tx         (),
     .dbg_sd_avm_address  (),
     .dbg_sd_avm_writedata(),
@@ -457,19 +476,19 @@ system #(
     .vol_spk             (vol_spk),
     .vol_en              (vol_en),
 
-    .debug_boot_stage    (),
+    .debug_boot_stage    (dbg_boot_stage),
     .debug_sd_error      (),
-    .debug_bios_loaded   (),
-    .debug_vga_bios_sig_bad(),
-    .debug_vga_bios_sig_checked(),
-    .debug_first_instruction(),
-    .debug_post_code     (),
-    .debug_post_write    (),
+    .debug_bios_loaded   (dbg_bios_loaded),
+    .debug_vga_bios_sig_bad(dbg_vga_sig_bad),
+    .debug_vga_bios_sig_checked(dbg_vga_sig_checked),
+    .debug_first_instruction(dbg_first_instr),
+    .debug_post_code     (dbg_post_code),
+    .debug_post_write    (dbg_post_write),
 
-    .cpu_pe              (),
+    .cpu_pe              (dbg_cpu_pe),
     .cpu_vm              (),
-    .cpu_cs              (),
-    .cpu_eip             (),
+    .cpu_cs              (dbg_cpu_cs),
+    .cpu_eip             (dbg_cpu_eip),
     .cpu_cs_base         ()
 );
 

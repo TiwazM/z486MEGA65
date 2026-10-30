@@ -9,6 +9,10 @@
 create_generated_clock -name main_clk  [get_pins CORE/clk_gen/i_clk_main/CLKOUT1]
 create_generated_clock -name pc_audio_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
 
+## The SDRAM clock: main_clk's frequency at 292.5 degrees plus a fine phase set at run time
+## (clk.vhd). It only clocks the ODDR that forwards it to the pin.
+create_generated_clock -name sdram_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT2]
+
 ## ascal asynchronous FIFO data crossings (Megamiga CORE.xdc, framework paths): i_dpram is
 ## written on i_clk (= main_clk) and read on avl_clk (= hr_clk), o_dpram is written on avl_clk
 ## and read on o_clk (= hdmi_clk). Bound them to one destination period instead of the
@@ -61,8 +65,8 @@ add_cells_to_pblock pblock_z486_cpu [get_cells CORE/i_z486/core/z486_cpu]
 resize_pblock pblock_z486_cpu -add {SLICE_X6Y50:SLICE_X163Y149 RAMB18_X0Y20:RAMB18_X8Y59 RAMB36_X0Y10:RAMB36_X8Y29 DSP48_X0Y20:DSP48_X8Y59}
 
 ## SDRAM (R6: IS42S16320F) pin registers in the IOBs (Megamiga's rule). The I/O timing itself
-## (the SDRAM clock's phase against the board's traces) is not constrained yet: it has to be
-## measured on a board. Not sdram_cs_n_o: sdram.v only selects between two chips of a 128 MB
+## (the SDRAM clock's phase against the board's traces) is not constrained: the phase is set on
+## the board (clk.vhd). Not sdram_cs_n_o: sdram.v only selects between two chips of a 128 MB
 ## module, so with one 64 MB chip it is a constant 0 without a flip-flop (Place 30-722).
 set_property IOB TRUE [get_ports {sdram_a_o[*] sdram_ba_o[*] sdram_ras_n_o sdram_cas_n_o sdram_we_n_o sdram_dqml_o sdram_dqmh_o sdram_dq_io[*]}]
 

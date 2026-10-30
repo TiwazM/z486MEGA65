@@ -937,7 +937,7 @@
           <Attr Name="UsedIn" Val="simulation"/>
         </FileInfo>
       </File>
-      <File Path="$PPRDIR/../z486_MiSTer/src/memory/sdram.v">
+      <File Path="$PPRDIR/gen/z486_MiSTer/src/memory/sdram.v">
         <FileInfo SFType="SVerilog">
           <Attr Name="UsedIn" Val="synthesis"/>
           <Attr Name="UsedIn" Val="simulation"/>

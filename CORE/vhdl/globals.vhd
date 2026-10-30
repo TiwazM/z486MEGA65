@@ -80,8 +80,8 @@ constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     --
 -- QNICE devices of the core (ids >= 0x0100)
 ----------------------------------------------------------------------------------------------------------
 
--- The PC's control register (mega65.vhd), address 0, bit 0: the BIOS ROMs are in HyperRAM
--- (m2m-rom.asm, PREP_START). Until QNICE sets it, the PC stays in reset.
+-- The PC's control and debug registers (mega65.vhd has the map). Address 0, bit 0: the BIOS
+-- ROMs are in HyperRAM (m2m-rom.asm, PREP_START); until QNICE sets it, the PC stays in reset.
 constant C_DEV_PC_CTL         : std_logic_vector(15 downto 0) := x"0100";
 
 ----------------------------------------------------------------------------------------------------------
