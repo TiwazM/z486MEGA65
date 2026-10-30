@@ -9,6 +9,7 @@
 #   qmon.py boot PHASE [SECS] reset the PC with the SDRAM clock at PHASE fine steps (13.95 ps)
 #                             from 292.5 degrees, wait SECS (default 3), print the status
 #   qmon.py sweep FROM TO STEP [SECS]   boot at each phase, one summary line each
+#   qmon.py fdd               floppy A: (fdd_sd.vhd, C_DEV_PC_FDD): mount registers, statistics
 import os, re, sys, termios, time
 
 PORT = os.environ.get("QMON_PORT", "/dev/cu.usbserial-101")
@@ -126,10 +127,25 @@ def line(s):
              s["cs"], s["eip"], s["logs"], s["vsyncs"]))
 
 
+def fdd():
+    poke(0xFFF4, 0x0101)                   # M2M$RAMROM_DEV = C_DEV_PC_FDD
+    poke(0xFFF5, 0x0000)
+    r = dump(0x8000, 0x8008)
+    st = dump(0x8010, 0x8013)
+    print("A: mode %d (%s%s%s)  sectors %d  base %d  shift %d  geometry %d/%d/%d" %
+          (r[0], "mounted" if r[0] & 1 else "empty", ", slot 1" if r[0] & 2 else "",
+           ", write protected" if r[0] & 4 else "", r[2] << 16 | r[1], r[4] << 16 | r[3], r[5],
+           r[6], r[8], r[7]))
+    print("   read %d  written %d  failed %d  last request: %s LBA %d" %
+          (st[0], st[1], st[2], "write" if st[3] & 0x8000 else "read", st[3] & 0x7FFF))
+
+
 os.write(fd, b"\r")
 read_for(1.0)
 args = sys.argv[1:]
-if args and args[0] == "status":
+if args and args[0] == "fdd":
+    fdd()
+elif args and args[0] == "status":
     s = status()
     print(line(s), " vga_chk %d vga_bad %d sdram_busy %d reset %d snap %d" %
           (s["vga_chk"], s["vga_bad"], s["sdram_busy"], s["reset"], s["snap"]))

@@ -7,8 +7,9 @@
 ; callbacks below are the ones the Megamiga fork's Shell needs: the M2M
 ; template's plus HANDLE_CORE_IO (core-io-hook), BROWSE_EXTRA (cfg-strings),
 ; FAR_CALL (code-banks) and CFG_SIGCHECK / CFG_SIGSET (the settings file
-; signature). PREP_START loads the PC's BIOS ROMs. No drives yet: they come
-; with the IDE/floppy bridge.
+; signature). PREP_START loads the PC's BIOS ROMs and mounts the floppy image
+; /z486/floppy.img, if there is one; the menu's "Floppy A:" line mounts others
+; (PREP_LOAD_IMAGE, FDD_PREP).
 ;
 ; Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's
 ; firmware (Johan Smolinski); licensed under GPL v3
@@ -46,17 +47,230 @@ SUBMENU_SUMMARY XOR     R8, R8
                 RET
 
 ; ----------------------------------------------------------------------------
-; Core specific callback functions: File browsing and image mounting (none)
+; Core specific callback functions: File browsing and image mounting
 ; ----------------------------------------------------------------------------
 
 ; FILTER_FILES: R8 = 0 = show every file
 FILTER_FILES    XOR     R8, R8
                 RET
 
-; PREP_LOAD_IMAGE: nothing to prepare.
+; PREP_LOAD_IMAGE: R8 = file handle, R9 = context, R10 = the menu line's group.
+; The only manual load is the "Floppy A:" line: FDD_PREP mounts the image and
+; the Shell streams nothing into the device.
 ; Output: R8: 0 = OK, else an error code; R9: image type (0) or the error text
-PREP_LOAD_IMAGE XOR     R8, R8
+PREP_LOAD_IMAGE RSUB    FDD_PREP, 1
+                RET
+
+; ----------------------------------------------------------------------------
+; Floppy drive A: (fdd_sd.vhd): the image file is read and written in place
+; through the SD host controller's engine port; its extent map tells the
+; hardware where the sectors are (Megamac's DISK_PREP, for a floppy).
+;
+; FDD_PREP: mount the image file R8 (an open handle) as drive A:
+;   1. its size must be a standard floppy's (FDD_SIZES): the geometry;
+;   2. drive A: goes away (MODE 0) while it changes;
+;   3. the file's extent map into window 1 (FAT32$FILE_MAP: up to 511
+;      extents, so fragmented files are fine);
+;   4. sectors, the cluster base (DEV_CLUSTER - (2 << shift)), shift and
+;      geometry, then MODE (mounted, the card's slot) last: pc_mgmt.vhd then
+;      inserts the disk;
+;   5. the handle to its end: the Shell's manual load streams nothing.
+; Output: R8 = 0 (OK) or an error code with R9 = the message; R10..R12 kept.
+; ----------------------------------------------------------------------------
+
+FDD_E_SIZE      .EQU    0x00F1
+FDD_E_FRAG      .EQU    0x00F2
+
+FDD_PREP        INCRB
+                MOVE    R10, @--SP
+                MOVE    R11, @--SP
+                MOVE    R12, @--SP
+                MOVE    R8, R0                  ; R0: the handle
+
+                ; 1. the size: one of FDD_SIZES
+                MOVE    R0, R1
+                ADD     FAT32$FDH_SIZE_HI, R1
+                MOVE    @R1, R2                 ; R2: size hi
+                MOVE    R0, R1
+                ADD     FAT32$FDH_SIZE_LO, R1
+                MOVE    @R1, R3                 ; R3: size lo
+                MOVE    FDD_SIZES, R4
+_FP_SIZE        MOVE    @R4, R5                 ; R5: sectors (0: the end)
+                RBRA    _FP_BADSZ, Z
+                MOVE    R4, R6
+                ADD     1, R6
+                CMP     @R6++, R2
+                RBRA    _FP_NEXT, !Z
+                CMP     @R6++, R3
+                RBRA    _FP_FOUND, Z            ; R6: cylinders, sectors/track
+_FP_NEXT        ADD     5, R4
+                RBRA    _FP_SIZE, 1
+
+                ; 2. drive A: away while it changes
+_FP_FOUND       MOVE    M2M$RAMROM_DEV, R1
+                MOVE    PC_DEV_FDD, @R1
+                MOVE    M2M$RAMROM_4KWIN, R1
+                MOVE    0, @R1
+                MOVE    M2M$RAMROM_DATA, R7     ; R7: the registers (window 0)
+                MOVE    0, @R7                  ; MODE: no image
+
+                ; 3. the extent map into window 1
+                MOVE    M2M$RAMROM_4KWIN, R1
+                MOVE    1, @R1
+                MOVE    R0, R8
+                MOVE    M2M$RAMROM_DATA, R9
+                MOVE    2048, R10
+                RSUB    FAT32$FILE_MAP, 1
+                MOVE    M2M$RAMROM_4KWIN, R1
+                MOVE    0, @R1
+                CMP     0, R9
+                RBRA    _FP_MAPOK, Z
+                CMP     FAT32$ERR_MAPSIZE, R9
+                RBRA    _FP_FRAG, Z
+                MOVE    R9, R8                  ; another FAT32 error: its code
+                MOVE    ERR_FDD_FAT, R9
+                RBRA    _FP_RET, 1
+
+                ; 4. shift = log2(sectors per cluster), base, geometry, mode
+_FP_MAPOK       MOVE    @R0, R4                 ; R4: the device (FDH_DEVICE = 0)
+                MOVE    R4, R1
+                ADD     FAT32$DEV_SECT_PER_CLUS, R1
+                MOVE    @R1, R1                 ; R1: sectors per cluster
+                XOR     R3, R3                  ; R3: the shift
+_FP_SHL         CMP     R1, 1
+                RBRA    _FP_SHD, !N             ; R1 <= 1: done
+                AND     0xFFFB, SR
+                SHR     1, R1
+                ADD     1, R3
+                RBRA    _FP_SHL, 1
+_FP_SHD         MOVE    2, R2
+                AND     0xFFFD, SR
+                SHL     R3, R2                  ; R2: 2 << shift
+                MOVE    R4, R1
+                ADD     FAT32$DEV_CLUSTER_LO, R1
+                MOVE    @R1++, R10              ; R11:R10 = DEV_CLUSTER
+                MOVE    @R1, R11
+                SUB     R2, R10
+                SUBC    0, R11
+                MOVE    R4, R8                  ; the card the file is on
+                RSUB    SDC$SLOT, 1             ; R8: its slot
+                AND     0xFFFD, SR
+                SHL     1, R8
+                OR      1, R8                   ; R8: MODE = mounted, the slot
+                MOVE    M2M$RAMROM_DEV, R1
+                MOVE    PC_DEV_FDD, @R1
+                MOVE    M2M$RAMROM_4KWIN, R1
+                MOVE    0, @R1
+                MOVE    R7, R1
+                ADD     1, R1
+                MOVE    R5, @R1++               ; 1 SECTS lo
+                MOVE    0, @R1++                ; 2 SECTS hi
+                MOVE    R10, @R1++              ; 3 BASE lo
+                MOVE    R11, @R1++              ; 4 BASE hi
+                MOVE    R3, @R1++               ; 5 SHIFT
+                MOVE    @R6++, @R1++            ; 6 cylinders
+                MOVE    @R6, @R1++              ; 7 sectors per track
+                MOVE    2, @R1                  ; 8 heads
+                MOVE    R8, @R7                 ; MODE last
+
+                ; 5. the handle to its end
+                MOVE    R0, R8
+                MOVE    R0, R9
+                ADD     FAT32$FDH_SIZE_LO, R9
+                MOVE    @R9, R9
+                MOVE    R0, R10
+                ADD     FAT32$FDH_SIZE_HI, R10
+                MOVE    @R10, R10
+                RSUB    FAT32$FILE_SEEK, 1
+                CMP     0, R9
+                RBRA    _FP_OK, Z
+                MOVE    R9, R8
+                MOVE    ERR_FDD_FAT, R9
+                RBRA    _FP_RET, 1
+
+_FP_OK          XOR     R8, R8
                 XOR     R9, R9
+                RBRA    _FP_RET, 1
+_FP_BADSZ       MOVE    FDD_E_SIZE, R8
+                MOVE    ERR_FDD_SIZE, R9
+                RBRA    _FP_RET, 1
+_FP_FRAG        MOVE    FDD_E_FRAG, R8
+                MOVE    ERR_FDD_FRAG, R9
+_FP_RET         MOVE    @SP++, R12
+                MOVE    @SP++, R11
+                MOVE    @SP++, R10
+                DECRB
+                RET
+
+; The floppy sizes: sectors, size in bytes (hi, lo), cylinders, sectors per
+; track (all with two heads); sectors 0 ends the table
+FDD_SIZES       .DW     720,  0x0005, 0xA000, 40, 9      ; 360 KB
+                .DW     1440, 0x000B, 0x4000, 80, 9      ; 720 KB
+                .DW     2400, 0x0012, 0xC000, 80, 15     ; 1.2 MB
+                .DW     2880, 0x0016, 0x8000, 80, 18     ; 1.44 MB
+                .DW     5760, 0x002D, 0x0000, 80, 36     ; 2.88 MB
+                .DW     0
+
+ERR_FDD_SIZE    .ASCII_P "Not a floppy image: it\n"
+                .ASCII_W "must be 360K, 720K,\n1.2M, 1.44M or 2.88M.\n"
+ERR_FDD_FRAG    .ASCII_W "The image file has too\nmany fragments.\n"
+ERR_FDD_FAT     .ASCII_W "Cannot read the image\nfile (FAT32 error).\n"
+FDD_AUTO        .ASCII_W "/z486/floppy.img"
+
+; FDD_AUTO_NAME: the "Floppy A:" line shows the auto-mounted image like a
+; manual load (Megamac's DISK_AUTO_NAME): CRTROM_MAN_LDF[0] = 1 and the file
+; name after the last '/' in the line's OPTM_HEAP buffer ((vdrives + submenus
+; + 0) * OSM_O_DX), at most the width - 2 characters, one more for the
+; ellipsis, the "%s is replaced" flag in the buffer's last word = 0. R8 = the
+; path. Registers preserved.
+FDD_AUTO_NAME   SYSCALL(enter, 1)
+                MOVE    R8, R0                  ; R0: the path
+                MOVE    OPTM_HEAP, R4
+                MOVE    @R4, R4                 ; R4: the heap (0: no menu yet)
+                RBRA    _FAN_RET, Z
+                MOVE    CRTROM_MAN_LDF, R5
+                MOVE    1, @R5                  ; manual load 0: loaded
+                MOVE    R0, R5                  ; R5: the name = after the last '/'
+                MOVE    R0, R6
+_FAN_BN         CMP     0, @R6
+                RBRA    _FAN_BN1, Z
+                CMP     0x002F, @R6             ; '/'
+                RBRA    _FAN_BN2, !Z
+                MOVE    R6, R5
+                ADD     1, R5
+_FAN_BN2        ADD     1, R6
+                RBRA    _FAN_BN, 1
+_FAN_BN1        MOVE    VDRIVES_NUM, R8
+                MOVE    @R8, R8
+                MOVE    OPTM_SCOUNT, R9
+                ADD     @R9, R8                 ; vdrives + submenus
+                MOVE    SCR$OSM_O_DX, R9
+                MOVE    @R9, R9                 ; R9: the line's width
+                SYSCALL(mulu, 1)                ; R10: the buffer's offset
+                ADD     R10, R4                 ; R4: the line's buffer
+                MOVE    R9, R6
+                SUB     2, R6                   ; R6: the longest name
+                MOVE    R5, R8
+                SYSCALL(strlen, 1)              ; R9: the name's length
+                CMP     R9, R6                  ; longer than the frame?
+                RBRA    _FAN_LONG, N            ; yes
+                MOVE    R5, R8
+                MOVE    R4, R9
+                SYSCALL(strcpy, 1)
+                RBRA    _FAN_FLAG, 1
+_FAN_LONG       MOVE    R5, R8                  ; the longest + 1: the ellipsis
+                MOVE    R4, R9
+                MOVE    R6, R10
+                ADD     1, R10
+                SYSCALL(memcpy, 1)
+                ADD     R10, R9
+                MOVE    0, @R9
+_FAN_FLAG       MOVE    SCR$OSM_O_DX, R8        ; "%s is replaced" = 0
+                MOVE    @R8, R8
+                SUB     1, R8
+                ADD     R4, R8
+                MOVE    0, @R8
+_FAN_RET        SYSCALL(leave, 1)
                 RET
 
 ; BROWSE_EXTRA (M2M-UPSTREAM cfg-strings): no browser entries that are no
@@ -136,8 +350,31 @@ _PCS_VGA        MOVE    R8, R7                  ; R7: device handle
                 RSUB    PC_ROM_LOAD, 1
                 RBRA    _PCS_RET, C
 
+                ; floppy drive A: /z486/floppy.img, if it is there (then
+                ; 150 ms, so that pc_mgmt.vhd has inserted it, 100 ms after
+                ; the eject, before the BIOS looks for drives)
+                MOVE    R7, R8
+                MOVE    PC_ROM_FILE, R9
+                MOVE    FDD_AUTO, R10
+                XOR     R11, R11
+                SYSCALL(f32_fopen, 1)
+                CMP     0, R10
+                RBRA    _PCS_GO, !Z             ; not there: no floppy
+                MOVE    PC_ROM_FILE, R8
+                RSUB    FDD_PREP, 1
+                CMP     0, R8
+                RBRA    _PCS_GO, !Z             ; not a floppy: no floppy
+                MOVE    FDD_AUTO, R8
+                RSUB    FDD_AUTO_NAME, 1
+                MOVE    150, R3                 ; 150 x about 1 ms
+_PCS_FDW1       MOVE    0x2000, R4              ; (OSM_SEL_POST's 1 ms loop)
+_PCS_FDW2       SUB     1, R4
+                RBRA    _PCS_FDW2, !Z
+                SUB     1, R3
+                RBRA    _PCS_FDW1, !Z
+
                 ; the PC may leave reset
-                MOVE    M2M$RAMROM_DEV, R8
+_PCS_GO         MOVE    M2M$RAMROM_DEV, R8
                 MOVE    PC_DEV_CTL, @R8
                 MOVE    M2M$RAMROM_4KWIN, R8
                 MOVE    0, @R8
@@ -361,7 +598,7 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "1"
+CFG_SIG_VAL     .ASCII_W "2"
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer, flat (the Shell creates and resizes the settings
@@ -395,8 +632,8 @@ END_OF_ROM      .DW 0
 PC_ROM_FILE     .BLOCK  FAT32$FDH_STRUCT_SIZE
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 14-line menu: 20 + 167 item characters + 1 + 4 x 14 + 1 + (1
-; submenu + 1) x 30 = 305 words; the Shell checks it at boot
+; for this 16-line menu: 20 + 182 item characters + 1 + 4 x 16 + 1 + (1
+; submenu + 1 manual load + 1) x 30 = 358 words; the Shell checks it at boot
 ; (ERR_FATAL_HEAP1/2). The rest of the heap is the file browser's.
 MENU_HEAP_SIZE  .EQU 512
 

@@ -84,6 +84,10 @@ constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     --
 -- ROMs are in HyperRAM (m2m-rom.asm, PREP_START); until QNICE sets it, the PC stays in reset.
 constant C_DEV_PC_CTL         : std_logic_vector(15 downto 0) := x"0100";
 
+-- Floppy drive A: (fdd_sd.vhd has the register map): the image file's extent map and size,
+-- written by m2m-rom.asm (FDD_PREP); window 0xFFFF answers the Shell's manual load
+constant C_DEV_PC_FDD         : std_logic_vector(15 downto 0) := x"0101";
+
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System: not used
 ----------------------------------------------------------------------------------------------------------
@@ -94,9 +98,10 @@ constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"EEEE";
 constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
--- System for handling simulated cartridges and ROM loaders: not used. The framework's auto-loader
--- writes one byte per HyperRAM word; z486 reads its BIOS ROMs packed, so m2m-rom.asm loads them
--- itself (PREP_START).
+-- System for handling simulated cartridges and ROM loaders. The framework's auto-loader writes
+-- one byte per HyperRAM word; z486 reads its BIOS ROMs packed, so m2m-rom.asm loads them itself
+-- (PREP_START). Manual load 0 is the menu's "Floppy A:" line: the file browser, then FDD_PREP
+-- mounts the image (the Shell streams nothing into the device).
 ----------------------------------------------------------------------------------------------------------
 
 type crtrom_buf_array is array(natural range<>) of std_logic_vector;
@@ -112,8 +117,8 @@ constant C_CRTROMTYPE_SDRAM      : std_logic_vector(15 downto 0) := x"0002";
 constant C_CRTROMTYPE_MANDATORY  : std_logic_vector(15 downto 0) := x"0003";
 constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 
-constant C_CRTROMS_MAN_NUM       : natural := 0;
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( x"EEEE", x"EEEE",
+constant C_CRTROMS_MAN_NUM       : natural := 1;
+constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_PC_FDD,
                                                          x"EEEE");
 
 constant C_CRTROMS_AUTO_NUM      : natural := 0;

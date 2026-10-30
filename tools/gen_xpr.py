@@ -21,7 +21,7 @@ ROOT = z486_sources.ROOT
 
 # CORE/ files, relative to CORE/ (= $PPRDIR)
 CORE_VHDL = ["vhdl/globals.vhd", "vhdl/config.vhd", "vhdl/clk.vhd", "vhdl/ps2_device.vhd",
-             "vhdl/pc_keyboard.vhd", "vhdl/mega65.vhd"]
+             "vhdl/pc_keyboard.vhd", "vhdl/pc_mgmt.vhd", "vhdl/fdd_sd.vhd", "vhdl/mega65.vhd"]
 CORE_SV = ["sv/z486_mega65.sv"]
 
 # Verilog include directories, relative to CORE/

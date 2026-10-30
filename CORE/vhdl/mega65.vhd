@@ -10,8 +10,10 @@
 --   map, a clock crossing (avm_fifo) and a 64 -> 16 bit width reduction (avm_decrease)
 -- * the SVGA framebuffer shown by ascal from HyperRAM (M2M-UPSTREAM rtg-framebuffer)
 -- * the MEGA65 keyboard as a PS/2 keyboard (pc_keyboard.vhd, ps2_device.vhd)
+-- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy) and floppy drive A: from an
+--   image file on the SD card (fdd_sd.vhd, through the SD host controller's engine port)
 --
--- Not wired yet: the IDE/floppy management bus (no drives), the PS/2 mouse, joysticks.
+-- Not wired yet: the IDE drives, the PS/2 mouse, joysticks.
 --
 -- The entity is the Megamiga fork's MEGA65_Core (M2M-UPSTREAM exceptions: floppy, SDRAM,
 -- PMOD, Ethernet pins and the SD engine port are routed into the core), as in pc10-iii.
@@ -328,9 +330,10 @@ architecture synthesis of MEGA65_Core is
 -- scrapes them into osm_const.asm as PC_OSM_*)
 ---------------------------------------------------------------------------------------------
 
-constant C_MENU_HDMI_720P     : natural := 5;
-constant C_MENU_HDMI_480P     : natural := 6;
-constant C_MENU_RESET         : natural := 11;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_FDD_A          : natural := 2;   -- manual load 0 (m2m-rom.asm FDD_PREP)
+constant C_MENU_HDMI_720P     : natural := 7;
+constant C_MENU_HDMI_480P     : natural := 8;
+constant C_MENU_RESET         : natural := 13;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -439,13 +442,38 @@ signal audio_r                : std_logic_vector(15 downto 0);
 signal main_audio             : std_logic_vector(31 downto 0);
 
 ---------------------------------------------------------------------------------------------
--- Drives (no bridge to the SD card yet: ide.v and floppy.v see an idle management bus)
+-- Drives: the management bus (pc_mgmt.vhd) and floppy A: from the SD card (fdd_sd.vhd)
 ---------------------------------------------------------------------------------------------
 
 signal main_fdd_request       : std_logic_vector(1 downto 0);
 signal main_ide0_request      : std_logic_vector(2 downto 0);
 signal main_ide1_request      : std_logic_vector(2 downto 0);
+signal main_mgmt_address      : std_logic_vector(15 downto 0);
+signal main_mgmt_read         : std_logic;
+signal main_mgmt_write        : std_logic;
+signal main_mgmt_writedata    : std_logic_vector(15 downto 0);
 signal main_mgmt_readdata     : std_logic_vector(15 downto 0);
+
+signal main_fdd_req           : std_logic;
+signal main_fdd_req_wr        : std_logic;
+signal main_fdd_req_lba       : std_logic_vector(15 downto 0);
+signal main_fdd_buf_addr      : std_logic_vector(8 downto 0);
+signal main_fdd_buf_we        : std_logic;
+signal main_fdd_buf_wd        : std_logic_vector(7 downto 0);
+signal main_fdd_buf_rd        : std_logic_vector(7 downto 0);
+
+signal qnice_fdd_done         : std_logic;
+signal qnice_fdd_done_err     : std_logic;
+signal qnice_fdd_mounted      : std_logic;
+signal qnice_fdd_wp           : std_logic;
+signal qnice_fdd_cyl          : std_logic_vector(7 downto 0);
+signal qnice_fdd_spt          : std_logic_vector(7 downto 0);
+signal qnice_fdd_total        : std_logic_vector(15 downto 0);
+signal qnice_fdd_heads        : std_logic_vector(1 downto 0);
+signal qnice_fdd_gen          : std_logic_vector(3 downto 0);
+signal qnice_fdd_ce           : std_logic;
+signal qnice_fdd_data         : std_logic_vector(15 downto 0);
+signal qnice_fdd_wait         : std_logic;
 
 component z486_mega65 is
    generic (
@@ -580,8 +608,7 @@ begin
    eth_txd_o            <= (others => '0');
    eth_txen_o           <= '0';
 
-   -- M2M-UPSTREAM sd-host: no engine requests (the framework's default)
-   sd_eng_o             <= (others => '0');
+   -- M2M-UPSTREAM sd-host: the engine port belongs to the floppy (fdd_sd.vhd, below)
 
    -- Expansion port: tristate everything; enabled because of the R5/R6 joystick port 2 bug
    cart_ctrl_oe_o       <= '0';
@@ -714,11 +741,11 @@ begin
          audio_l            => audio_l,
          audio_r            => audio_r,
 
-         mgmt_address       => (others => '0'),
-         mgmt_read          => '0',
+         mgmt_address       => main_mgmt_address,
+         mgmt_read          => main_mgmt_read,
          mgmt_readdata      => main_mgmt_readdata,
-         mgmt_write         => '0',
-         mgmt_writedata     => (others => '0'),
+         mgmt_write         => main_mgmt_write,
+         mgmt_writedata     => main_mgmt_writedata,
          fdd_request        => main_fdd_request,
          ide0_request       => main_ide0_request,
          ide1_request       => main_ide1_request,
@@ -748,6 +775,40 @@ begin
          dbg_log_we         => main_dbg_log_we,
          dbg_mem_busy       => main_dbg_mem_busy
       ); -- i_z486
+
+   -- The management bus: MiSTer's ARM side in hardware (CMOS, floppy). Not reset with the
+   -- PC: it configures the CMOS while the PC still waits for its ROMs.
+   i_pc_mgmt : entity work.pc_mgmt
+      generic map (
+         G_CLK_HZ          => CORE_CLK_SPEED
+      )
+      port map (
+         clk_i             => main_clk,
+         rst_i             => main_rst,
+         mgmt_address_o    => main_mgmt_address,
+         mgmt_read_o       => main_mgmt_read,
+         mgmt_write_o      => main_mgmt_write,
+         mgmt_writedata_o  => main_mgmt_writedata,
+         mgmt_readdata_i   => main_mgmt_readdata,
+         fdd_request_i     => main_fdd_request,
+         rtc_i             => main_rtc_i,
+         fdd_mounted_i     => qnice_fdd_mounted,
+         fdd_wp_i          => qnice_fdd_wp,
+         fdd_cyl_i         => qnice_fdd_cyl,
+         fdd_spt_i         => qnice_fdd_spt,
+         fdd_total_i       => qnice_fdd_total,
+         fdd_heads_i       => qnice_fdd_heads,
+         fdd_gen_i         => qnice_fdd_gen,
+         sd_req_o          => main_fdd_req,
+         sd_req_wr_o       => main_fdd_req_wr,
+         sd_req_lba_o      => main_fdd_req_lba,
+         sd_done_i         => qnice_fdd_done,
+         sd_err_i          => qnice_fdd_done_err,
+         buf_addr_o        => main_fdd_buf_addr,
+         buf_we_o          => main_fdd_buf_we,
+         buf_wd_o          => main_fdd_buf_wd,
+         buf_rd_i          => main_fdd_buf_rd
+      ); -- i_pc_mgmt
 
    -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
    -- is not: the BIOS resets it with command FF.
@@ -1020,7 +1081,9 @@ begin
    begin
       v_word := to_integer(unsigned(qnice_dev_addr_i(2 downto 0)));
       qnice_dev_data_o <= x"EEEE";
-      if qnice_dev_id_i = C_DEV_PC_CTL then
+      if qnice_dev_id_i = C_DEV_PC_FDD then
+         qnice_dev_data_o <= qnice_fdd_data;
+      elsif qnice_dev_id_i = C_DEV_PC_CTL then
          if qnice_dev_addr_i = x"0000000" then
             qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0);
          elsif qnice_dev_addr_i = x"0000001" then
@@ -1034,7 +1097,44 @@ begin
          end if;
       end if;
    end process p_qnice_dev_data;
-   qnice_dev_wait_o <= '0';
+   qnice_dev_wait_o <= qnice_fdd_wait when qnice_dev_id_i = C_DEV_PC_FDD else '0';
+
+   -- Floppy drive A: from an image file on the SD card (C_DEV_PC_FDD; the firmware mounts it)
+   qnice_fdd_ce <= qnice_dev_ce_i when qnice_dev_id_i = C_DEV_PC_FDD else '0';
+
+   i_fdd_sd : entity work.fdd_sd
+      generic map (
+         G_QNICE_HZ    => QNICE_CLK_SPEED
+      )
+      port map (
+         qnice_clk_i   => qnice_clk_i,
+         qnice_rst_i   => qnice_rst_i,
+         qnice_addr_i  => qnice_dev_addr_i,
+         qnice_data_i  => qnice_dev_data_i,
+         qnice_ce_i    => qnice_fdd_ce,
+         qnice_we_i    => qnice_dev_we_i,
+         qnice_data_o  => qnice_fdd_data,
+         qnice_wait_o  => qnice_fdd_wait,
+         sd_q2c_i      => sd_eng_i,
+         sd_c2q_o      => sd_eng_o,
+         mnt_mounted_o => qnice_fdd_mounted,
+         mnt_wp_o      => qnice_fdd_wp,
+         mnt_cyl_o     => qnice_fdd_cyl,
+         mnt_spt_o     => qnice_fdd_spt,
+         mnt_total_o   => qnice_fdd_total,
+         mnt_heads_o   => qnice_fdd_heads,
+         mnt_gen_o     => qnice_fdd_gen,
+         req_i         => main_fdd_req,
+         req_wr_i      => main_fdd_req_wr,
+         req_lba_i     => main_fdd_req_lba,
+         done_o        => qnice_fdd_done,
+         done_err_o    => qnice_fdd_done_err,
+         main_clk_i    => main_clk,
+         buf_addr_i    => main_fdd_buf_addr,
+         buf_we_i      => main_fdd_buf_we,
+         buf_wd_i      => main_fdd_buf_wd,
+         buf_rd_o      => main_fdd_buf_rd
+      ); -- i_fdd_sd
 
    i_cdc_sdram_ps_pos : entity work.cdc_stable
       generic map (

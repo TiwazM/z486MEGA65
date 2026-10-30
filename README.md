@@ -9,8 +9,9 @@ routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
 with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
 over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
 0.25 ns (about 65.6 MHz), all inside the CPU. On an R6 the PC boots its BIOS
-from the SD card to the end of POST: the VGA BIOS, the Bochs BIOS banner, then
-"No bootable device", as there are no drives yet, nor a keyboard.
+from the SD card and boots DOS from a floppy image on the card (FreeDOS 1.4's boot
+floppy: the installer, then the `A:\>` prompt, `DIR`), typed on the MEGA65
+keyboard as the PC's PS/2 keyboard. No hard disks yet.
 
 ## Plan
 
@@ -63,7 +64,18 @@ from the SD card to the end of POST: the VGA BIOS, the Bochs BIOS banner, then
   BIOS's keyboard commands, which MiSTer's ARM side gives there. See
   [Keyboard](#keyboard). `CORE/sim/run_keyboard.sh` simulates it against
   z486's 8042 (`ps2.v`).
-- Menu: HDMI mode, help, "Reset the PC".
+- Floppy A: (`CORE/vhdl/fdd_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
+  serves z486's floppy controller and fills the CMOS through the management
+  bus, is in hardware (`pc_mgmt`): at power-up the CMOS (floppy types,
+  equipment, base memory, checksum, the date and time from the MEGA65's RTC),
+  then insert/eject and the sector requests. `fdd_sd` reads and writes each
+  sector straight in the image file through the SD host controller's engine
+  port (Megamiga's sd-host), with the file's extent map from the firmware
+  (fragmented files are fine). The menu's "Floppy A:" line mounts an image
+  (360K, 720K, 1.2M, 1.44M or 2.88M; writes go to the file); `/z486/floppy.img`
+  is mounted at start-up if it is there, and the BIOS then boots from it.
+  `CORE/sim/run_floppy.sh` simulates it against z486's `floppy.v` and `rtc.v`.
+- Menu: floppy A:, HDMI mode, help, "Reset the PC".
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
   of the PC's state (boot stage, POST code, CS:EIP, VGA frame count) and a
   4096-entry log of the BIOS's debug port 0x402, z486's stall watchdog,
@@ -72,13 +84,14 @@ from the SD card to the end of POST: the VGA BIOS, the Bochs BIOS banner, then
   Run/Stop + Cursor Up, then press Help, and run `tools/qmon.py status`
   (`boot` and `sweep` reset the PC at other SDRAM clock phases).
 
-Not wired yet: the IDE/floppy management bus, the PS/2 mouse, joysticks.
+Not wired yet: the IDE drives, floppy B:, the PS/2 mouse, joysticks.
 
 ## SD card
 
 ```
-/z486/boot0.rom   the system BIOS
-/z486/boot1.rom   the VGA BIOS
+/z486/boot0.rom    the system BIOS
+/z486/boot1.rom    the VGA BIOS
+/z486/floppy.img   optional: drive A: at start-up (a raw floppy image)
 ```
 
 Both come with z486_MiSTer, in
