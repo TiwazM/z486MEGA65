@@ -57,17 +57,22 @@ from the SD card to the end of POST: the VGA BIOS, the Bochs BIOS banner, then
   `mega65.vhd`). A missing or unreadable ROM stops with a message on screen.
   The framework's own ROM auto-loader is not used: it writes one byte per
   HyperRAM word, and z486 reads the ROMs packed.
+- Keyboard: the MEGA65 keyboard is the PC's PS/2 keyboard
+  (`CORE/vhdl/pc_keyboard.vhd`, `ps2_device.vhd`): scan code set 2, which the
+  PC's 8042 translates to set 1, typematic repeat, and the replies to the
+  BIOS's keyboard commands, which MiSTer's ARM side gives there. See
+  [Keyboard](#keyboard). `CORE/sim/run_keyboard.sh` simulates it against
+  z486's 8042 (`ps2.v`).
 - Menu: HDMI mode, help, "Reset the PC".
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
   of the PC's state (boot stage, POST code, CS:EIP, VGA frame count) and a
-  4096-entry log of the BIOS's debug port 0x402, z486's stall watchdog and
-  POST code changes; `mega65.vhd` has the map. They are read with the M2M
+  4096-entry log of the BIOS's debug port 0x402, z486's stall watchdog,
+  POST code changes and the PS/2 keyboard's bytes both ways; `mega65.vhd` has the map. They are read with the M2M
   debug monitor over the JTAG adapter's serial port (115200 baud): hold
   Run/Stop + Cursor Up, then press Help, and run `tools/qmon.py status`
   (`boot` and `sweep` reset the PC at other SDRAM clock phases).
 
-Not wired yet: the IDE/floppy management bus, PS/2 keyboard and mouse,
-joysticks.
+Not wired yet: the IDE/floppy management bus, the PS/2 mouse, joysticks.
 
 ## SD card
 
@@ -84,6 +89,29 @@ BIOS, which matches the core's ET4000 and is Tseng's code: neither is part of
 this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
+
+## Keyboard
+
+The keys go by their labels, as on a US PC keyboard (Shift+2 is @, as on a
+PC):
+
+| MEGA65 | PC |
+|---|---|
+| RUN/STOP, ESC | Esc |
+| INST/DEL | Backspace; with Shift Insert, with MEGA Delete |
+| CLR/HOME | Home; with Shift End |
+| RESTORE | Delete |
+| F1 F3 F5 F7 F9 F11 | the same; with Shift F2 F4 F6 F8 F10 F12, as on the keycaps (the PC sees no Shift while the key is down) |
+| cursor keys | arrows; with MEGA, up/down = Page Up/Down, left/right = Home/End |
+| CTRL, ALT, TAB, both shifts | Ctrl, Alt, Tab, Shift |
+| CAPS LOCK | Caps Lock (it latches on the MEGA65: each change taps the PC's) |
+| NO SCROLL | Scroll Lock |
+| `+` and `=` | `=` (with Shift `+`) |
+| `-` `:` `@` `*` `;` `£` | `-` `;` `[` `]` `'` `\` |
+| arrow-left, arrow-up | `` ` `` |
+| MEGA | the Fn key above, nothing by itself |
+| F13 | nothing yet |
+| HELP | the menu |
 
 ## SDRAM clock
 

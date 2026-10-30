@@ -9,9 +9,9 @@
 -- * z486's MiSTer DDR3 port (the boot image and the SVGA framebuffer) in HyperRAM: an address
 --   map, a clock crossing (avm_fifo) and a 64 -> 16 bit width reduction (avm_decrease)
 -- * the SVGA framebuffer shown by ascal from HyperRAM (M2M-UPSTREAM rtg-framebuffer)
+-- * the MEGA65 keyboard as a PS/2 keyboard (pc_keyboard.vhd, ps2_device.vhd)
 --
--- Not wired yet: the IDE/floppy management bus (no drives), PS/2 keyboard and mouse,
--- joysticks, the boot image loader (the PC waits for its boot image).
+-- Not wired yet: the IDE/floppy management bus (no drives), the PS/2 mouse, joysticks.
 --
 -- The entity is the Megamiga fork's MEGA65_Core (M2M-UPSTREAM exceptions: floppy, SDRAM,
 -- PMOD, Ethernet pins and the SD engine port are routed into the core), as in pc10-iii.
@@ -383,8 +383,22 @@ signal main_dbg_post_new      : std_logic;
 signal main_dbg_snap          : std_logic_vector(127 downto 0) := (others => '0');
 signal qnice_dbg_snap         : std_logic_vector(127 downto 0);
 signal main_dbg_log_wr        : std_logic;
-signal main_dbg_log_entry     : std_logic_vector(8 downto 0);
-signal qnice_dbg_log_q        : std_logic_vector(8 downto 0);
+signal main_dbg_log_entry     : std_logic_vector(9 downto 0);
+signal qnice_dbg_log_q        : std_logic_vector(9 downto 0);
+
+---------------------------------------------------------------------------------------------
+-- The MEGA65 keyboard as a PS/2 keyboard (main clock)
+---------------------------------------------------------------------------------------------
+
+signal main_kbd_tx_valid      : std_logic;
+signal main_kbd_tx_data       : std_logic_vector(7 downto 0);
+signal main_kbd_tx_ready      : std_logic;
+signal main_kbd_rx_valid      : std_logic;
+signal main_kbd_rx_data       : std_logic_vector(7 downto 0);
+signal main_kbd_dev_clk       : std_logic;     -- the keyboard's lines
+signal main_kbd_dev_dat       : std_logic;
+signal main_kbd_host_clk      : std_logic;     -- the 8042's lines
+signal main_kbd_host_dat      : std_logic;
 
 ---------------------------------------------------------------------------------------------
 -- z486's MiSTer DDR3 port (main clock) and its way into HyperRAM (hr clock)
@@ -709,11 +723,11 @@ begin
          ide0_request       => main_ide0_request,
          ide1_request       => main_ide1_request,
 
-         ps2_kbd_clk_in     => '1',            -- no keyboard yet: idle lines
-         ps2_kbd_data_in    => '1',
-         ps2_kbd_clk_out    => open,
-         ps2_kbd_data_out   => open,
-         ps2_mouse_clk_in   => '1',
+         ps2_kbd_clk_in     => main_kbd_dev_clk,
+         ps2_kbd_data_in    => main_kbd_dev_dat,
+         ps2_kbd_clk_out    => main_kbd_host_clk,
+         ps2_kbd_data_out   => main_kbd_host_dat,
+         ps2_mouse_clk_in   => '1',            -- no mouse yet: idle lines
          ps2_mouse_data_in  => '1',
          ps2_mouse_clk_out  => open,
          ps2_mouse_data_out => open,
@@ -735,11 +749,48 @@ begin
          dbg_mem_busy       => main_dbg_mem_busy
       ); -- i_z486
 
+   -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
+   -- is not: the BIOS resets it with command FF.
+   i_pc_keyboard : entity work.pc_keyboard
+      generic map (
+         G_CLK_HZ        => CORE_CLK_SPEED
+      )
+      port map (
+         clk_i           => main_clk,
+         rst_i           => main_rst,
+         key_num_i       => main_kb_key_num_i,
+         key_pressed_n_i => main_kb_key_pressed_n_i,
+         tx_valid_o      => main_kbd_tx_valid,
+         tx_data_o       => main_kbd_tx_data,
+         tx_ready_i      => main_kbd_tx_ready,
+         rx_valid_i      => main_kbd_rx_valid,
+         rx_data_i       => main_kbd_rx_data
+      ); -- i_pc_keyboard
+
+   i_ps2_keyboard : entity work.ps2_device
+      generic map (
+         G_PS2_DIV  => CORE_CLK_SPEED / 32_000  -- 16 kHz
+      )
+      port map (
+         clk_i      => main_clk,
+         rst_i      => main_rst,
+         tx_valid_i => main_kbd_tx_valid,
+         tx_data_i  => main_kbd_tx_data,
+         tx_ready_o => main_kbd_tx_ready,
+         rx_valid_o => main_kbd_rx_valid,
+         rx_data_o  => main_kbd_rx_data,
+         ps2_clk_i  => main_kbd_host_clk,
+         ps2_dat_i  => main_kbd_host_dat,
+         ps2_clk_o  => main_kbd_dev_clk,
+         ps2_dat_o  => main_kbd_dev_dat
+      ); -- i_ps2_keyboard
+
    -- Debug: every 2^20 clocks (16 ms) a snapshot of the PC's state, still for long enough to
-   -- cross to QNICE whole (cdc_stable). The log keeps the last 4096 bytes of the PC's debug
-   -- port (the BIOS's port 0x402, the watchdog's stall messages) and POST codes (bit 8 set),
-   -- these only when they change: the Bochs BIOS writes port 0x80 as an I/O delay, thousands
-   -- of zeros. Each PC reset starts the counters and the log afresh.
+   -- cross to QNICE whole (cdc_stable). The log keeps the last 4096 entries: bits 9..8 say
+   -- what bits 7..0 are, 00 a byte of the PC's debug port (the BIOS's port 0x402, the
+   -- watchdog's stall messages), 01 a POST code, only when it changes (the Bochs BIOS writes
+   -- port 0x80 as an I/O delay, thousands of zeros), 10 a byte from the 8042 to the keyboard,
+   -- 11 one from the keyboard. Each PC reset starts the counters and the log afresh.
    p_main_dbg : process (main_clk)
    begin
       if rising_edge(main_clk) then
@@ -780,14 +831,17 @@ begin
 
    main_dbg_post_new  <= '1' when main_dbg_post_write = '1' and main_dbg_post_code /= main_dbg_post_last
                     else '0';
-   main_dbg_log_wr    <= main_dbg_post_new or main_dbg_log_we;
-   main_dbg_log_entry <= '1' & main_dbg_post_code when main_dbg_post_new = '1' else
-                         '0' & main_dbg_log_byte;
+   main_dbg_log_wr    <= main_dbg_post_new or main_dbg_log_we or main_kbd_rx_valid or
+                         (main_kbd_tx_valid and main_kbd_tx_ready);
+   main_dbg_log_entry <= "01" & main_dbg_post_code when main_dbg_post_new = '1' else
+                         "00" & main_dbg_log_byte  when main_dbg_log_we = '1' else
+                         "10" & main_kbd_rx_data   when main_kbd_rx_valid = '1' else
+                         "11" & main_kbd_tx_data;
 
    i_dbg_log : entity work.dualport_2clk_ram
       generic map (
          ADDR_WIDTH => 12,
-         DATA_WIDTH => 9,
+         DATA_WIDTH => 10,
          FALLING_B  => true                    -- QNICE's device convention
       )
       port map (
@@ -944,7 +998,7 @@ begin
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
    --                log count, VGA vsync count, snapshot count
-   --    0x1000..1FFF read: the log, entry n at 0x1000 + n mod 4096
+   --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    p_qnice_pc_ctl : process (qnice_clk_i)
    begin
       if falling_edge(qnice_clk_i) then
@@ -976,7 +1030,7 @@ begin
          elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000010" then
             qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 15 downto 16 * v_word);
          elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
-            qnice_dev_data_o <= "0000000" & qnice_dbg_log_q;
+            qnice_dev_data_o <= "000000" & qnice_dbg_log_q;
          end if;
       end if;
    end process p_qnice_dev_data;

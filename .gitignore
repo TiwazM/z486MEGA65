@@ -40,6 +40,7 @@ ooc/run_*.out
 CORE/gen/
 CORE/reports/
 CORE/build_r6*.out
+CORE/sim/build/
 CORE/m2m-rom/.tools/
 CORE/m2m-rom/asm.log
 CORE/m2m-rom/globals.asm

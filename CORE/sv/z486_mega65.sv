@@ -12,8 +12,9 @@
 // The ddram_* port is MiSTer's DDR3 port (64-bit words, clk_sys): the boot image and the SVGA
 // framebuffer. mega65.vhd maps it into HyperRAM. fb_base_o is still a DDR3 address.
 //
-// Not wired yet (inputs idle): the mgmt bus of ide.v / floppy.v (no drives until the bridge to
-// the SD card exists), PS/2 keyboard and mouse, joysticks.
+// The PS/2 keyboard lines come from mega65.vhd (the MEGA65 keyboard). Not wired yet (inputs
+// idle): the mgmt bus of ide.v / floppy.v (no drives until the bridge to the SD card exists),
+// the PS/2 mouse, joysticks.
 
 `default_nettype none
 

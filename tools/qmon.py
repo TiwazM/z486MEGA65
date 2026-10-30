@@ -95,10 +95,14 @@ def log(n):
     for e in ent:
         if e is None:
             continue
-        if e & 0x100:
-            out += "[POST %02X]" % (e & 0xFF)
+        kind, c = e >> 8 & 3, e & 0xFF
+        if kind == 1:
+            out += "[POST %02X]" % c
+        elif kind == 2:
+            out += "[>kbd %02X]" % c          # the 8042 to the keyboard
+        elif kind == 3:
+            out += "[<kbd %02X]" % c          # the keyboard to the 8042
         else:
-            c = e & 0xFF
             out += chr(c) if (c >= 32 and c < 127) or c == 10 else "\\x%02X" % c
     return out
 
