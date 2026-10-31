@@ -11,13 +11,18 @@
 -- release is a key the PC holds down for good); then the release overwrites the newest entry.
 -- Each event becomes its scan codes in a 16-byte queue for ps2_device.
 --
--- The keys by their labels, as on a US PC keyboard (Shift+2 is @ as on a PC):
+-- The keys by their labels: letters and digits as on a PC, the symbols as on the MEGA65's
+-- keycaps (: and Shift+: = [, ; and Shift+; = ], @, *, +, -, =, Shift+2 = ", Shift+6 = &,
+-- Shift+7 = ', Shift+8 = (, Shift+9 = )): each table entry says whether the PC's Shift must be
+-- pressed or released for it (M_DOWN, M_UP), and the PC sees that while the key is down. The
+-- PC's symbols without a keycap: GBP = \ (Shift: |), arrow up = ^ (Shift: ~), arrow left = `,
+-- Shift+- = _, Shift+@ = {, Shift+* = }.
 --   RUN/STOP and ESC = Esc, CTRL = Ctrl, ALT = Alt, NO SCROLL = Scroll Lock, RESTORE = Delete,
---   INST/DEL = Backspace, CLR/HOME = Home, + = =, : = ;, @ = [, * = ], ; = ', GBP = \,
---   the arrow-left and arrow-up symbols = `, the cursor keys = the arrows.
+--   INST/DEL = Backspace, CLR/HOME = Home, the cursor keys = the arrows.
 --   F1 F3 F5 F7 F9 F11 = F1 F3 F5 F7 F9 F11; with Shift F2 F4 F6 F8 F10 F12, as on their
 --   keycaps: the PC sees the Shift released while that key is down. The same way Shift+INST/DEL
---   = Insert and Shift+CLR/HOME = End. F13 and HELP (the menu) send nothing.
+--   = Insert and Shift+CLR/HOME = End. F13 (the mouse's right button, pc_mouse.vhd) and HELP
+--   (the menu) send nothing.
 --   MEGA is a Fn key: MEGA+cursor up/down = Page Up/Down, MEGA+cursor left/right = Home/End,
 --   MEGA+INST/DEL = Delete.
 --   CAPS LOCK latches on the MEGA65: each change taps the PC's Caps Lock.
@@ -56,10 +61,15 @@ end entity pc_keyboard;
 
 architecture synthesis of pc_keyboard is
 
-   -- A scan code: bit 8 = the E0 prefix; "0" & x"00" = none
-   subtype t_code is std_logic_vector(8 downto 0);
+   -- A scan code: bits 10..9 = what the PC's Shift must be while the key is down (M_AS: as the
+   -- shift keys are, M_DOWN: pressed, M_UP: released), bit 8 = the E0 prefix, 7..0 the code;
+   -- all zeros = none
+   subtype t_code is std_logic_vector(10 downto 0);
    type t_map is array (0 to 79) of t_code;
-   constant C_NONE : t_code := "0" & x"00";
+   constant M_AS   : std_logic_vector(1 downto 0) := "00";
+   constant M_DOWN : std_logic_vector(1 downto 0) := "01";
+   constant M_UP   : std_logic_vector(1 downto 0) := "10";
+   constant C_NONE : t_code := M_AS & "0" & x"00";
 
    constant K_LSHIFT : natural := 15;
    constant K_RSHIFT : natural := 52;
@@ -69,100 +79,118 @@ architecture synthesis of pc_keyboard is
    constant K_CAPS   : natural := 72;
 
    constant C_BASE : t_map := (
-       0 => "0" & x"66",   -- INST/DEL   -> Backspace
-       1 => "0" & x"5A",   -- RETURN     -> Enter
-       2 => "1" & x"74",   -- cursor right
-       3 => "0" & x"83",   -- F7
-       4 => "0" & x"05",   -- F1
-       5 => "0" & x"04",   -- F3
-       6 => "0" & x"03",   -- F5
-       7 => "1" & x"72",   -- cursor down
-       8 => "0" & x"26",   -- 3
-       9 => "0" & x"1D",   -- W
-      10 => "0" & x"1C",   -- A
-      11 => "0" & x"25",   -- 4
-      12 => "0" & x"1A",   -- Z
-      13 => "0" & x"1B",   -- S
-      14 => "0" & x"24",   -- E
-      15 => "0" & x"12",   -- left shift
-      16 => "0" & x"2E",   -- 5
-      17 => "0" & x"2D",   -- R
-      18 => "0" & x"23",   -- D
-      19 => "0" & x"36",   -- 6
-      20 => "0" & x"21",   -- C
-      21 => "0" & x"2B",   -- F
-      22 => "0" & x"2C",   -- T
-      23 => "0" & x"22",   -- X
-      24 => "0" & x"3D",   -- 7
-      25 => "0" & x"35",   -- Y
-      26 => "0" & x"34",   -- G
-      27 => "0" & x"3E",   -- 8
-      28 => "0" & x"32",   -- B
-      29 => "0" & x"33",   -- H
-      30 => "0" & x"3C",   -- U
-      31 => "0" & x"2A",   -- V
-      32 => "0" & x"46",   -- 9
-      33 => "0" & x"43",   -- I
-      34 => "0" & x"3B",   -- J
-      35 => "0" & x"45",   -- 0
-      36 => "0" & x"3A",   -- M
-      37 => "0" & x"42",   -- K
-      38 => "0" & x"44",   -- O
-      39 => "0" & x"31",   -- N
-      40 => "0" & x"55",   -- +          -> =
-      41 => "0" & x"4D",   -- P
-      42 => "0" & x"4B",   -- L
-      43 => "0" & x"4E",   -- -
-      44 => "0" & x"49",   -- .
-      45 => "0" & x"4C",   -- :          -> ;
-      46 => "0" & x"54",   -- @          -> [
-      47 => "0" & x"41",   -- ,
-      48 => "0" & x"5D",   -- GBP        -> \
-      49 => "0" & x"5B",   -- *          -> ]
-      50 => "0" & x"52",   -- ;          -> '
-      51 => "1" & x"6C",   -- CLR/HOME   -> Home
-      52 => "0" & x"59",   -- right shift
-      53 => "0" & x"55",   -- =
-      54 => "0" & x"0E",   -- arrow up   -> `
-      55 => "0" & x"4A",   -- /
-      56 => "0" & x"16",   -- 1
-      57 => "0" & x"0E",   -- arrow left -> `
-      58 => "0" & x"14",   -- CTRL       -> left Ctrl
-      59 => "0" & x"1E",   -- 2
-      60 => "0" & x"29",   -- SPACE
-      62 => "0" & x"15",   -- Q
-      63 => "0" & x"76",   -- RUN/STOP   -> Esc
-      64 => "0" & x"7E",   -- NO SCROLL  -> Scroll Lock
-      65 => "0" & x"0D",   -- TAB
-      66 => "0" & x"11",   -- ALT        -> left Alt
-      68 => "0" & x"01",   -- F9
-      69 => "0" & x"78",   -- F11
-      71 => "0" & x"76",   -- ESC
-      72 => "0" & x"58",   -- CAPS LOCK (latched: tapped)
-      73 => "1" & x"75",   -- cursor up
-      74 => "1" & x"6B",   -- cursor left
-      75 => "1" & x"71",   -- RESTORE    -> Delete
+       0 => M_AS & "0" & x"66",   -- INST/DEL   -> Backspace
+       1 => M_AS & "0" & x"5A",   -- RETURN     -> Enter
+       2 => M_AS & "1" & x"74",   -- cursor right
+       3 => M_AS & "0" & x"83",   -- F7
+       4 => M_AS & "0" & x"05",   -- F1
+       5 => M_AS & "0" & x"04",   -- F3
+       6 => M_AS & "0" & x"03",   -- F5
+       7 => M_AS & "1" & x"72",   -- cursor down
+       8 => M_AS & "0" & x"26",   -- 3
+       9 => M_AS & "0" & x"1D",   -- W
+      10 => M_AS & "0" & x"1C",   -- A
+      11 => M_AS & "0" & x"25",   -- 4
+      12 => M_AS & "0" & x"1A",   -- Z
+      13 => M_AS & "0" & x"1B",   -- S
+      14 => M_AS & "0" & x"24",   -- E
+      15 => M_AS & "0" & x"12",   -- left shift
+      16 => M_AS & "0" & x"2E",   -- 5
+      17 => M_AS & "0" & x"2D",   -- R
+      18 => M_AS & "0" & x"23",   -- D
+      19 => M_AS & "0" & x"36",   -- 6
+      20 => M_AS & "0" & x"21",   -- C
+      21 => M_AS & "0" & x"2B",   -- F
+      22 => M_AS & "0" & x"2C",   -- T
+      23 => M_AS & "0" & x"22",   -- X
+      24 => M_AS & "0" & x"3D",   -- 7
+      25 => M_AS & "0" & x"35",   -- Y
+      26 => M_AS & "0" & x"34",   -- G
+      27 => M_AS & "0" & x"3E",   -- 8
+      28 => M_AS & "0" & x"32",   -- B
+      29 => M_AS & "0" & x"33",   -- H
+      30 => M_AS & "0" & x"3C",   -- U
+      31 => M_AS & "0" & x"2A",   -- V
+      32 => M_AS & "0" & x"46",   -- 9
+      33 => M_AS & "0" & x"43",   -- I
+      34 => M_AS & "0" & x"3B",   -- J
+      35 => M_AS & "0" & x"45",   -- 0
+      36 => M_AS & "0" & x"3A",   -- M
+      37 => M_AS & "0" & x"42",   -- K
+      38 => M_AS & "0" & x"44",   -- O
+      39 => M_AS & "0" & x"31",   -- N
+      40 => M_DOWN & "0" & x"55",   -- +          -> Shift+=
+      41 => M_AS & "0" & x"4D",   -- P
+      42 => M_AS & "0" & x"4B",   -- L
+      43 => M_AS   & "0" & x"4E",   -- -
+      44 => M_AS & "0" & x"49",   -- .
+      45 => M_DOWN & "0" & x"4C",   -- :          -> Shift+;
+      46 => M_DOWN & "0" & x"1E",   -- @          -> Shift+2
+      47 => M_AS & "0" & x"41",   -- ,
+      48 => M_UP   & "0" & x"5D",   -- GBP        -> \
+      49 => M_DOWN & "0" & x"3E",   -- *          -> Shift+8
+      50 => M_UP   & "0" & x"4C",   -- ;
+      51 => M_AS & "1" & x"6C",   -- CLR/HOME   -> Home
+      52 => M_AS & "0" & x"59",   -- right shift
+      53 => M_UP   & "0" & x"55",   -- =
+      54 => M_DOWN & "0" & x"36",   -- arrow up   -> ^ (Shift+6)
+      55 => M_AS & "0" & x"4A",   -- /
+      56 => M_AS & "0" & x"16",   -- 1
+      57 => M_UP   & "0" & x"0E",   -- arrow left -> `
+      58 => M_AS & "0" & x"14",   -- CTRL       -> left Ctrl
+      59 => M_AS & "0" & x"1E",   -- 2
+      60 => M_AS & "0" & x"29",   -- SPACE
+      62 => M_AS & "0" & x"15",   -- Q
+      63 => M_AS & "0" & x"76",   -- RUN/STOP   -> Esc
+      64 => M_AS & "0" & x"7E",   -- NO SCROLL  -> Scroll Lock
+      65 => M_AS & "0" & x"0D",   -- TAB
+      66 => M_AS & "0" & x"11",   -- ALT        -> left Alt
+      68 => M_AS & "0" & x"01",   -- F9
+      69 => M_AS & "0" & x"78",   -- F11
+      71 => M_AS & "0" & x"76",   -- ESC
+      72 => M_AS & "0" & x"58",   -- CAPS LOCK (latched: tapped)
+      73 => M_AS & "1" & x"75",   -- cursor up
+      74 => M_AS & "1" & x"6B",   -- cursor left
+      75 => M_AS & "1" & x"71",   -- RESTORE    -> Delete
       others => C_NONE);   -- 61 MEGA (Fn), 67 HELP (the menu), 70 F13
 
-   -- With Shift, as on the keycaps; the PC sees no Shift while the key is down
+   -- With Shift, as on the keycaps (the keys missing here: as the base table, with the PC's
+   -- Shift); the symbols a PC has and the MEGA65's keycaps lack are on keys whose shifted
+   -- keycap is a graphic: Shift+- _, Shift+@ {, Shift+* }, Shift+GBP |, Shift+arrow up ~
    constant C_SHIFT : t_map := (
-       0 => "1" & x"70",   -- INST       -> Insert
-       3 => "0" & x"0A",   -- F8
-       4 => "0" & x"06",   -- F2
-       5 => "0" & x"0C",   -- F4
-       6 => "0" & x"0B",   -- F6
-      51 => "1" & x"69",   -- CLR        -> End
-      68 => "0" & x"09",   -- F10
-      69 => "0" & x"07",   -- F12
+       0 => M_UP   & "1" & x"70",   -- INST       -> Insert
+       3 => M_UP   & "0" & x"0A",   -- F8
+       4 => M_UP   & "0" & x"06",   -- F2
+       5 => M_UP   & "0" & x"0C",   -- F4
+       6 => M_UP   & "0" & x"0B",   -- F6
+      19 => M_DOWN & "0" & x"3D",   -- 6: &       -> Shift+7
+      24 => M_UP   & "0" & x"52",   -- 7: '
+      27 => M_DOWN & "0" & x"46",   -- 8: (       -> Shift+9
+      32 => M_DOWN & "0" & x"45",   -- 9: )       -> Shift+0
+      35 => M_UP   & "0" & x"45",   -- 0 (no symbol on its keycap)
+      40 => M_DOWN & "0" & x"55",   -- +          -> Shift+=
+      43 => M_DOWN & "0" & x"4E",   -- -: _       -> Shift+-
+      45 => M_UP   & "0" & x"54",   -- :: [
+      46 => M_DOWN & "0" & x"54",   -- @: {       -> Shift+[
+      48 => M_DOWN & "0" & x"5D",   -- GBP: |     -> Shift+\
+      49 => M_DOWN & "0" & x"5B",   -- *: }       -> Shift+]
+      50 => M_UP   & "0" & x"5B",   -- ;: ]
+      51 => M_UP   & "1" & x"69",   -- CLR        -> End
+      53 => M_UP   & "0" & x"55",   -- =
+      54 => M_DOWN & "0" & x"0E",   -- arrow up: ~ -> Shift+`
+      57 => M_UP   & "0" & x"0E",   -- arrow left -> `
+      59 => M_DOWN & "0" & x"52",   -- 2: "       -> Shift+'
+      68 => M_UP   & "0" & x"09",   -- F10
+      69 => M_UP   & "0" & x"07",   -- F12
       others => C_NONE);
 
    -- With MEGA (Fn)
    constant C_FN : t_map := (
-       0 => "1" & x"71",   -- Delete
-       2 => "1" & x"69",   -- End
-       7 => "1" & x"7A",   -- Page Down
-      73 => "1" & x"7D",   -- Page Up
-      74 => "1" & x"6C",   -- Home
+       0 => M_AS & "1" & x"71",   -- Delete
+       2 => M_AS & "1" & x"69",   -- End
+       7 => M_AS & "1" & x"7A",   -- Page Down
+      73 => M_AS & "1" & x"7D",   -- Page Up
+      74 => M_AS & "1" & x"6C",   -- Home
       others => C_NONE);
 
    -- Which table a held key's make came from, so that its break matches
@@ -446,12 +474,19 @@ begin
                rep_on <= '0';
                rep_due <= '0';
                if scan_en = '1' then
-                  if v_var = V_SHIFT and supp = 80 then
+                  -- the PC's Shift as the key wants it, until its release (supp)
+                  if v_code(10 downto 9) = M_UP and supp = 80 then
                      if sent_l = '1' then send_break(C_BASE(K_LSHIFT)); end if;
                      if sent_r = '1' then send_break(C_BASE(K_RSHIFT)); end if;
                      sent_l <= '0';
                      sent_r <= '0';
                      supp   <= v_num;
+                  elsif v_code(10 downto 9) = M_DOWN and supp = 80 then
+                     if sent_l = '0' and sent_r = '0' then
+                        send_make(C_BASE(K_LSHIFT));
+                        sent_l <= '1';
+                     end if;
+                     supp <= v_num;
                   end if;
                   send_make(v_code);
                   if v_num /= K_CTRL and v_num /= K_ALT then
@@ -477,8 +512,18 @@ begin
                if supp = v_num then
                   supp <= 80;
                   if scan_en = '1' then
-                     if phys_l = '1' then send_make(C_BASE(K_LSHIFT)); sent_l <= '1'; end if;
-                     if phys_r = '1' then send_make(C_BASE(K_RSHIFT)); sent_r <= '1'; end if;
+                     if phys_l = '1' and sent_l = '0' then
+                        send_make(C_BASE(K_LSHIFT));
+                     elsif phys_l = '0' and sent_l = '1' then
+                        send_break(C_BASE(K_LSHIFT));
+                     end if;
+                     if phys_r = '1' and sent_r = '0' then
+                        send_make(C_BASE(K_RSHIFT));
+                     elsif phys_r = '0' and sent_r = '1' then
+                        send_break(C_BASE(K_RSHIFT));
+                     end if;
+                     sent_l <= phys_l;
+                     sent_r <= phys_r;
                   end if;
                end if;
             end if;

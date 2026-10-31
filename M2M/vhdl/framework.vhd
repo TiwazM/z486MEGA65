@@ -285,7 +285,8 @@ architecture synthesis of framework is
 
 -- M2M-UPSTREAM rtg-native-modes (Megamiga 2026-10-15): entries 7 and 8 for a core that shows
 -- a framebuffer in its own resolution (original: video_modes_vector(0 to 6))
-constant VIDEO_MODE_VECTOR    : video_modes_vector(0 to 8) := (
+-- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): entry 9
+constant VIDEO_MODE_VECTOR    : video_modes_vector(0 to 9) := (
    C_HDMI_720p_50,        -- HDMI 1280x720   @ 50 Hz
    C_HDMI_720p_60,        -- 1280x720        @ 60 Hz
    C_HDMI_576p_50,        -- PAL 576p in 4:3 @ 50 Hz
@@ -294,7 +295,8 @@ constant VIDEO_MODE_VECTOR    : video_modes_vector(0 to 8) := (
    C_HDMI_720x480p_5994,  -- HDMI 720x480    @ 59.94 Hz
    C_SVGA_800_600_60,     -- SVGA 800x600    @ 60 Hz
    C_SVGA_1024_768_60,    -- VESA 1024x768   @ 60 Hz   (M2M-UPSTREAM rtg-native-modes)
-   C_HDMI_1080p_30);      -- HDMI 1920x1080  @ 30 Hz   (M2M-UPSTREAM rtg-native-modes)
+   C_HDMI_1080p_30,       -- HDMI 1920x1080  @ 30 Hz   (M2M-UPSTREAM rtg-native-modes)
+   C_SVGA_1280_1024_60);  -- VESA 1280x1024  @ 60 Hz   (M2M-UPSTREAM sxga-mode)
 
 signal video_mode : video_modes_t;
 
@@ -500,7 +502,8 @@ begin
          sys_pps_o         => sys_pps
       ); -- i_clk_m2m
 
-   video_mode <= C_HDMI_1080p_30      when qnice_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
+   video_mode <= C_SVGA_1280_1024_60  when qnice_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
+                 C_HDMI_1080p_30      when qnice_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
                  C_SVGA_1024_768_60   when qnice_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                  C_SVGA_800_600_60    when qnice_video_mode_i = C_VIDEO_SVGA_800_60   else
                  C_HDMI_720x480p_5994 when qnice_video_mode_i = C_VIDEO_HDMI_720_5994 else
@@ -942,7 +945,10 @@ begin
          G_FONT_DY               => FONT_DY,
          -- M2M-UPSTREAM line-doubler (AExp 2026-10-10): the core selects the
          -- scandoubler's plain line doubler in its globals.vhd
-         G_VGA_LINEDOUBLER       => VGA_LINEDOUBLER
+         G_VGA_LINEDOUBLER       => VGA_LINEDOUBLER,
+         -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): the interpolators the core
+         -- builds, from its globals.vhd
+         G_ASCAL_MASK            => ASCAL_MASK
       )
       port map (
          -- Input from Core

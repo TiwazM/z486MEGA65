@@ -10,10 +10,13 @@
 --   map, a clock crossing (avm_fifo) and a 64 -> 16 bit width reduction (avm_decrease)
 -- * the SVGA framebuffer shown by ascal from HyperRAM (M2M-UPSTREAM rtg-framebuffer)
 -- * the MEGA65 keyboard as a PS/2 keyboard (pc_keyboard.vhd, ps2_device.vhd)
--- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy) and floppy drive A: from an
---   image file on the SD card (fdd_sd.vhd, through the SD host controller's engine port)
+-- * a mouse on joystick port 1 (an Amiga mouse, or a mouSTer in Amiga mode; F13 is the right
+--   button) as a PS/2 mouse (pc_mouse.vhd, ps2_device.vhd)
+-- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy, hard disk) and the disks from
+--   image files on the SD card (disk_sd.vhd, through the SD host controller's engine port):
+--   floppy drives A: and B:, the hard disk on the first IDE channel
 --
--- Not wired yet: the IDE drives, the PS/2 mouse, joysticks.
+-- Not wired yet: the second IDE channel (CD-ROM), joysticks.
 --
 -- The entity is the Megamiga fork's MEGA65_Core (M2M-UPSTREAM exceptions: floppy, SDRAM,
 -- PMOD, Ethernet pins and the SD engine port are routed into the core), as in pc10-iii.
@@ -330,10 +333,15 @@ architecture synthesis of MEGA65_Core is
 -- scrapes them into osm_const.asm as PC_OSM_*)
 ---------------------------------------------------------------------------------------------
 
-constant C_MENU_FDD_A          : natural := 2;   -- manual load 0 (m2m-rom.asm FDD_PREP)
-constant C_MENU_HDMI_720P     : natural := 7;
-constant C_MENU_HDMI_480P     : natural := 8;
-constant C_MENU_RESET         : natural := 13;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_FDD_A          : natural := 2;   -- manual load 0 (m2m-rom.asm DISK_PREP)
+constant C_MENU_FDD_B          : natural := 3;   -- manual load 1
+constant C_MENU_HDD            : natural := 4;   -- manual load 2
+constant C_MENU_HDMI_720P     : natural := 9;
+constant C_MENU_HDMI_480P     : natural := 10;
+constant C_MENU_HDMI_800      : natural := 11;
+constant C_MENU_HDMI_1024     : natural := 12;
+constant C_MENU_HDMI_1280     : natural := 13;  -- M2M-UPSTREAM sxga-mode
+constant C_MENU_RESET         : natural := 18;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -354,6 +362,10 @@ signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
 -- The SDRAM clock (clk.vhd) and its phase, set from QNICE (C_DEV_PC_CTL, address 1)
 signal main_sdram_clk         : std_logic;
 signal qnice_sdram_ps_target  : std_logic_vector(15 downto 0) := (others => '0');
+signal qnice_l2_on            : std_logic_vector(0 downto 0) := "1";   -- the L2 cache (guest_l2.sv)
+signal main_l2_on             : std_logic_vector(0 downto 0);
+signal main_l2_hits           : std_logic_vector(31 downto 0);
+signal main_l2_misses         : std_logic_vector(31 downto 0);
 signal sdram_ps_pos           : std_logic_vector(15 downto 0);  -- clk_i
 signal qnice_sdram_ps_pos     : std_logic_vector(15 downto 0);
 
@@ -383,8 +395,8 @@ signal main_dbg_snap_cnt      : unsigned(15 downto 0) := (others => '0');
 signal main_dbg_vs_d          : std_logic := '0';
 signal main_dbg_post_last     : std_logic_vector(7 downto 0) := x"00";
 signal main_dbg_post_new      : std_logic;
-signal main_dbg_snap          : std_logic_vector(127 downto 0) := (others => '0');
-signal qnice_dbg_snap         : std_logic_vector(127 downto 0);
+signal main_dbg_snap          : std_logic_vector(255 downto 0) := (others => '0');
+signal qnice_dbg_snap         : std_logic_vector(255 downto 0);
 signal main_dbg_log_wr        : std_logic;
 signal main_dbg_log_entry     : std_logic_vector(9 downto 0);
 signal qnice_dbg_log_q        : std_logic_vector(9 downto 0);
@@ -402,6 +414,15 @@ signal main_kbd_dev_clk       : std_logic;     -- the keyboard's lines
 signal main_kbd_dev_dat       : std_logic;
 signal main_kbd_host_clk      : std_logic;     -- the 8042's lines
 signal main_kbd_host_dat      : std_logic;
+signal main_mouse_tx_valid    : std_logic;
+signal main_mouse_tx_data     : std_logic_vector(7 downto 0);
+signal main_mouse_tx_ready    : std_logic;
+signal main_mouse_rx_valid    : std_logic;
+signal main_mouse_rx_data     : std_logic_vector(7 downto 0);
+signal main_mouse_dev_clk     : std_logic;
+signal main_mouse_dev_dat     : std_logic;
+signal main_mouse_host_clk    : std_logic;
+signal main_mouse_host_dat    : std_logic;
 
 ---------------------------------------------------------------------------------------------
 -- z486's MiSTer DDR3 port (main clock) and its way into HyperRAM (hr clock)
@@ -442,7 +463,7 @@ signal audio_r                : std_logic_vector(15 downto 0);
 signal main_audio             : std_logic_vector(31 downto 0);
 
 ---------------------------------------------------------------------------------------------
--- Drives: the management bus (pc_mgmt.vhd) and floppy A: from the SD card (fdd_sd.vhd)
+-- Drives: the management bus (pc_mgmt.vhd) and the disks from the SD card (disk_sd.vhd)
 ---------------------------------------------------------------------------------------------
 
 signal main_fdd_request       : std_logic_vector(1 downto 0);
@@ -454,26 +475,23 @@ signal main_mgmt_write        : std_logic;
 signal main_mgmt_writedata    : std_logic_vector(15 downto 0);
 signal main_mgmt_readdata     : std_logic_vector(15 downto 0);
 
-signal main_fdd_req           : std_logic;
-signal main_fdd_req_wr        : std_logic;
-signal main_fdd_req_lba       : std_logic_vector(15 downto 0);
-signal main_fdd_buf_addr      : std_logic_vector(8 downto 0);
-signal main_fdd_buf_we        : std_logic;
-signal main_fdd_buf_wd        : std_logic_vector(7 downto 0);
-signal main_fdd_buf_rd        : std_logic_vector(7 downto 0);
+signal main_disk_req          : std_logic;
+signal main_disk_req_wr       : std_logic;
+signal main_disk_req_unit     : std_logic_vector(1 downto 0);
+signal main_disk_req_lba      : std_logic_vector(31 downto 0);
+signal main_disk_buf_addr     : std_logic_vector(8 downto 0);
+signal main_disk_buf_we       : std_logic;
+signal main_disk_buf_wd       : std_logic_vector(7 downto 0);
+signal main_disk_buf_rd       : std_logic_vector(7 downto 0);
 
-signal qnice_fdd_done         : std_logic;
-signal qnice_fdd_done_err     : std_logic;
-signal qnice_fdd_mounted      : std_logic;
-signal qnice_fdd_wp           : std_logic;
-signal qnice_fdd_cyl          : std_logic_vector(7 downto 0);
-signal qnice_fdd_spt          : std_logic_vector(7 downto 0);
-signal qnice_fdd_total        : std_logic_vector(15 downto 0);
-signal qnice_fdd_heads        : std_logic_vector(1 downto 0);
-signal qnice_fdd_gen          : std_logic_vector(3 downto 0);
-signal qnice_fdd_ce           : std_logic;
-signal qnice_fdd_data         : std_logic_vector(15 downto 0);
-signal qnice_fdd_wait         : std_logic;
+signal qnice_disk_done        : std_logic;
+signal qnice_disk_done_err    : std_logic;
+signal qnice_disk_mnt         : std_logic_vector(119 downto 0);
+signal qnice_disk_ce          : std_logic;
+signal qnice_disk_data        : std_logic_vector(15 downto 0);
+signal qnice_disk_wait        : std_logic;
+signal qnice_disk_sel         : std_logic;
+signal qnice_disk_unit        : std_logic_vector(1 downto 0);
 
 component z486_mega65 is
    generic (
@@ -540,6 +558,9 @@ component z486_mega65 is
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
+      l2_enable          : in    std_logic;
+      l2_hits            : out   std_logic_vector(31 downto 0);
+      l2_misses          : out   std_logic_vector(31 downto 0);
       dbg_boot_stage     : out   std_logic_vector(2 downto 0);
       dbg_bios_loaded    : out   std_logic;
       dbg_vga_sig_checked : out  std_logic;
@@ -608,7 +629,7 @@ begin
    eth_txd_o            <= (others => '0');
    eth_txen_o           <= '0';
 
-   -- M2M-UPSTREAM sd-host: the engine port belongs to the floppy (fdd_sd.vhd, below)
+   -- M2M-UPSTREAM sd-host: the engine port belongs to the disks (disk_sd.vhd, below)
 
    -- Expansion port: tristate everything; enabled because of the R5/R6 joystick port 2 bug
    cart_ctrl_oe_o       <= '0';
@@ -754,12 +775,15 @@ begin
          ps2_kbd_data_in    => main_kbd_dev_dat,
          ps2_kbd_clk_out    => main_kbd_host_clk,
          ps2_kbd_data_out   => main_kbd_host_dat,
-         ps2_mouse_clk_in   => '1',            -- no mouse yet: idle lines
-         ps2_mouse_data_in  => '1',
-         ps2_mouse_clk_out  => open,
-         ps2_mouse_data_out => open,
+         ps2_mouse_clk_in   => main_mouse_dev_clk,
+         ps2_mouse_data_in  => main_mouse_dev_dat,
+         ps2_mouse_clk_out  => main_mouse_host_clk,
+         ps2_mouse_data_out => main_mouse_host_dat,
 
          ram_size           => C_RAM_SIZE,
+         l2_enable          => main_l2_on(0),
+         l2_hits            => main_l2_hits,
+         l2_misses          => main_l2_misses,
 
          dbg_boot_stage     => main_dbg_boot_stage,
          dbg_bios_loaded    => main_dbg_bios_loaded,
@@ -776,8 +800,8 @@ begin
          dbg_mem_busy       => main_dbg_mem_busy
       ); -- i_z486
 
-   -- The management bus: MiSTer's ARM side in hardware (CMOS, floppy). Not reset with the
-   -- PC: it configures the CMOS while the PC still waits for its ROMs.
+   -- The management bus: MiSTer's ARM side in hardware (CMOS, floppy, hard disk). Not reset
+   -- with the PC: it configures the CMOS while the PC still waits for its ROMs.
    i_pc_mgmt : entity work.pc_mgmt
       generic map (
          G_CLK_HZ          => CORE_CLK_SPEED
@@ -791,23 +815,19 @@ begin
          mgmt_writedata_o  => main_mgmt_writedata,
          mgmt_readdata_i   => main_mgmt_readdata,
          fdd_request_i     => main_fdd_request,
+         ide_request_i     => main_ide0_request,
          rtc_i             => main_rtc_i,
-         fdd_mounted_i     => qnice_fdd_mounted,
-         fdd_wp_i          => qnice_fdd_wp,
-         fdd_cyl_i         => qnice_fdd_cyl,
-         fdd_spt_i         => qnice_fdd_spt,
-         fdd_total_i       => qnice_fdd_total,
-         fdd_heads_i       => qnice_fdd_heads,
-         fdd_gen_i         => qnice_fdd_gen,
-         sd_req_o          => main_fdd_req,
-         sd_req_wr_o       => main_fdd_req_wr,
-         sd_req_lba_o      => main_fdd_req_lba,
-         sd_done_i         => qnice_fdd_done,
-         sd_err_i          => qnice_fdd_done_err,
-         buf_addr_o        => main_fdd_buf_addr,
-         buf_we_o          => main_fdd_buf_we,
-         buf_wd_o          => main_fdd_buf_wd,
-         buf_rd_i          => main_fdd_buf_rd
+         mnt_i             => qnice_disk_mnt,
+         sd_req_o          => main_disk_req,
+         sd_req_wr_o       => main_disk_req_wr,
+         sd_req_unit_o     => main_disk_req_unit,
+         sd_req_lba_o      => main_disk_req_lba,
+         sd_done_i         => qnice_disk_done,
+         sd_err_i          => qnice_disk_done_err,
+         buf_addr_o        => main_disk_buf_addr,
+         buf_we_o          => main_disk_buf_we,
+         buf_wd_o          => main_disk_buf_wd,
+         buf_rd_i          => main_disk_buf_rd
       ); -- i_pc_mgmt
 
    -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
@@ -846,6 +866,47 @@ begin
          ps2_dat_o  => main_kbd_dev_dat
       ); -- i_ps2_keyboard
 
+   -- A mouse on joystick port 1 as the PC's PS/2 mouse, always there (the BIOS waits for good
+   -- for a mouse that does not answer). Not reset with the PC either.
+   i_pc_mouse : entity work.pc_mouse
+      generic map (
+         G_CLK_HZ        => CORE_CLK_SPEED
+      )
+      port map (
+         clk_i           => main_clk,
+         rst_i           => main_rst,
+         up_n_i          => main_joy_1_up_n_i,
+         down_n_i        => main_joy_1_down_n_i,
+         left_n_i        => main_joy_1_left_n_i,
+         right_n_i       => main_joy_1_right_n_i,
+         fire_n_i        => main_joy_1_fire_n_i,
+         key_num_i       => main_kb_key_num_i,
+         key_pressed_n_i => main_kb_key_pressed_n_i,
+         tx_valid_o      => main_mouse_tx_valid,
+         tx_data_o       => main_mouse_tx_data,
+         tx_ready_i      => main_mouse_tx_ready,
+         rx_valid_i      => main_mouse_rx_valid,
+         rx_data_i       => main_mouse_rx_data
+      ); -- i_pc_mouse
+
+   i_ps2_mouse : entity work.ps2_device
+      generic map (
+         G_PS2_DIV  => CORE_CLK_SPEED / 32_000  -- 16 kHz
+      )
+      port map (
+         clk_i      => main_clk,
+         rst_i      => main_rst,
+         tx_valid_i => main_mouse_tx_valid,
+         tx_data_i  => main_mouse_tx_data,
+         tx_ready_o => main_mouse_tx_ready,
+         rx_valid_o => main_mouse_rx_valid,
+         rx_data_o  => main_mouse_rx_data,
+         ps2_clk_i  => main_mouse_host_clk,
+         ps2_dat_i  => main_mouse_host_dat,
+         ps2_clk_o  => main_mouse_dev_clk,
+         ps2_dat_o  => main_mouse_dev_dat
+      ); -- i_ps2_mouse
+
    -- Debug: every 2^20 clocks (16 ms) a snapshot of the PC's state, still for long enough to
    -- cross to QNICE whole (cdc_stable). The log keeps the last 4096 entries: bits 9..8 say
    -- what bits 7..0 are, 00 a byte of the PC's debug port (the BIOS's port 0x402, the
@@ -868,7 +929,9 @@ begin
          end if;
          if main_dbg_tick = 0 then
             main_dbg_snap_cnt <= main_dbg_snap_cnt + 1;
-            main_dbg_snap <= std_logic_vector(main_dbg_snap_cnt) &
+            main_dbg_snap <= x"000000000000000" & "000" & main_l2_on &
+                             main_l2_misses & main_l2_hits &
+                             std_logic_vector(main_dbg_snap_cnt) &
                              std_logic_vector(main_dbg_vs_cnt) &
                              std_logic_vector(main_dbg_log_cnt) &
                              main_dbg_cpu_eip &
@@ -916,9 +979,20 @@ begin
          q_b        => qnice_dbg_log_q
       ); -- i_dbg_log
 
+   -- The L2 cache's switch into the PC's clock
+   i_cdc_l2_on : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 1
+      )
+      port map (
+         src_data_i => qnice_l2_on,
+         dst_clk_i  => main_clk,
+         dst_data_o => main_l2_on
+      ); -- i_cdc_l2_on
+
    i_cdc_dbg_snap : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE => 128
+         G_DATA_SIZE => 256
       )
       port map (
          src_data_i => main_dbg_snap,
@@ -938,12 +1012,13 @@ begin
 
    ---------------------------------------------------------------------------------------------
    -- z486's DDR3 port in HyperRAM. DDR3 byte 0x3F800000.. (the SVGA framebuffer, 4 MB) is
-   -- HyperRAM 0x400000..0x7FFFFF; everything else (the boot image at 0x300C0000) folds into
-   -- HyperRAM 0x200000..0x3FFFFF. The framework's ascal buffer stays below 0x200000.
+   -- HyperRAM 0x400000..0x7FFFFF; everything else (the boot image at 0x300C0000, all z486 reads
+   -- there) folds into HyperRAM 0x300000..0x3FFFFF. The framework's ascal buffer has the 3 MB
+   -- below 0x300000: three frames of 1 MB, triple buffered.
    ---------------------------------------------------------------------------------------------
 
-   main_hr_addr <= "1"  & main_ddram_addr(18 downto 0) when main_ddram_addr(28 downto 19) = "0011111110" else
-                   "01" & main_ddram_addr(17 downto 0);
+   main_hr_addr <= "1"   & main_ddram_addr(18 downto 0) when main_ddram_addr(28 downto 19) = "0011111110" else
+                   "011" & main_ddram_addr(16 downto 0);
 
    i_avm_fifo_ddram : entity work.avm_fifo
       generic map (
@@ -1033,7 +1108,10 @@ begin
    -- QNICE clock domain: video and audio settings, core devices (none yet)
    ---------------------------------------------------------------------------------------------
 
-   qnice_video_mode_o <= C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
+   qnice_video_mode_o <= C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
+                         C_VIDEO_SVGA_1024_60  when qnice_osm_control_i(C_MENU_HDMI_1024) = '1' else
+                         C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_HDMI_800)  = '1' else
+                         C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
                          C_VIDEO_HDMI_16_9_60;
 
    qnice_dvi_o                <= '0';         -- HDMI with sound
@@ -1044,9 +1122,11 @@ begin
    qnice_audio_filter_o       <= '0';
    qnice_zoom_crop_o          <= '0';
    qnice_osm_cfg_scaling_o    <= (others => '1');
-   qnice_ascal_mode_o         <= "00";
+   qnice_ascal_mode_o         <= "10";        -- sharp bilinear: 720x400 text at x1.2 (480p) or
+                                              -- x1.8 (720p) without uneven strokes, still crisp
    qnice_ascal_polyphase_o    <= '0';
-   qnice_ascal_triplebuf_o    <= '0';
+   qnice_ascal_triplebuf_o    <= '1';         -- whole frames: the PC's 70 Hz text mode on 60 Hz
+                                              -- HDMI tore while the screen changed
    qnice_flip_joyports_o      <= '0';
 
    -- C_DEV_PC_CTL (globals.vhd):
@@ -1055,10 +1135,13 @@ begin
    --                Clearing and setting it resets the PC.
    --    0x0001      the SDRAM clock's phase, signed fine steps from 292.5 degrees (clk.vhd)
    --    0x0002      read: where the phase shift is
+   --    0x0003      bit 0 = the L2 cache is on (guest_l2.sv; default on, switching it on
+   --                empties it first)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
-   --                log count, VGA vsync count, snapshot count
+   --                log count, VGA vsync count, snapshot count; 0x0018..1C the L2's line
+   --                fills from the cache (lo, hi) and from the SDRAM (lo, hi), whether it is on
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    p_qnice_pc_ctl : process (qnice_clk_i)
    begin
@@ -1068,10 +1151,13 @@ begin
                qnice_pc_roms_ok(0) <= qnice_dev_data_i(0);
             elsif qnice_dev_addr_i = x"0000001" then
                qnice_sdram_ps_target <= qnice_dev_data_i;
+            elsif qnice_dev_addr_i = x"0000003" then
+               qnice_l2_on(0) <= qnice_dev_data_i(0);
             end if;
          end if;
          if qnice_rst_i = '1' then
             qnice_pc_roms_ok(0) <= '0';
+            qnice_l2_on(0)      <= '1';
          end if;
       end if;
    end process p_qnice_pc_ctl;
@@ -1081,8 +1167,8 @@ begin
    begin
       v_word := to_integer(unsigned(qnice_dev_addr_i(2 downto 0)));
       qnice_dev_data_o <= x"EEEE";
-      if qnice_dev_id_i = C_DEV_PC_FDD then
-         qnice_dev_data_o <= qnice_fdd_data;
+      if qnice_disk_sel = '1' then
+         qnice_dev_data_o <= qnice_disk_data;
       elsif qnice_dev_id_i = C_DEV_PC_CTL then
          if qnice_dev_addr_i = x"0000000" then
             qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0);
@@ -1090,19 +1176,28 @@ begin
             qnice_dev_data_o <= qnice_sdram_ps_target;
          elsif qnice_dev_addr_i = x"0000002" then
             qnice_dev_data_o <= qnice_sdram_ps_pos;
+         elsif qnice_dev_addr_i = x"0000003" then
+            qnice_dev_data_o <= x"000" & "000" & qnice_l2_on(0);
          elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000010" then
             qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 15 downto 16 * v_word);
+         elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000011" then
+            qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 143 downto 16 * v_word + 128);
          elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
             qnice_dev_data_o <= "000000" & qnice_dbg_log_q;
          end if;
       end if;
    end process p_qnice_dev_data;
-   qnice_dev_wait_o <= qnice_fdd_wait when qnice_dev_id_i = C_DEV_PC_FDD else '0';
+   qnice_dev_wait_o <= qnice_disk_wait when qnice_disk_sel = '1' else '0';
 
-   -- Floppy drive A: from an image file on the SD card (C_DEV_PC_FDD; the firmware mounts it)
-   qnice_fdd_ce <= qnice_dev_ce_i when qnice_dev_id_i = C_DEV_PC_FDD else '0';
+   -- The disks from image files on the SD card: floppy drives A: and B:, the hard disk
+   -- (C_DEV_PC_DISK, _B, _HD: one CSR each; the firmware mounts them)
+   qnice_disk_sel  <= '1' when qnice_dev_id_i = C_DEV_PC_DISK or qnice_dev_id_i = C_DEV_PC_DISK_B or
+                               qnice_dev_id_i = C_DEV_PC_DISK_HD else '0';
+   qnice_disk_unit <= "01" when qnice_dev_id_i = C_DEV_PC_DISK_B else
+                      "10" when qnice_dev_id_i = C_DEV_PC_DISK_HD else "00";
+   qnice_disk_ce   <= qnice_dev_ce_i and qnice_disk_sel;
 
-   i_fdd_sd : entity work.fdd_sd
+   i_disk_sd : entity work.disk_sd
       generic map (
          G_QNICE_HZ    => QNICE_CLK_SPEED
       )
@@ -1111,30 +1206,26 @@ begin
          qnice_rst_i   => qnice_rst_i,
          qnice_addr_i  => qnice_dev_addr_i,
          qnice_data_i  => qnice_dev_data_i,
-         qnice_ce_i    => qnice_fdd_ce,
+         qnice_ce_i    => qnice_disk_ce,
+         qnice_unit_i  => qnice_disk_unit,
          qnice_we_i    => qnice_dev_we_i,
-         qnice_data_o  => qnice_fdd_data,
-         qnice_wait_o  => qnice_fdd_wait,
+         qnice_data_o  => qnice_disk_data,
+         qnice_wait_o  => qnice_disk_wait,
          sd_q2c_i      => sd_eng_i,
          sd_c2q_o      => sd_eng_o,
-         mnt_mounted_o => qnice_fdd_mounted,
-         mnt_wp_o      => qnice_fdd_wp,
-         mnt_cyl_o     => qnice_fdd_cyl,
-         mnt_spt_o     => qnice_fdd_spt,
-         mnt_total_o   => qnice_fdd_total,
-         mnt_heads_o   => qnice_fdd_heads,
-         mnt_gen_o     => qnice_fdd_gen,
-         req_i         => main_fdd_req,
-         req_wr_i      => main_fdd_req_wr,
-         req_lba_i     => main_fdd_req_lba,
-         done_o        => qnice_fdd_done,
-         done_err_o    => qnice_fdd_done_err,
+         mnt_o         => qnice_disk_mnt,
+         req_i         => main_disk_req,
+         req_wr_i      => main_disk_req_wr,
+         req_unit_i    => main_disk_req_unit,
+         req_lba_i     => main_disk_req_lba,
+         done_o        => qnice_disk_done,
+         done_err_o    => qnice_disk_done_err,
          main_clk_i    => main_clk,
-         buf_addr_i    => main_fdd_buf_addr,
-         buf_we_i      => main_fdd_buf_we,
-         buf_wd_i      => main_fdd_buf_wd,
-         buf_rd_o      => main_fdd_buf_rd
-      ); -- i_fdd_sd
+         buf_addr_i    => main_disk_buf_addr,
+         buf_we_i      => main_disk_buf_we,
+         buf_wd_i      => main_disk_buf_wd,
+         buf_rd_o      => main_disk_buf_rd
+      ); -- i_disk_sd
 
    i_cdc_sdram_ps_pos : entity work.cdc_stable
       generic map (

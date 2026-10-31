@@ -9,9 +9,10 @@ routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
 with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
 over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
 0.25 ns (about 65.6 MHz), all inside the CPU. On an R6 the PC boots its BIOS
-from the SD card and boots DOS from a floppy image on the card (FreeDOS 1.4's boot
-floppy: the installer, then the `A:\>` prompt, `DIR`), typed on the MEGA65
-keyboard as the PC's PS/2 keyboard. No hard disks yet.
+from the SD card, typed on the MEGA65 keyboard as the PC's PS/2 keyboard, and
+FreeDOS 1.4 installs from its boot floppies (image files on the card, swapped
+through the menu) onto the IDE hard disk (a 2 GB image file on the card) and
+boots from it.
 
 ## Plan
 
@@ -40,9 +41,14 @@ keyboard as the PC's PS/2 keyboard. No hard disks yet.
   (positive syncs, separate blanks).
 - `CORE/vhdl/mega65.vhd` maps z486's MiSTer DDR3 port into HyperRAM:
   DDR3 `0x3F800000` (the SVGA framebuffer, 4 MB) to HyperRAM `0x400000`, the
-  rest (the boot image at `0x300C0000`) into `0x200000`-`0x3FFFFF`, through
+  rest (the boot image at `0x300C0000`) into `0x300000`-`0x3FFFFF`, through
   `avm_fifo` and `avm_decrease` (64 to 16 bits). ascal shows the framebuffer
-  from HyperRAM (M2M-UPSTREAM rtg-framebuffer).
+  from HyperRAM (M2M-UPSTREAM rtg-framebuffer). Below `0x300000` ascal keeps
+  three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
+  on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
+  changed (a flickering clock, stray lines, the cursor). The scaler
+  interpolates sharp bilinear: the 720x400 text mode scales by 1.2 (480p,
+  720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes uneven.
 - Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
   for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
   MMCM at VCO 1280 MHz.
@@ -53,38 +59,84 @@ keyboard as the PC's PS/2 keyboard. No hard disks yet.
 - BIOS: at startup the firmware (`CORE/m2m-rom/m2m-rom.asm`, `PREP_START`)
   loads `boot1.rom` (VGA BIOS, to `0xC0000`) and `boot0.rom` (system BIOS, to
   `0xF0000`, or `0xE0000` if above 64 KB) from the SD card into the HyperRAM
-  window z486's boot loader copies from (`0x2C0000`, 256 KB, cleared first).
+  window z486's boot loader copies from (`0x3C0000`, 256 KB, cleared first).
   The PC stays in reset until they are in (QNICE device `C_DEV_PC_CTL`,
   `mega65.vhd`). A missing or unreadable ROM stops with a message on screen.
   The framework's own ROM auto-loader is not used: it writes one byte per
   HyperRAM word, and z486 reads the ROMs packed.
+- Firmware space: the QNICE ROM holds 28,286 of its 32,768 words. The FAT32
+  write layer (the Shell's settings file) lives in code banks 0 and 1, 4K-word
+  banks behind the window 0x9000-0x9FFF (Megamiga's code-banks, as in MegaMac),
+  called through `FAR_CALL` stubs; six banks are free.
 - Keyboard: the MEGA65 keyboard is the PC's PS/2 keyboard
   (`CORE/vhdl/pc_keyboard.vhd`, `ps2_device.vhd`): scan code set 2, which the
   PC's 8042 translates to set 1, typematic repeat, and the replies to the
   BIOS's keyboard commands, which MiSTer's ARM side gives there. See
-  [Keyboard](#keyboard). `CORE/sim/run_keyboard.sh` simulates it against
+  [Keyboard](#keyboard).
+- Mouse: an Amiga mouse on joystick port 1, or a USB mouse behind a mouSTer in
+  Amiga mode, is the PC's PS/2 mouse (`CORE/vhdl/pc_mouse.vhd`): its
+  quadrature lines as MegaMac decodes them, the left button on pin 6. The
+  right button (pin 9) is invisible to the MEGA65's paddle circuit (Megamiga
+  measured it), so F13 stands in for it. The mouse answers the BIOS's and the
+  drivers' commands (reset, identify, sample rate, status, ...) like a
+  standard PS/2 mouse, also when nothing is plugged in: the BIOS's mouse
+  functions, which CuteMouse calls, wait for good for a mouse that does not
+  answer. `CORE/sim/run_ps2.sh` simulates the keyboard and the mouse against
   z486's 8042 (`ps2.v`).
-- Floppy A: (`CORE/vhdl/fdd_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
-  serves z486's floppy controller and fills the CMOS through the management
-  bus, is in hardware (`pc_mgmt`): at power-up the CMOS (floppy types,
-  equipment, base memory, checksum, the date and time from the MEGA65's RTC),
-  then insert/eject and the sector requests. `fdd_sd` reads and writes each
-  sector straight in the image file through the SD host controller's engine
-  port (Megamiga's sd-host), with the file's extent map from the firmware
-  (fragmented files are fine). The menu's "Floppy A:" line mounts an image
-  (360K, 720K, 1.2M, 1.44M or 2.88M; writes go to the file); `/z486/floppy.img`
-  is mounted at start-up if it is there, and the BIOS then boots from it.
-  `CORE/sim/run_floppy.sh` simulates it against z486's `floppy.v` and `rtc.v`.
-- Menu: floppy A:, HDMI mode, help, "Reset the PC".
+- Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
+  serves z486's floppy and IDE controllers and fills the CMOS through the
+  management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
+  (equipment, base memory, checksum, the date and time from the MEGA65's RTC);
+  then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
+  requests) and the hard disk, the master of the first IDE channel (`ide.v`:
+  IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
+  types following the images. `disk_sd` reads and writes each sector straight
+  in the image file through the SD host controller's engine port (Megamiga's
+  sd-host), with the file's extent map from the firmware (fragmented files are
+  fine). See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against
+  z486's `floppy.v`, `ide.v` and `rtc.v`.
+- Menu: floppy A:, floppy B:, hard disk, HDMI mode, help, "Reset the PC".
+- HDMI modes: 720p 60 Hz (the PC's 4:3 picture between bars), 480p, 800x600,
+  1024x768 and 1280x1024 at 60 Hz. 1280x1024 is a 5:4 monitor's own
+  resolution: the picture is 1280x960 between bars and the monitor scales
+  nothing, where 480p or 720p are scaled twice (by the core and by the
+  monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
+  CVT-RB) at 90 MHz: VESA's DMT timing needs 108 MHz, at which the HDMI
+  domain misses timing (the menu overlay's blending). The 90 MHz is a new
+  entry in the framework's HDMI clock (M2M-UPSTREAM sxga-mode:
+  `video_out_clock.vhd`, values from Xilinx's MMCM functions; the HDMI
+  domain is timed at it), and the scaler is built without its bicubic and
+  polyphase interpolators (`ASCAL_MASK` in `globals.vhd`), whose DSP paths
+  were the slowest of that domain.
+- L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
+  between the CPU's memory port and the SDRAM, as on a 486 board:
+  direct-mapped, 16-byte lines, write-through. A line fill that hits is
+  answered from the cache; stores update cached lines; floppy and Sound
+  Blaster DMA (the SDRAM's second port) drop their lines before the CPU's
+  next lookup. `tools/qmon.py l2` shows the fills from the cache and from the
+  SDRAM, `l2 off` / `l2 on` switch it for comparisons. `CORE/sim/run_l2.sh`
+  checks it against a memory model with DMA writes and switching. Measured
+  (2026-10-31, the same build): Doom's `-timedemo demo3` 35.7 fps without,
+  36.9 fps with it (+3.5%), 76% of the line fills from the cache: Doom's hot
+  data mostly fits z486's own 8 + 8 KB. Dr. Hardware: average RAM throughput
+  24.5 -> 31.4 MB/s (+28%; blocks between the L1's 16 KB and 256 KB), the
+  minimum (beyond 256 KB) and maximum (within the L1) unchanged, Hardstones
+  26345 -> 27418 (+4%).
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
-  of the PC's state (boot stage, POST code, CS:EIP, VGA frame count) and a
-  4096-entry log of the BIOS's debug port 0x402, z486's stall watchdog,
-  POST code changes and the PS/2 keyboard's bytes both ways; `mega65.vhd` has the map. They are read with the M2M
-  debug monitor over the JTAG adapter's serial port (115200 baud): hold
-  Run/Stop + Cursor Up, then press Help, and run `tools/qmon.py status`
-  (`boot` and `sweep` reset the PC at other SDRAM clock phases).
+  of the PC's state (boot stage, POST code, CS:EIP, VGA frame count, the L2's
+  counters) and a 4096-entry log of the BIOS's debug port 0x402, z486's
+  stall watchdog, POST code changes and the PS/2 keyboard's bytes both ways;
+  `mega65.vhd` has the map. `tools/qmon.py` reads them over the JTAG
+  adapter's serial port (115200 baud) while the PC and the menu run: the
+  firmware answers serial commands in the Shell's background (`R`/`W` QNICE
+  memory, `D`/`P` a device's registers, as MegaMac does), no debug mode
+  needed. `qmon.py status` (`disks` the mounted images, the sector counts and
+  times; `boot` and `sweep` reset the PC at other SDRAM clock phases).
+  `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
+  Cursor Up, then press Help).
 
-Not wired yet: the IDE drives, floppy B:, the PS/2 mouse, joysticks.
+Not wired yet: joysticks, the second IDE channel (a CD-ROM), the MEGA65's own
+floppy drive.
 
 ## SD card
 
@@ -92,6 +144,7 @@ Not wired yet: the IDE drives, floppy B:, the PS/2 mouse, joysticks.
 /z486/boot0.rom    the system BIOS
 /z486/boot1.rom    the VGA BIOS
 /z486/floppy.img   optional: drive A: at start-up (a raw floppy image)
+/z486/hdd.img      optional: the hard disk at start-up (a raw disk image)
 ```
 
 Both come with z486_MiSTer, in
@@ -103,10 +156,49 @@ this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
 
+## Disks
+
+The menu's "Floppy A:", "Floppy B:" and "Hard disk:" lines mount an image file
+from the card, under any name; writes go to the file.
+
+- **Floppies:** raw images of 360K, 720K, 1.2M, 1.44M or 2.88M; the size gives
+  the geometry and the drive type in the CMOS. A floppy mounted while the PC
+  runs is a disk change, as on a real drive, so disks can be swapped during an
+  installation. The PC boots from A: when it holds a floppy, else from the
+  hard disk (z486's default boot order, as on MiSTer).
+- **Hard disk:** a raw image of any whole number of 512-byte sectors, up to
+  4 GB less 512 bytes, the largest file FAT32 holds. The BIOS looks for disks
+  only when the PC starts: after mounting one from the menu, "Reset the PC".
+  It reads the size from IDENTIFY (LBA) and translates for DOS.
+- **Eject:** every folder of the file browser starts with `<No Disk>` (right
+  after `<..>`): choosing it empties the drive. A mount lasts until the
+  MEGA65 is switched off; only `/z486/floppy.img` and `/z486/hdd.img` come
+  back by themselves.
+
+An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
+
+```bash
+mkfile -n 2g hdd.img
+```
+
+Copy it to the card as `/z486/hdd.img`, boot FreeDOS's boot floppy from A:,
+and let the installer partition and format C: (it restarts the PC in between)
+and install, swapping the floppies through the menu's "Floppy A:" line. To
+start from C: afterwards, choose `<No Disk>` for A: and "Reset the PC".
+
+Each sector goes to the card on its own, so writing is slow (DOS without a
+disk cache rewrites the FAT for every file). `tools/qmon.py disks` shows the
+sector counts and the time per sector (`disks clear` zeroes them, `disks
+watch 10` counts sectors per second over 10 seconds).
+
+`tools/floppy-packer.html`, a page that runs in any browser without a server,
+packs files into a FAT12 floppy image of any of the five sizes, with DOS's
+8.3 file names checked.
+
 ## Keyboard
 
-The keys go by their labels, as on a US PC keyboard (Shift+2 is @, as on a
-PC):
+The keys go by their labels: letters and digits as on a PC, the symbols as
+printed on the MEGA65's keycaps:
 
 | MEGA65 | PC |
 |---|---|
@@ -119,11 +211,10 @@ PC):
 | CTRL, ALT, TAB, both shifts | Ctrl, Alt, Tab, Shift |
 | CAPS LOCK | Caps Lock (it latches on the MEGA65: each change taps the PC's) |
 | NO SCROLL | Scroll Lock |
-| `+` and `=` | `=` (with Shift `+`) |
-| `-` `:` `@` `*` `;` `£` | `-` `;` `[` `]` `'` `\` |
-| arrow-left, arrow-up | `` ` `` |
+| symbol keys and shifted digits | as on their keycaps: `:` (Shift `[`), `;` (Shift `]`), `@`, `*`, `+`, `-`, `=`, Shift+2 `"`, Shift+6 `&`, Shift+7 `'`, Shift+8 `(`, Shift+9 `)`, ... (the PC sees Shift pressed or released as each one needs) |
+| PC symbols without a keycap | `£` `\` (Shift `|`), arrow-up `^` (Shift `~`), arrow-left `` ` ``, Shift+`-` `_`, Shift+`@` `{`, Shift+`*` `}` |
 | MEGA | the Fn key above, nothing by itself |
-| F13 | nothing yet |
+| F13 | the mouse's right button (see Mouse above) |
 | HELP | the menu |
 
 ## SDRAM clock
@@ -149,7 +240,8 @@ another R6 can be measured the same way.
 - `ooc/` - out-of-context Vivado builds of the CPU and of `system.sv`
 - `tools/` - `build_r6.sh` (the core's build in Docker), `gen_xpr.py` (the
   project), `z486_sources.py` (the source list and the Vivado 2022.2 copies),
-  `qmon.py` (the debug registers through the M2M debug monitor)
+  `qmon.py` (the debug registers through the M2M debug monitor),
+  `floppy-packer.html` (files into a floppy image, in a browser)
 
 Clone with `git clone --recursive`, or run `git submodule update --init` after
 cloning (z486_MiSTer's own submodules are not needed).
@@ -167,6 +259,8 @@ tools/build_r6.sh impl strong   # the same with place ExtraTimingOpt and a post-
                                 # AggressiveExplore phys_opt pass
 tools/build_r6.sh impl incr  # incremental place and route from CORE/reports/ref/
 tools/build_r6.sh bit        # the last impl's bitstream and core file, CORE/bitstream/z486-R6.cor
+tools/build_r6.sh patch      # firmware only (m2m-rom.asm): the last impl's bitstream with the
+                             # current firmware, in minutes, no synthesis
 ```
 
 `build_r6.sh` regenerates `CORE/CORE-R6.xpr` and the source copies in
@@ -208,22 +302,25 @@ Toolchain notes (Vivado 2022.2):
 
 ## Results so far (XC7A200T-2, Vivado 2022.2)
 
-The whole core at **64 MHz** as it boots on the R6 (BIOS loader, SDRAM clock at
-292.5 degrees, debug registers; incremental from the previous build, CPU
-pblock, `main_clk` over-constrained by 0.3 ns during implementation): **all
-timing constraints met** with **+0.327 ns** on the PC's clock, no failing
-endpoint out of 97,745, hold +0.012 ns, routing complete. 67.1K LUTs (50%),
-33.8K registers, 141.5 block RAM tiles, 86 DSPs.
+The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
+disk, the keyboard, the SDRAM clock at 292.5 degrees, debug registers;
+incremental from the previous build, CPU pblock, `main_clk` over-constrained
+by 0.3 ns during implementation, 18 minutes with synthesis): **all timing
+constraints met** with **+0.377 ns** on the PC's clock, no failing endpoint
+out of 105,449, hold +0.012 ns, routing complete. 73.1K LUTs (54%), 36.8K
+registers, 150.5 block RAM tiles, 86 DSPs.
 
-| Clock | Period | Setup slack | BIOS loader build | Without the over-constraint |
-|---|---|---|---|---|
-| `main_clk` (the PC) | 15.625 ns | **+0.327 ns** (~65.4 MHz) | +0.303 ns | +0.016 ns |
-| `hr_clk` (HyperRAM) | 10.000 ns | +0.179 ns | +0.194 ns | +0.182 ns |
-| `hdmi_clk` | 13.468 ns | +2.032 ns | +1.599 ns | +1.854 ns |
-| `qnice_clk` | 20.000 ns | +0.635 ns | +1.198 ns | +0.999 ns |
-| `pc_audio_clk` | 40.723 ns | +7.496 ns | +8.900 ns | +7.557 ns |
+| Clock | Period | Disks build | First booting build | BIOS loader build | Without the over-constraint |
+|---|---|---|---|---|---|
+| `main_clk` (the PC) | 15.625 ns | **+0.377 ns** (~65.6 MHz) | +0.327 ns | +0.303 ns | +0.016 ns |
+| `hr_clk` (HyperRAM) | 10.000 ns | +0.284 ns | +0.179 ns | +0.194 ns | +0.182 ns |
+| `hdmi_clk` | 13.468 ns | +1.707 ns | +2.032 ns | +1.599 ns | +1.854 ns |
+| `qnice_clk` | 20.000 ns | +0.561 ns | +0.635 ns | +1.198 ns | +0.999 ns |
+| `pc_audio_clk` | 40.723 ns | +3.308 ns | +7.496 ns | +8.900 ns | +7.557 ns |
 
-The debug build before it (a full `impl strong` with the phase still at 180
+The first booting build (the SDRAM clock at 292.5 degrees) had +0.327 ns, out of
+97,745 endpoints, with 67.1K LUTs (50%), 33.8K registers and 141.5 block RAM
+tiles. The debug build before it (a full `impl strong` with the phase still at 180
 degrees) ended at +0.134 ns, short of the 0.3 ns target; the incremental run
 (`impl incr`, 99.97 % of cells and nets reused, 38 minutes with synthesis)
 reached it.

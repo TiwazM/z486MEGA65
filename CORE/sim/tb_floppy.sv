@@ -2,13 +2,14 @@
 
 // z486 for MEGA65
 //
-// Testbench: floppy drive A: from the SD card. z486_MiSTer's floppy.v (the PC's FDC, driven
+// Testbench: floppy drives A: and B: from the SD card. z486_MiSTer's floppy.v (the PC's FDC, driven
 // through its real I/O adapter with DMA, after z486_MiSTer's tests/tb_floppy_io.sv) and rtc.v
-// (the CMOS) against pc_mgmt.vhd (the management bus) and fdd_sd.vhd (the image file through
+// (the CMOS) against pc_mgmt.vhd (the management bus) and disk_sd.vhd (the image file through
 // the SD engine port), with a model of the SD host controller's engine port behind them. The
-// image's extent map has two extents, so the cluster arithmetic is checked; the engine model
+// A: image's extent map has two extents, so the cluster arithmetic is checked (B: has one, with
+// one sector per cluster, at another base); the engine model
 // fails one read once and preempts one write once, so the retries are too. CMOS: the bytes the
-// BIOS reads and their checksum. CORE/sim/run_floppy.sh runs it with xsim.
+// BIOS reads and their checksum. CORE/sim/run_disks.sh runs it with xsim.
 //
 // Licensed under GPL v3
 
@@ -80,15 +81,12 @@ module tb_floppy;
     // The bridge
     // ------------------------------------------------------------------------------------------
     wire sd_req, sd_req_wr, sd_done, sd_err;
-    wire [15:0] sd_req_lba;
+    wire [1:0] sd_req_unit;
+    wire [31:0] sd_req_lba;
     wire [8:0] buf_addr;
     wire buf_we;
     wire [7:0] buf_wd, buf_rd;
-    wire m_mounted, m_wp;
-    wire [7:0] m_cyl, m_spt;
-    wire [15:0] m_total;
-    wire [1:0] m_heads;
-    wire [3:0] m_gen;
+    wire [119:0] mnt;
     // RTC: 12:34:56, 30.10.26, a Friday (MEGA65: 0 = Monday), the update toggle 0
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
 
@@ -96,10 +94,9 @@ module tb_floppy;
         .clk_i(clk), .rst_i(!reset_n),
         .mgmt_address_o(mgmt_address), .mgmt_read_o(mgmt_read), .mgmt_write_o(mgmt_write),
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
-        .fdd_request_i(request), .rtc_i(rtc_word),
-        .fdd_mounted_i(m_mounted), .fdd_wp_i(m_wp), .fdd_cyl_i(m_cyl), .fdd_spt_i(m_spt),
-        .fdd_total_i(m_total), .fdd_heads_i(m_heads), .fdd_gen_i(m_gen),
-        .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_lba_o(sd_req_lba),
+        .fdd_request_i(request), .ide_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
+        .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
+        .sd_req_lba_o(sd_req_lba),
         .sd_done_i(sd_done), .sd_err_i(sd_err),
         .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd)
     );
@@ -111,26 +108,27 @@ module tb_floppy;
     wire q_wait;
     wire [63:0] q2c;
     wire [75:0] c2q;
-    fdd_sd #(.G_QNICE_HZ(50000000)) sd (
+    disk_sd #(.G_QNICE_HZ(50000000)) sd (
         .qnice_clk_i(qclk), .qnice_rst_i(qrst),
-        .qnice_addr_i(q_addr), .qnice_data_i(q_wdata), .qnice_ce_i(q_ce), .qnice_we_i(q_we),
+        .qnice_addr_i(q_addr), .qnice_data_i(q_wdata), .qnice_ce_i(q_ce), .qnice_unit_i(2'b00), .qnice_we_i(q_we),
         .qnice_data_o(q_rdata), .qnice_wait_o(q_wait),
         .sd_q2c_i(q2c), .sd_c2q_o(c2q),
-        .mnt_mounted_o(m_mounted), .mnt_wp_o(m_wp), .mnt_cyl_o(m_cyl), .mnt_spt_o(m_spt),
-        .mnt_total_o(m_total), .mnt_heads_o(m_heads), .mnt_gen_o(m_gen),
-        .req_i(sd_req), .req_wr_i(sd_req_wr), .req_lba_i(sd_req_lba),
+        .mnt_o(mnt),
+        .req_i(sd_req), .req_wr_i(sd_req_wr), .req_unit_i(sd_req_unit), .req_lba_i(sd_req_lba),
         .done_o(sd_done), .done_err_o(sd_err),
         .main_clk_i(clk), .buf_addr_i(buf_addr), .buf_we_i(buf_we), .buf_wd_i(buf_wd),
         .buf_rd_o(buf_rd)
     );
 
     // ------------------------------------------------------------------------------------------
-    // The image: base 1000, 4 sectors per cluster, extents (10, 1) and (50, 1000)
+    // The images: A: base 1000, 4 sectors per cluster, extents (10, 1) and (50, 1000);
+    // B: base 5000, 1 sector per cluster, extent (100, 3000)
     // ------------------------------------------------------------------------------------------
-    function automatic integer blk(input integer lba);
+    function automatic integer blk(input integer drive, input integer lba);
         integer c;
         c = lba / 4;
-        blk = 1000 + ((c == 0) ? 10 : 50 + c - 1) * 4 + lba % 4;
+        if (drive == 1) blk = 5000 + 100 + lba;
+        else            blk = 1000 + ((c == 0) ? 10 : 50 + c - 1) * 4 + lba % 4;
     endfunction
     function automatic [7:0] sdbyte(input integer b, input integer i);
         sdbyte = 8'(b * 7 ^ i ^ (i >> 8) ^ 8'h5a);
@@ -240,7 +238,7 @@ module tb_floppy;
     endtask
 
     // DMA: delayed acknowledgments, terminal count on the last byte (tb_floppy_io.sv)
-    integer dma_count = 0, dma_gap = 0, dma_lba0 = 0, dma_errors = 0;
+    integer dma_count = 0, dma_gap = 0, dma_lba0 = 0, dma_errors = 0, dma_drive = 0;
     bit dma_to_pc = 0;
     always @(negedge clk) begin
         dma_ack = 0; dma_tc = 0;
@@ -248,11 +246,11 @@ module tb_floppy;
             if (dma_gap != 0) dma_gap--;
             else begin
                 if (dma_count >= 1024) $fatal(1, "extra DMA byte");
-                if (dma_to_pc && dma_writedata !== sdbyte(blk(dma_lba0 + dma_count / 512), dma_count % 512)) begin
+                if (dma_to_pc && dma_writedata !== sdbyte(blk(dma_drive, dma_lba0 + dma_count / 512), dma_count % 512)) begin
                     if (dma_errors < 5)
                         $error("DMA byte %0d (LBA %0d): %02x != %02x", dma_count,
                                dma_lba0 + dma_count / 512, dma_writedata,
-                               sdbyte(blk(dma_lba0 + dma_count / 512), dma_count % 512));
+                               sdbyte(blk(dma_drive, dma_lba0 + dma_count / 512), dma_count % 512));
                     dma_errors++;
                 end
                 dma_readdata = pattern((dma_lba0 + dma_count / 512) * 512 + dma_count % 512);
@@ -262,23 +260,23 @@ module tb_floppy;
         end
     end
 
-    // Two sectors on A:, from cylinder 0 head 0 sector s (LBA s - 1)
-    task automatic transfer(input integer s, input bit read_disk);
+    // Two sectors on drive d, from cylinder 0 head 0 sector s (LBA s - 1)
+    task automatic transfer(input integer d, input integer s, input bit read_disk);
         reg [7:0] value;
         integer k;
         dma_to_pc = read_disk;
-        dma_count = 0; dma_lba0 = s - 1;
+        dma_count = 0; dma_lba0 = s - 1; dma_drive = d;
         if (!read_disk) begin
-            expect_write_lba[blk(s - 1)] = s - 1;
-            expect_write_lba[blk(s)] = s;
+            expect_write_lba[blk(d, s - 1)] = s - 1;
+            expect_write_lba[blk(d, s)] = s;
         end
-        write8(16'h3f2, 8'h1c);
-        command_byte(8'h07); command_byte(8'h00);           // recalibrate
+        write8(16'h3f2, d ? 8'h2d : 8'h1c);
+        command_byte(8'h07); command_byte(d[7:0]);          // recalibrate
         wait (irq);
         command_byte(8'h08);
         read8(16'h3f5, value); read8(16'h3f5, value);
         command_byte(read_disk ? 8'h46 : 8'h45);
-        command_byte(8'h00);
+        command_byte(d[7:0]);
         command_byte(0); command_byte(0); command_byte(s[7:0]);
         command_byte(2); command_byte(s[7:0] + 1); command_byte(8'h1b); command_byte(8'hff);
         wait (irq);
@@ -288,7 +286,7 @@ module tb_floppy;
             if (k == 0 && value[7:6] != 0) $fatal(1, "bad ST0 %02x", value);
             if ((k == 1 || k == 2) && value != 0) $fatal(1, "bad ST%0d %02x", k, value);
         end
-        $display("ok    %s LBA %0d-%0d", read_disk ? "read " : "write", s - 1, s);
+        $display("ok    %s %s LBA %0d-%0d", d ? "B:" : "A:", read_disk ? "read " : "write", s - 1, s);
     endtask
 
     integer errors = 0;
@@ -309,9 +307,19 @@ module tb_floppy;
         qwr(28'h0000005, 16'd2);
         qwr(28'h0000006, 16'd80); qwr(28'h0000007, 16'd18); qwr(28'h0000008, 16'd2);
         qwr(28'h0000000, 16'd1);
+        // B:: one extent, one sector per cluster, its map at 2048, its registers at 0x20
+        qwr(28'h0001800, 16'd1);
+        qwr(28'h0001801, 16'd100); qwr(28'h0001802, 16'd0); qwr(28'h0001803, 16'd3000); qwr(28'h0001804, 16'd0);
+        qwr(28'h0000021, 16'd2880); qwr(28'h0000022, 16'd0);
+        qwr(28'h0000023, 16'd5000); qwr(28'h0000024, 16'd0);
+        qwr(28'h0000025, 16'd0);
+        qwr(28'h0000026, 16'd80); qwr(28'h0000027, 16'd18); qwr(28'h0000028, 16'd2);
+        qwr(28'h0000020, 16'd1);
 
         wait (fdd0_inserted);
         $display("ok    A: inserted after %0t", $time);
+        wait (fdc.media_present[1]);
+        $display("ok    B: inserted after %0t", $time);
 
         // the CMOS the BIOS reads
         cmos_rd(7'h10, b10); cmos_rd(7'h14, b14); cmos_rd(7'h15, b15); cmos_rd(7'h16, b16);
@@ -332,13 +340,15 @@ module tb_floppy;
         $display("      CMOS date %02x.%02x.%02x", v, hi, lo);
 
         command_byte(8'h03); command_byte(8'hdf); command_byte(8'h02);   // specify
-        transfer(1, 1);                       // LBA 0-1: the first extent
-        fail_read_blk = blk(4);
-        transfer(5, 1);                       // LBA 4-5: the second extent, one failure
-        transfer(1, 0);                       // write LBA 0-1, preempted once
+        transfer(0, 1, 1);                    // A: LBA 0-1: the first extent
+        fail_read_blk = blk(0, 4);
+        transfer(0, 5, 1);                    // A: LBA 4-5: the second extent, one failure
+        transfer(0, 1, 0);                    // A: write LBA 0-1, preempted once
+        transfer(1, 3, 1);                    // B: LBA 2-3
+        transfer(1, 3, 0);                    // B: write LBA 2-3
         if (dma_errors != 0) begin $error("%0d DMA bytes wrong", dma_errors); errors++; end
         if (write_errors != 0) begin $error("%0d written bytes wrong", write_errors); errors++; end
-        if (eng_reads != 4 || eng_writes != 2) begin
+        if (eng_reads != 6 || eng_writes != 4) begin
             $error("engine: %0d reads, %0d writes", eng_reads, eng_writes); errors++;
         end
         if (errors == 0) $display("PASS: all checks");

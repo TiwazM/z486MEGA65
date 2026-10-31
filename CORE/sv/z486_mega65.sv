@@ -4,6 +4,8 @@
 //   * system.sv (CPU, chipset, VGA/ET4000, OPL3/SB, IDE, floppy) with the same parameters
 //   * split_sdram_backend.sv on the R6's SDRAM (IS42S16320F, 64 MB: sdram_size 2'd2); the R6
 //     has DQM pins, so HAS_DQM = 1 (MiSTer's modules have none)
+//   * a 256 KB second-level cache between the CPU's memory port and the SDRAM (guest_l2.sv,
+//     after MegaMac's), which MiSTer has not
 //   * the SVGA framebuffer descriptor (z486_mister.sv, MISTER_FB / MISTER_FB_PALETTE)
 //   * the audio mix (SB Pro mixer volumes, OPL, speaker; no CMS, CD-DA or MT-32)
 //   * the video stream for M2M: positive syncs (video_cleaner) and separate H/V blanks that
@@ -12,9 +14,8 @@
 // The ddram_* port is MiSTer's DDR3 port (64-bit words, clk_sys): the boot image and the SVGA
 // framebuffer. mega65.vhd maps it into HyperRAM. fb_base_o is still a DDR3 address.
 //
-// The PS/2 keyboard lines come from mega65.vhd (the MEGA65 keyboard). Not wired yet (inputs
-// idle): the mgmt bus of ide.v / floppy.v (no drives until the bridge to the SD card exists),
-// the PS/2 mouse, joysticks.
+// The PS/2 keyboard and mouse lines and the mgmt bus of ide.v / floppy.v come from mega65.vhd.
+// Not wired yet (inputs idle): joysticks.
 
 `default_nettype none
 
@@ -97,6 +98,12 @@ module z486_mega65 #(
 
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
+    // The L2 cache (guest_l2.sv; clk_sys): on (a 0 -> 1 empties it first), and its line fills
+    // from the cache and from the SDRAM
+    input  wire        l2_enable,
+    output wire [31:0] l2_hits,
+    output wire [31:0] l2_misses,
+
     // Debug (clk_sys): system.sv's boot and POST state, the CPU's CS:EIP, and the bytes of its
     // debug port (the BIOS's port 0x402 and the stall watchdog's messages)
     output wire  [2:0] dbg_boot_stage,     // 1 copying, 2-3 reading HyperRAM, 4 copied, 5 running
@@ -149,6 +156,18 @@ wire core_reset = reset_sync[2];
 // ------------------------------------------------------------------------------------------
 
 wire        guest_mem_busy;
+// system.sv's memory port (the CPU's), before the L2 cache
+wire [31:0] cpu_mem0_addr;
+wire [31:0] cpu_mem0_din;
+wire [31:0] cpu_mem0_dout;
+wire        cpu_mem0_resp_valid;
+wire  [3:0] cpu_mem0_be;
+wire  [7:0] cpu_mem0_burstcount;
+wire        cpu_mem0_line_read;
+wire        cpu_mem0_ready;
+wire        cpu_mem0_valid;
+wire        cpu_mem0_write;
+// the SDRAM's port 0, after the L2 cache
 wire [31:0] guest_mem0_addr;
 wire [31:0] guest_mem0_din;
 wire [31:0] guest_mem0_dout;
@@ -168,6 +187,39 @@ wire  [7:0] guest_mem1_burstcount;
 wire        guest_mem1_ready;
 wire        guest_mem1_valid;
 wire        guest_mem1_write;
+
+// The L2 cache between the CPU's port and the SDRAM's port 0; DMA writes (port 1) drop lines
+guest_l2 #(
+    .IDX_BITS(14)                          // 256 KB, 72 block RAM tiles
+) l2 (
+    .clk          (clk_sys),
+    .reset        (core_reset),
+    .enable       (l2_enable),
+    .u_valid      (cpu_mem0_valid),
+    .u_ready      (cpu_mem0_ready),
+    .u_write      (cpu_mem0_write),
+    .u_addr       (cpu_mem0_addr),
+    .u_din        (cpu_mem0_din),
+    .u_be         (cpu_mem0_be),
+    .u_burstcount (cpu_mem0_burstcount),
+    .u_line_read  (cpu_mem0_line_read),
+    .u_dout       (cpu_mem0_dout),
+    .u_resp_valid (cpu_mem0_resp_valid),
+    .d_valid      (guest_mem0_valid),
+    .d_ready      (guest_mem0_ready),
+    .d_write      (guest_mem0_write),
+    .d_addr       (guest_mem0_addr),
+    .d_din        (guest_mem0_din),
+    .d_be         (guest_mem0_be),
+    .d_burstcount (guest_mem0_burstcount),
+    .d_line_read  (guest_mem0_line_read),
+    .d_dout       (guest_mem0_dout),
+    .d_resp_valid (guest_mem0_resp_valid),
+    .dma_we       (guest_mem1_valid && guest_mem1_ready && guest_mem1_write),
+    .dma_addr     (guest_mem1_addr),
+    .hits         (l2_hits),
+    .misses       (l2_misses)
+);
 
 split_sdram_backend #(
     .FREQ(CLK_HZ),
@@ -308,18 +360,18 @@ system #(
     .mgmt_writedata      (mgmt_writedata),
 
     .ext_mem_busy        (guest_mem_busy),
-    .ext_mem0_addr       (guest_mem0_addr),
-    .ext_mem0_din        (guest_mem0_din),
-    .ext_mem0_dout       (guest_mem0_dout),
-    .ext_mem0_resp_valid (guest_mem0_resp_valid),
+    .ext_mem0_addr       (cpu_mem0_addr),
+    .ext_mem0_din        (cpu_mem0_din),
+    .ext_mem0_dout       (cpu_mem0_dout),
+    .ext_mem0_resp_valid (cpu_mem0_resp_valid),
     .ext_mem0_line_dout  (128'd0),
     .ext_mem0_line_resp_valid(1'b0),
-    .ext_mem0_be         (guest_mem0_be),
-    .ext_mem0_burstcount (guest_mem0_burstcount),
-    .ext_mem0_line_read  (guest_mem0_line_read),
-    .ext_mem0_ready      (guest_mem0_ready),
-    .ext_mem0_valid      (guest_mem0_valid),
-    .ext_mem0_write      (guest_mem0_write),
+    .ext_mem0_be         (cpu_mem0_be),
+    .ext_mem0_burstcount (cpu_mem0_burstcount),
+    .ext_mem0_line_read  (cpu_mem0_line_read),
+    .ext_mem0_ready      (cpu_mem0_ready),
+    .ext_mem0_valid      (cpu_mem0_valid),
+    .ext_mem0_write      (cpu_mem0_write),
     .ext_mem1_addr       (guest_mem1_addr),
     .ext_mem1_din        (guest_mem1_din),
     .ext_mem1_dout       (guest_mem1_dout),

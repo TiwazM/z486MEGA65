@@ -32,7 +32,9 @@ entity av_pipeline is
       -- scandoubler doubles the lines with its plain line doubler (needs
       -- video_clk_i >= 2 x the pixel rate of video_ce_i) instead of MiSTer's
       -- Hq2x (needs 4 x). false keeps the original behaviour.
-      G_VGA_LINEDOUBLER       : boolean := false
+      G_VGA_LINEDOUBLER       : boolean := false;
+      -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): see digital_pipeline.vhd
+      G_ASCAL_MASK            : std_logic_vector(7 downto 0) := x"ff"
    );
    port (
       -- From CORE
@@ -823,7 +825,8 @@ begin
          G_VGA_DY            => G_VGA_DY,
          G_FONT_FILE         => G_FONT_FILE,
          G_FONT_DX           => G_FONT_DX,
-         G_FONT_DY           => G_FONT_DY
+         G_FONT_DY           => G_FONT_DY,
+         G_ASCAL_MASK        => G_ASCAL_MASK         -- M2M-UPSTREAM ascal-mask
       )
       port map (
          -- Input from Core (video and audio)

@@ -51,6 +51,9 @@ set impl [get_runs impl_1]
 set place_directive [get_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $impl]
 if {!$finish} {
     reset_run impl_1
+    # reset_run leaves a routed checkpoint of an earlier run behind; a route that fails now
+    # (route_design writes mega65_r6_routed_error.dcp) must not find it and pass as success
+    file delete -force [file join [get_property DIRECTORY $impl] mega65_r6_routed.dcp]
     if {$strong} {
         set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt $impl
     }

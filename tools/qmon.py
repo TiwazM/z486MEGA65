@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-# Drives the QNICE monitor (M2M debug mode: hold Run/Stop + Cursor Up, then press Help) over the
-# MEGA65 JTAG adapter's UART, 115200 8N1, and reads z486's debug registers (C_DEV_PC_CTL,
-# CORE/vhdl/mega65.vhd). QMON_PORT overrides the serial port.
+# Reads z486's debug registers (C_DEV_PC_CTL, CORE/vhdl/mega65.vhd) and the disks' (C_DEV_PC_DISK,
+# disk_sd.vhd) over the MEGA65 JTAG adapter's UART, 115200 8N1, while the Shell and the PC run:
+# through the firmware's serial commands (m2m-rom.asm, HANDLE_CORE_IO: R/W QNICE memory, D/P a
+# device's registers), no debug mode needed. QMON_MONITOR=1 talks to the QNICE monitor of the M2M
+# debug mode instead (hold Run/Stop + Cursor Up, then press Help). QMON_PORT overrides the serial
+# port.
 #
-#   qmon.py CMD...            each CMD is one monitor command typed as is, e.g. "MCFFF40100",
-#                             "MD80008007", "ME8000"; the replies are printed
+#   qmon.py CMD...            each CMD is sent as is (a firmware command such as "R80008",
+#                             or a monitor command in debug mode); the replies are printed
 #   qmon.py status            z486's debug snapshot (C_DEV_PC_CTL 0x10..0x17) and the log
 #   qmon.py boot PHASE [SECS] reset the PC with the SDRAM clock at PHASE fine steps (13.95 ps)
 #                             from 292.5 degrees, wait SECS (default 3), print the status
 #   qmon.py sweep FROM TO STEP [SECS]   boot at each phase, one summary line each
-#   qmon.py fdd               floppy A: (fdd_sd.vhd, C_DEV_PC_FDD): mount registers, statistics
+#   qmon.py disks             the disks (disk_sd.vhd, C_DEV_PC_DISK): mounts, statistics, times
+#   qmon.py l2 [on|off]       the L2 cache: line fills from it and from the SDRAM (rates over
+#                             2 s); on/off switches it (on empties it first)
+#   qmon.py disks clear       zero the disks' statistics
+#   qmon.py disks watch [s]   sectors per second over s seconds (default 10)
 import os, re, sys, termios, time
 
 PORT = os.environ.get("QMON_PORT", "/dev/cu.usbserial-101")
@@ -42,19 +49,42 @@ def read_for(secs, until=b"QMON> "):
     return buf.replace(b"\r", b"").decode("latin-1")
 
 
-def cmd(c):
-    for ch in c.encode():
-        os.write(fd, bytes([ch]))
-        time.sleep(0.004)
-    return read_for(5.0)
+MONITOR = os.environ.get("QMON_MONITOR") == "1"
+cur_dev, cur_win = 0, 0                    # the device window the next D/P command selects
+
+
+def cmd(c, secs=5.0):
+    if MONITOR:                            # the monitor reads keys one at a time
+        for ch in c.encode():
+            os.write(fd, bytes([ch]))
+            time.sleep(0.004)
+    else:                                  # the firmware's UART has a 32-byte FIFO
+        os.write(fd, c.encode())
+    return read_for(secs)
 
 
 def poke(addr, val):
-    cmd("MC%04X%04X" % (addr, val & 0xFFFF))
+    global cur_dev, cur_win
+    if MONITOR:
+        cmd("MC%04X%04X" % (addr, val & 0xFFFF))
+    elif addr == 0xFFF4:                   # M2M$RAMROM_DEV / _4KWIN: for the next D/P
+        cur_dev = val
+    elif addr == 0xFFF5:
+        cur_win = val
+    elif 0x8000 <= addr <= 0x8FFF:
+        cmd("P%04X%04X%04X%04X" % (cur_dev, cur_win, addr, val & 0xFFFF))
+    else:
+        cmd("W%04X%04X" % (addr, val & 0xFFFF))
 
 
 def dump(start, end):
-    out = cmd("MD%04X%04X" % (start, end))
+    n = end - start + 1
+    if MONITOR:
+        out = cmd("MD%04X%04X" % (start, end))
+    elif 0x8000 <= start <= 0x8FFF:
+        out = cmd("D%04X%04X%04X%04X" % (cur_dev, cur_win, start, n), 5.0 + n / 1500)
+    else:
+        out = cmd("R%04X%04X" % (start, n), 5.0 + n / 1500)
     words = {}
     for m in re.finditer(r"^([0-9A-F]{4}): ((?:[0-9A-F]{4} ?)+)", out, re.M):
         base = int(m.group(1), 16)
@@ -127,24 +157,70 @@ def line(s):
              s["cs"], s["eip"], s["logs"], s["vsyncs"]))
 
 
-def fdd():
-    poke(0xFFF4, 0x0101)                   # M2M$RAMROM_DEV = C_DEV_PC_FDD
+def disks():
+    poke(0xFFF4, 0x0101)                   # M2M$RAMROM_DEV = C_DEV_PC_DISK
     poke(0xFFF5, 0x0000)
-    r = dump(0x8000, 0x8008)
-    st = dump(0x8010, 0x8013)
-    print("A: mode %d (%s%s%s)  sectors %d  base %d  shift %d  geometry %d/%d/%d" %
-          (r[0], "mounted" if r[0] & 1 else "empty", ", slot 1" if r[0] & 2 else "",
-           ", write protected" if r[0] & 4 else "", r[2] << 16 | r[1], r[4] << 16 | r[3], r[5],
-           r[6], r[8], r[7]))
-    print("   read %d  written %d  failed %d  last request: %s LBA %d" %
-          (st[0], st[1], st[2], "write" if st[3] & 0x8000 else "read", st[3] & 0x7FFF))
+    for u, name in enumerate(["A:", "B:", "hard disk"]):
+        r = dump(0x8000 + 0x20 * u, 0x8008 + 0x20 * u)
+        geo = "  geometry %d/%d/%d" % (r[6], r[8], r[7]) if u < 2 else ""
+        print("%-9s mode %d (%s%s%s)  sectors %d  base %d  shift %d%s" %
+              (name, r[0], "mounted" if r[0] & 1 else "empty", ", slot 1" if r[0] & 2 else "",
+               ", write protected" if r[0] & 4 else "", r[2] << 16 | r[1], r[4] << 16 | r[3], r[5], geo))
+    st = dump(0x8010, 0x801E)
+    print("sectors read %d  written %d  failed %d  last request: %s %s LBA %d, %d us" %
+          (st[0], st[1], st[2], "write" if st[3] & 0x8000 else "read",
+           ["A:", "B:", "hard disk", "?"][st[3] >> 13 & 3], st[5] << 16 | st[4], st[12]))
+    rd_t, wr_t = st[7] << 16 | st[6], st[10] << 16 | st[9]
+    print("read  average %s us, slowest %d us" % ("%d" % (rd_t // st[0]) if st[0] else "-", st[8]))
+    print("write average %s us, slowest %d us" % ("%d" % (wr_t // st[1]) if st[1] else "-", st[11]))
+    print("tried again after an error %d, after QNICE's own SD access %d" % (st[13], st[14]))
 
 
-os.write(fd, b"\r")
-read_for(1.0)
+def l2(arg):
+    pc_dev()
+    if arg in ("on", "off"):
+        poke(0x8003, 1 if arg == "on" else 0)
+        time.sleep(0.1)
+    a, t0 = dump(0x8018, 0x801C), time.time()
+    time.sleep(2)
+    b, t1 = dump(0x8018, 0x801C), time.time()
+    h0, m0 = a[1] << 16 | a[0], a[3] << 16 | a[2]
+    h1, m1 = b[1] << 16 | b[0], b[3] << 16 | b[2]
+    dt = t1 - t0
+    dh, dm = (h1 - h0) & 0xFFFFFFFF, (m1 - m0) & 0xFFFFFFFF
+    print("L2 cache %s; line fills since the PC's reset: %d from the cache, %d from the SDRAM" %
+          ("on" if b[4] & 1 else "off", h1, m1))
+    print("over %.1f s: %.0f fills/s from the cache, %.0f/s from the SDRAM (%s hits)" %
+          (dt, dh / dt, dm / dt, "%.1f%%" % (100.0 * dh / (dh + dm)) if dh + dm else "-"))
+
+
+def disks_clear():
+    poke(0xFFF4, 0x0101)
+    poke(0xFFF5, 0x0000)
+    poke(0x8010, 0)
+
+
+def disks_watch(secs):
+    poke(0xFFF4, 0x0101)
+    poke(0xFFF5, 0x0000)
+    a, t0 = dump(0x8010, 0x8011), time.time()
+    time.sleep(secs)
+    b, t1 = dump(0x8010, 0x8011), time.time()
+    dt = t1 - t0
+    rd, wr = (b[0] - a[0]) & 0xFFFF, (b[1] - a[1]) & 0xFFFF
+    print("in %.1f s: %d sectors read (%.0f/s, %.0f KB/s), %d written (%.0f/s, %.0f KB/s)" %
+          (dt, rd, rd / dt, rd / dt / 2, wr, wr / dt, wr / dt / 2))
+
+
 args = sys.argv[1:]
-if args and args[0] == "fdd":
-    fdd()
+if args and args[0] == "l2":
+    l2(args[1] if len(args) > 1 else "")
+elif args[:2] == ["disks", "clear"]:
+    disks_clear()
+elif args[:2] == ["disks", "watch"]:
+    disks_watch(float(args[2]) if len(args) > 2 else 10)
+elif args and args[0] == "disks":
+    disks()
 elif args and args[0] == "status":
     s = status()
     print(line(s), " vga_chk %d vga_bad %d sdram_busy %d reset %d snap %d" %

@@ -55,7 +55,7 @@ entity video_out_clock is
           -- 011 =  65.000 MHz. E.g. 1024x768 @ 60 Hz (M2M-UPSTREAM rtg-native-modes; was 148.500 MHz)
           -- 100 =  25.175 MHz. E.g.  640x480 @ 59.94 Hz
           -- 101 =  27.027 MHz. E.g.  720x480 @ 60.00 Hz
-          -- 110 =  74.176 MHz. E.g. 1280x720 @ 59.94 Hz
+          -- 110 =  90.000 MHz. E.g. 1280x1024 @ 59.79 Hz, reduced blanking (M2M-UPSTREAM sxga-mode; was 74.176 MHz)
           -- 111 = undefined
     rsto    : out   std_logic;                    -- output clock synchronous reset
     clko    : out   std_logic;                    -- pixel clock
@@ -345,18 +345,26 @@ begin
           when x"B5" => data := x"4E" & x"9000" & x"66FF";  -- Filter Register 1
           when x"B6" => data := x"CF" & x"0100" & x"666F";  -- Filter Register 2
 
-          -- Desired frequency = 74.176 MHz
-          -- CLKFBOUT_MULT_F   = 22.250
-          -- DIVCLK_DIVIDE     = 3
+          -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): 90 MHz for 1280x1024 @ 59.79 Hz
+          -- with reduced blanking (a 5:4 monitor's own resolution: the scaler is the only one)
+          -- instead of 74.176 MHz, which no video mode used. VESA's own 1280x1024 @ 60 Hz needs
+          -- 108 MHz, at which the HDMI domain (vga_osm's blending, ascal) misses timing by
+          -- 0.6 ns. Values as for the 65 MHz entry: counters by XAPP888's count_calc (the unisim
+          -- MMCME2_ADV model's DRP readback agrees), lock and OPTIMIZED filter from Xilinx's
+          -- clk_wiz_v6_0 mmcm_pll_drp_func_7s_mmcm.vh for M=45 (that file reproduces the filters
+          -- of every entry above), the lock registers written like the M>=37 entries above.
+          -- Desired frequency = 90.000 MHz
+          -- CLKFBOUT_MULT_F   = 45.000
+          -- DIVCLK_DIVIDE     = 5
           -- CLKOUT0_DIVIDE_F  = 2.000
           -- CLKOUT1_DIVIDE    = 10
-          -- Actual frequency  = 74.167 MHz
+          -- Actual frequency  = 90.000 MHz
           when x"C0" => data := x"06" & x"1145" & x"1000";  -- CLKOUT5 Register 1
           when x"C1" => data := x"07" & x"0000" & x"8000";  -- CLKOUT5 Register 2
           when x"C2" => data := x"08" & x"1041" & x"1000";  -- CLKOUT0 Register 1
-          when x"C3" => data := x"09" & x"00C0" & x"8000";  -- CLKOUT0 Register 2
+          when x"C3" => data := x"09" & x"0000" & x"8000";  -- CLKOUT0 Register 2
           when x"C4" => data := x"0A" & x"1145" & x"1000";  -- CLKOUT1 Register 1
-          when x"C5" => data := x"0B" & x"0080" & x"8000";  -- CLKOUT1 Register 2
+          when x"C5" => data := x"0B" & x"0000" & x"8000";  -- CLKOUT1 Register 2
           when x"C6" => data := x"0C" & x"1145" & x"1000";  -- CLKOUT2 Register 1
           when x"C7" => data := x"0D" & x"0000" & x"8000";  -- CLKOUT2 Register 2
           when x"C8" => data := x"0E" & x"1145" & x"1000";  -- CLKOUT3 Register 1
@@ -364,16 +372,16 @@ begin
           when x"CA" => data := x"10" & x"1145" & x"1000";  -- CLKOUT4 Register 1
           when x"CB" => data := x"11" & x"0000" & x"8000";  -- CLKOUT4 Register 2
           when x"CC" => data := x"12" & x"1145" & x"1000";  -- CLKOUT6 Register 1
-          when x"CD" => data := x"13" & x"0C00" & x"8000";  -- CLKOUT6 Register 2
-          when x"CE" => data := x"14" & x"128A" & x"1000";  -- CLKFBOUT Register 1
-          when x"CF" => data := x"15" & x"2C00" & x"8000";  -- CLKFBOUT Register 2
-          when x"D0" => data := x"16" & x"0042" & x"C000";  -- DIVCLK Register
-          when x"D1" => data := x"18" & x"00C2" & x"FC00";  -- Lock Register 1
+          when x"CD" => data := x"13" & x"0000" & x"8000";  -- CLKOUT6 Register 2
+          when x"CE" => data := x"14" & x"1597" & x"1000";  -- CLKFBOUT Register 1
+          when x"CF" => data := x"15" & x"0080" & x"8000";  -- CLKFBOUT Register 2
+          when x"D0" => data := x"16" & x"0083" & x"C000";  -- DIVCLK Register
+          when x"D1" => data := x"18" & x"00FA" & x"FC00";  -- Lock Register 1
           when x"D2" => data := x"19" & x"7C01" & x"8000";  -- Lock Register 2
           when x"D3" => data := x"1A" & x"7DE9" & x"8000";  -- Lock Register 3
           when x"D4" => data := x"28" & x"FFFF" & x"0000";  -- Power Register
-          when x"D5" => data := x"4E" & x"1100" & x"66FF";  -- Filter Register 1
-          when x"D6" => data := x"CF" & x"9000" & x"666F";  -- Filter Register 2
+          when x"D5" => data := x"4E" & x"0800" & x"66FF";  -- Filter Register 1
+          when x"D6" => data := x"CF" & x"8000" & x"666F";  -- Filter Register 2
 
           -- Desired frequency = 40.000 MHz
           -- CLKFBOUT_MULT_F   = 10
@@ -528,16 +536,18 @@ begin
   MMCM: component mmcme2_adv
     generic map (
       bandwidth            => "OPTIMIZED",
-      clkfbout_mult_f      => 37.125, -- f_VCO = (100 MHz / 5) x 37.125 = 742.5 MHz
+      -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): the fastest entry is now 90 MHz
+      -- (1280x1024), so the static configuration is that one (was 74.25 MHz)
+      clkfbout_mult_f      => 45.0,   -- f_VCO = (100 MHz / 5) x 45 = 900 MHz
       clkfbout_phase       => 0.0,
       clkfbout_use_fine_ps => false,
       clkin1_period        => 10.0,   -- INPUT @ 100 MHz
       clkin2_period        => 0.0,
-      clkout0_divide_f     => 2.0,    -- TMDS @ 371.25 MHz
+      clkout0_divide_f     => 2.0,    -- TMDS @ 450 MHz
       clkout0_duty_cycle   => 0.5,
       clkout0_phase        => 0.0,
       clkout0_use_fine_ps  => false,
-      clkout1_divide       => 10,     -- HDMI @ 74.25 MHz
+      clkout1_divide       => 10,     -- HDMI @ 90 MHz
       clkout1_duty_cycle   => 0.5,
       clkout1_phase        => 0.0,
       clkout1_use_fine_ps  => false,

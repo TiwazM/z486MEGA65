@@ -4,7 +4,7 @@
 -- Testbench: the MEGA65 keyboard (pc_keyboard.vhd, ps2_device.vhd) against the PC's keyboard
 -- controller (z486_MiSTer's ps2.v, an 8042 that translates set 2 to set 1). The test plays the
 -- BIOS on ports 0x60/0x64 and a MEGA65 key matrix, and checks the set 1 bytes the PC reads.
--- CORE/sim/run_keyboard.sh runs it with Vivado's xsim.
+-- CORE/sim/run_ps2.sh runs it with Vivado's xsim.
 --
 -- Licensed under GPL v3
 ----------------------------------------------------------------------------------
@@ -276,6 +276,22 @@ begin
 
       key_down(72);   expect("Caps Lock latched: a tap", x"3A" & x"BA");
       key_up(72); expect("Caps Lock unlatched: a tap", x"3A" & x"BA");
+
+      -- The symbols by their keycaps: the PC's Shift pressed or released around the key
+      key_down(45);   expect(": = Shift+;", x"2A" & x"27");
+      key_up(45); expect(": break, Shift break", x"A7" & x"AA");
+      key_down(15);   expect("left shift make", x"2A");
+      key_down(45);   expect("Shift+: = [: shift break, [ make", x"AA" & x"1A");
+      key_up(45); expect("[ break, shift make again", x"9A" & x"2A");
+      key_down(59);   expect("Shift+2 = quote (Shift+'), the shift stays", x"28");
+      key_up(59); expect("quote break", x"A8");
+      key_up(15); expect("left shift break", x"AA");
+      key_down(50);   expect("; = ;", x"27");
+      key_up(50); expect("; break", x"A7");
+      key_down(46);   expect("@ = Shift+2", x"2A" & x"03");
+      key_up(46); expect("@ break, Shift break", x"83" & x"AA");
+      key_down(53);   expect("= = =", x"0D");
+      key_up(53); expect("= break", x"8D");
 
       key_down(0);    expect("INST/DEL = Backspace", x"0E");
       key_up(0);  expect("Backspace break", x"8E");

@@ -26,7 +26,11 @@ entity digital_pipeline is
       G_VGA_DY               : natural;
       G_FONT_FILE            : string;
       G_FONT_DX              : natural;
-      G_FONT_DY              : natural
+      G_FONT_DY              : natural;
+      -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): ascal's MASK, the interpolators
+      -- that are built (bit 0 nearest, 1 bilinear, 2 sharp bilinear, 3 bicubic, 4 polyphase);
+      -- a core that never selects bicubic or polyphase leaves out their long DSP paths
+      G_ASCAL_MASK           : std_logic_vector(7 downto 0) := x"ff"
    );
    port (
       -- Input from Core (video and audio)
@@ -223,7 +227,9 @@ begin
       std_logic_vector(to_unsigned((G_VGA_DX/G_FONT_DX) * 256 + (G_VGA_DY/G_FONT_DY), 16));
 
    -- M2M-UPSTREAM rtg-native-modes (Megamiga 2026-10-15): entries 7 and 8
-   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(8) when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else
+   -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): entry 9
+   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(9) when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else
+                      G_VIDEO_MODE_VECTOR(8) when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else
                       G_VIDEO_MODE_VECTOR(7) when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else
                       G_VIDEO_MODE_VECTOR(6) when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                       G_VIDEO_MODE_VECTOR(5) when hdmi_video_mode_i = C_VIDEO_HDMI_720_5994 else
@@ -251,6 +257,7 @@ begin
    assert G_VIDEO_MODE_VECTOR(6).H_PIXELS <= G_VIDEO_MODE_VECTOR(6).V_PIXELS*4/3;
    assert G_VIDEO_MODE_VECTOR(7).H_PIXELS <= G_VIDEO_MODE_VECTOR(7).V_PIXELS*4/3;  -- M2M-UPSTREAM rtg-native-modes
    assert G_VIDEO_MODE_VECTOR(8).H_PIXELS >= G_VIDEO_MODE_VECTOR(8).V_PIXELS*4/3;  -- M2M-UPSTREAM rtg-native-modes
+   assert G_VIDEO_MODE_VECTOR(9).H_PIXELS <= G_VIDEO_MODE_VECTOR(9).V_PIXELS*4/3;  -- M2M-UPSTREAM sxga-mode
 
    -- In HDMI 4:3 mode, ignore crop (zoom-in).
    -- We are using constants here to avoid that large networks are synthesized.
@@ -264,6 +271,7 @@ begin
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
+                0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 0; -- Not used
 
    hdmi_hmax_base <= hdmi_video_mode.H_PIXELS-1                                               when hdmi_crop_mode_i = '1' else
@@ -276,6 +284,7 @@ begin
                 hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                 hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
+                hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 hdmi_video_mode.H_PIXELS-1; -- Not used
 
    hdmi_vmin_base <= 0                                                                        when hdmi_crop_mode_i = '1' else
@@ -288,6 +297,7 @@ begin
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
+                (G_VIDEO_MODE_VECTOR(9).V_PIXELS-G_VIDEO_MODE_VECTOR(9).H_PIXELS*3/4)/2   when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 0; -- Not used
 
    hdmi_vmax_base <= hdmi_video_mode.V_PIXELS-1                                               when hdmi_crop_mode_i = '1' else
@@ -300,6 +310,7 @@ begin
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
+                (G_VIDEO_MODE_VECTOR(9).V_PIXELS+G_VIDEO_MODE_VECTOR(9).H_PIXELS*3/4)/2   when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 hdmi_video_mode.V_PIXELS-1; -- Not used
 
    -- M2M-UPSTREAM screen-center: expose the ascal-measured input size (also
@@ -398,7 +409,7 @@ begin
 
    i_ascal : entity work.ascal
       generic map (
-         MASK      => x"ff",
+         MASK      => unsigned(G_ASCAL_MASK),    -- M2M-UPSTREAM ascal-mask (was x"ff")
          RAMBASE   => (others => '0'),
 
          -- ascal needs an input buffer according to this formula: dx * dy * 3 bytes (RGB) per pixel and then rounded up

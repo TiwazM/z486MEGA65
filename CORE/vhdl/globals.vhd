@@ -27,8 +27,9 @@ constant QNICE_FIRMWARE_M2M       : string  := "../../../CORE/m2m-rom/m2m-rom.ro
 -- Select firmware here
 constant QNICE_FIRMWARE           : string  := QNICE_FIRMWARE_M2M;
 
--- Megamiga fork (M2M-UPSTREAM code-banks): no code banks yet
-constant QNICE_CODE_BANKS         : string  := "";
+-- Megamiga fork (M2M-UPSTREAM code-banks): the code bank ROM behind the window 0x9000-0x9FFF
+-- (m2m-rom.asm: the FAT32 write layer, banks 0 and 1; make_rom.sh writes the image)
+constant QNICE_CODE_BANKS         : string  := "../../../CORE/m2m-rom/m2m-banks.rom";
 
 ----------------------------------------------------------------------------------------------------------
 -- Clock Speed(s)
@@ -55,6 +56,11 @@ constant VGA_DY               : natural := 480;
 -- for the analog 15 kHz path (M2M-UPSTREAM line-doubler).
 constant VGA_LINEDOUBLER      : boolean := true;
 
+-- The scaler's interpolators that are built (M2M-UPSTREAM ascal-mask; bit 0 nearest, 1 bilinear,
+-- 2 sharp bilinear, 3 bicubic, 4 polyphase): z486 uses sharp bilinear (mega65.vhd), and bicubic's
+-- DSP paths were the HDMI clock's slowest, too slow for the 90 MHz of 1280x1024
+constant ASCAL_MASK           : std_logic_vector(7 downto 0) := x"07";
+
 --    FONT_*  size of one OSM character (the 8x8 strike, rendered as 16x16 cells)
 constant FONT_FILE            : string  := "../font/Anikki-8x8-m2m.rom";
 constant FONT_DX              : natural := 16;
@@ -69,9 +75,9 @@ constant VRAM_ADDR_WIDTH      : natural := f_log2(CHAR_MEM_SIZE);
 ----------------------------------------------------------------------------------------------------------
 -- HyperRAM memory map (in units of 4kW)
 --
--- Byte addresses: 0x000000-0x1FFFFF the framework (ascal's buffer), 0x200000-0x3FFFFF z486's
--- DDR3 window (boot image at 0x2C0000), 0x400000-0x7FFFFF z486's SVGA framebuffer
--- (mega65.vhd maps the DDR3 port)
+-- Byte addresses: 0x000000-0x2FFFFF the framework (ascal's buffer: three 1 MB frames, triple
+-- buffered), 0x300000-0x3FFFFF z486's DDR3 window (boot image at 0x3C0000), 0x400000-0x7FFFFF
+-- z486's SVGA framebuffer (mega65.vhd maps the DDR3 port)
 ----------------------------------------------------------------------------------------------------------
 
 constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     -- Reserved for the M2M framework
@@ -84,9 +90,13 @@ constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     --
 -- ROMs are in HyperRAM (m2m-rom.asm, PREP_START); until QNICE sets it, the PC stays in reset.
 constant C_DEV_PC_CTL         : std_logic_vector(15 downto 0) := x"0100";
 
--- Floppy drive A: (fdd_sd.vhd has the register map): the image file's extent map and size,
--- written by m2m-rom.asm (FDD_PREP); window 0xFFFF answers the Shell's manual load
-constant C_DEV_PC_FDD         : std_logic_vector(15 downto 0) := x"0101";
+-- The disks, floppy drives A: and B: and the hard disk (disk_sd.vhd has the register map): the
+-- image files' extent maps and sizes, written by m2m-rom.asm (DISK_PREP). One device per drive
+-- for the Shell's manual loads: each has its own CSR in window 0xFFFF (the Shell takes a line
+-- as loaded while its device's CSR says so); the other windows are the same for all three.
+constant C_DEV_PC_DISK        : std_logic_vector(15 downto 0) := x"0101";   -- A:
+constant C_DEV_PC_DISK_B      : std_logic_vector(15 downto 0) := x"0102";
+constant C_DEV_PC_DISK_HD     : std_logic_vector(15 downto 0) := x"0103";
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System: not used
@@ -100,8 +110,9 @@ constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 ----------------------------------------------------------------------------------------------------------
 -- System for handling simulated cartridges and ROM loaders. The framework's auto-loader writes
 -- one byte per HyperRAM word; z486 reads its BIOS ROMs packed, so m2m-rom.asm loads them itself
--- (PREP_START). Manual load 0 is the menu's "Floppy A:" line: the file browser, then FDD_PREP
--- mounts the image (the Shell streams nothing into the device).
+-- (PREP_START). Manual loads 0, 1 and 2 are the menu's "Floppy A:", "Floppy B:" and "Hard disk:"
+-- lines (the same device three times, so that the Shell tells them apart): the file browser,
+-- then DISK_PREP mounts the image (the Shell streams nothing into the device).
 ----------------------------------------------------------------------------------------------------------
 
 type crtrom_buf_array is array(natural range<>) of std_logic_vector;
@@ -117,8 +128,10 @@ constant C_CRTROMTYPE_SDRAM      : std_logic_vector(15 downto 0) := x"0002";
 constant C_CRTROMTYPE_MANDATORY  : std_logic_vector(15 downto 0) := x"0003";
 constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 
-constant C_CRTROMS_MAN_NUM       : natural := 1;
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_PC_FDD,
+constant C_CRTROMS_MAN_NUM       : natural := 3;
+constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK_B,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK_HD,
                                                          x"EEEE");
 
 constant C_CRTROMS_AUTO_NUM      : natural := 0;

@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Floppy Packer: builds DOS floppy images (FAT12) in the browser. Open this file in a
+     browser; it saves the .img directly. Licensed under GPL v3, part of z486 for MEGA65. -->
+<title>Floppy Packer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a work surface (files and their DOS names) beside the disk itself (format, label,
+   space, cluster map, save), stacking on a phone. */
+:root {
+  --bg: #e9edf3;          /* cool grey, a little toward the cobalt */
+  --panel: #ffffff;
+  --ink: #18202e;
+  --muted: #586378;
+  --line: #d3dae5;
+  --accent: #2346c4;      /* a 3.5" disk's cobalt shell */
+  --accent-ink: #ffffff;
+  --accent-soft: #dfe6fb;
+  --system: #8a96ab;      /* boot sector, FATs, root directory */
+  --ok: #2c7a4b;
+  --warn: #9a5a00;
+  --bad: #be2f27;
+  --label: #fbfaf4;       /* the paper label on the disk */
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131a; --panel: #161c26; --ink: #e5e9f1; --muted: #95a0b4; --line: #283141;
+    --accent: #7d97ff; --accent-ink: #0d1220; --accent-soft: #1f2a4a; --system: #5b6578;
+    --ok: #5cc28a; --warn: #e2a345; --bad: #ff6f63; --label: #1d2330;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f131a; --panel: #161c26; --ink: #e5e9f1; --muted: #95a0b4; --line: #283141;
+  --accent: #7d97ff; --accent-ink: #0d1220; --accent-soft: #1f2a4a; --system: #5b6578;
+  --ok: #5cc28a; --warn: #e2a345; --bad: #ff6f63; --label: #1d2330;
+  color-scheme: dark;
+}
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px;
+  line-height: 1.5;
+}
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px;
+  display: grid; gap: 20px;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 30px; letter-spacing: 0.01em;
+  margin: 0; text-wrap: balance;
+}
+header p { margin: 0; color: var(--muted); max-width: 62ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px; display: grid; gap: 14px; min-width: 0;
+}
+h2 {
+  font-family: var(--font-display); font-weight: 600; font-size: 13px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); margin: 0;
+}
+.mono { font-family: var(--font-data); }
+button, .btn {
+  font: inherit; font-weight: 500; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); padding: 7px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+button.link { border: none; padding: 0; background: none; color: var(--accent); text-decoration: underline; }
+input[type="text"] {
+  font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; min-width: 0;
+}
+
+/* drop zone */
+.drop {
+  border: 2px dashed var(--line); border-radius: 10px; padding: 18px; display: flex;
+  flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop strong { display: block; font-size: 16px; }
+.drop span { color: var(--muted); font-size: 13px; }
+.drop .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* the file table */
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th {
+  text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.06em; padding: 0 8px 8px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.orig { min-width: 160px; overflow-wrap: anywhere; }
+td.orig .ind { display: inline-block; }
+td.dos input { width: 9.5em; font-family: var(--font-data); text-transform: uppercase; }
+td.dos input.invalid { border-color: var(--bad); }
+.folder { font-weight: 600; }
+.chip {
+  display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+  white-space: nowrap; border: 1px solid currentColor;
+}
+.chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+td .x { border: none; background: none; color: var(--muted); padding: 2px 6px; font-size: 16px; }
+td .x:hover { color: var(--bad); }
+.note { color: var(--muted); font-size: 13px; margin: 0; }
+.msg { font-size: 13px; margin: 0; }
+.msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+.examples {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; font-size: 13px;
+}
+.empty { color: var(--muted); text-align: center; padding: 18px 0; }
+
+/* the disk */
+.formats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.formats button { padding: 6px 0; font-family: var(--font-data); font-size: 13px; }
+.formats button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.geo { font-size: 13px; color: var(--muted); margin: 0; white-space: pre-line; }
+.disklabel {
+  background: var(--label); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  display: grid; gap: 4px;
+}
+.disklabel label { font-size: 12px; color: var(--muted); }
+.disklabel input { font-family: var(--font-data); text-transform: uppercase; background: transparent; border: none; border-bottom: 1px dashed var(--line); border-radius: 0; padding: 4px 0; font-size: 18px; letter-spacing: 0.08em; }
+.space { display: grid; gap: 6px; }
+.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width 0.2s; }
+.bar.over > div { background: var(--bad); }
+.space .figures { display: flex; justify-content: space-between; font-size: 13px; font-variant-numeric: tabular-nums; }
+canvas { width: 100%; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.save { display: grid; gap: 8px; }
+.save .row { display: flex; gap: 8px; align-items: center; }
+.save .row input { flex: 1; font-family: var(--font-data); }
+.howto { font-size: 13px; color: var(--muted); margin: 0; }
+.howto b { color: var(--ink); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Floppy Packer</h1>
+    <p>Builds a DOS floppy image (FAT12) from your files, with the 8.3 names DOS will show.</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="files-h">
+      <h2 id="files-h">Files</h2>
+      <div class="drop" id="drop">
+        <div>
+          <strong>Drop files or folders here</strong>
+          <span>Folders keep their structure. macOS extras (.DS_Store, ._ files) are left out.</span>
+        </div>
+        <div class="buttons">
+          <button type="button" id="add-files">Add files</button>
+          <button type="button" id="add-folder">Add folder</button>
+        </div>
+        <input type="file" id="pick-files" multiple hidden>
+        <input type="file" id="pick-folder" webkitdirectory multiple hidden>
+      </div>
+      <div class="examples" id="examples" hidden>
+        <span>These are example files, so you can see how names change. Add your own to replace them.</span>
+        <button type="button" class="link" id="clear-examples">Remove examples</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Name on your computer</th><th>DOS name</th><th class="num">Size</th><th class="num">Clusters</th><th>Status</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="note" id="skipped" hidden></p>
+    </section>
+
+    <aside class="panel" aria-labelledby="disk-h">
+      <h2 id="disk-h">Disk</h2>
+      <div class="formats" role="group" aria-label="Disk size" id="formats"></div>
+      <p class="geo mono" id="geo"></p>
+      <div class="disklabel">
+        <label for="label">Volume label (up to 11 characters)</label>
+        <input type="text" id="label" maxlength="11" value="MYDISK" autocomplete="off" spellcheck="false">
+        <p class="msg bad" id="label-msg" hidden></p>
+      </div>
+      <div class="space">
+        <div class="bar" id="bar"><div></div></div>
+        <div class="figures"><span id="used"></span><span id="free"></span></div>
+        <p class="note mono" id="rootcount"></p>
+      </div>
+      <canvas id="map" height="120" aria-label="Cluster map of the disk"></canvas>
+      <div class="legend"><span><i style="background: var(--system)"></i>Boot, FATs, root</span><span><i style="background: var(--accent)"></i>Your files</span><span><i style="background: var(--line)"></i>Free</span></div>
+      <div class="save">
+        <div class="row">
+          <input type="text" id="imgname" value="mydisk" autocomplete="off" spellcheck="false" aria-label="Image file name">
+          <span class="mono">.img</span>
+        </div>
+        <button type="button" class="primary" id="save">Save image</button>
+        <p class="msg" id="save-msg" hidden></p>
+        <p class="howto" id="save-how"></p>
+      </div>
+      <p class="howto"><b>On the MEGA65 (z486):</b> copy the .img to the SD card, then press Help, pick <b>Floppy B:</b> (or A:) and choose the file. DOS sees the disk change at once.</p>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* CORE BEGIN: FAT12 floppy images, no browser APIs (tested on its own) */
+const FORMATS = [
+  { id: "360",  name: "360K",  sectors: 720,  spc: 2, root: 112, fat: 2, media: 0xFD, spt: 9,  heads: 2, cyl: 40 },
+  { id: "720",  name: "720K",  sectors: 1440, spc: 2, root: 112, fat: 3, media: 0xF9, spt: 9,  heads: 2, cyl: 80 },
+  { id: "1200", name: "1.2M",  sectors: 2400, spc: 1, root: 224, fat: 7, media: 0xF9, spt: 15, heads: 2, cyl: 80 },
+  { id: "1440", name: "1.44M", sectors: 2880, spc: 1, root: 224, fat: 9, media: 0xF0, spt: 18, heads: 2, cyl: 80 },
+  { id: "2880", name: "2.88M", sectors: 5760, spc: 2, root: 240, fat: 9, media: 0xF0, spt: 36, heads: 2, cyl: 80 },
+];
+function layout(f) {
+  const rootSectors = f.root * 32 / 512;
+  const dataStart = 1 + 2 * f.fat + rootSectors;
+  return { rootSectors, dataStart, clusters: Math.floor((f.sectors - dataStart) / f.spc), clusterBytes: f.spc * 512 };
+}
+
+// 8.3 names: the characters DOS allows, Windows-style ~N tails for names that had to change
+const NAME_OK = /^[A-Z0-9!#$%&'()\-@^_`{}~]+$/;
+const RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/;
+function cleanPart(s) {
+  let lossy = false, out = "";
+  for (const ch of s.toUpperCase()) {
+    if (ch === " ") { lossy = true; continue; }
+    if (/[A-Z0-9!#$%&'()\-@^_`{}~]/.test(ch)) out += ch; else { out += "_"; lossy = true; }
+  }
+  return { out, lossy };
+}
+function splitName(name) {
+  let n = name.replace(/^\.+/, "");
+  const dot = n.lastIndexOf(".");
+  let base = dot > 0 ? n.slice(0, dot) : n, ext = dot > 0 ? n.slice(dot + 1) : "";
+  const lossyDots = base.includes(".");
+  base = base.replace(/\./g, "");
+  return { base, ext, lossyDots, leading: n !== name };
+}
+// The name DOS would get, unique among `taken` (a Set of upper-case names)
+function shortName(name, taken) {
+  const p = splitName(name);
+  const b = cleanPart(p.base), e = cleanPart(p.ext);
+  let base = b.out || "_", ext = e.out.slice(0, 3);
+  let lossy = b.lossy || e.lossy || p.lossyDots || p.leading || base.length > 8 || e.out.length > 3;
+  if (RESERVED.test(base)) base = base + "_";      // CON.TXT: a device name, CON_.TXT: a file
+  const full = (bb) => bb + (ext ? "." + ext : "");
+  if (!lossy && !taken.has(full(base))) return full(base);
+  for (let n = 1; n < 1000000; n++) {
+    const tail = "~" + n;
+    const cand = full(base.slice(0, 8 - tail.length) + tail);
+    if (!taken.has(cand)) return cand;
+  }
+  return full(base.slice(0, 8));
+}
+function validDos(name) {
+  const m = /^([^.]{1,8})(?:\.([^.]{1,3}))?$/.exec(name);
+  return !!m && NAME_OK.test(m[1]) && (!m[2] || NAME_OK.test(m[2])) && !RESERVED.test(m[1]);
+}
+function validLabel(label) { return /^[A-Z0-9!#$%&'()\-@^_`{}~ ]{0,11}$/.test(label) && !/^ /.test(label); }
+
+// The space a tree needs: a node is {dos, dir, children, size}
+function clustersFor(node, cb) {
+  if (node.dir) return Math.max(1, Math.ceil((node.children.length + 2) * 32 / cb));
+  return Math.ceil(node.size / cb);
+}
+function tally(children, cb) {
+  let total = 0;
+  for (const c of children) {
+    total += clustersFor(c, cb);
+    if (c.dir) total += tally(c.children, cb);
+  }
+  return total;
+}
+
+function dosTime(d) { return (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1); }
+function dosDate(d) {
+  const y = Math.min(Math.max(d.getFullYear(), 1980), 2107);
+  return ((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+}
+
+// The image. `children` is the root's list; files carry `data` (Uint8Array, length = size)
+// and `mtime` (Date). Clusters are given out in order, each file and folder contiguous.
+function buildImage(f, label, children, now, serial) {
+  const L = layout(f), cb = L.clusterBytes;
+  const img = new Uint8Array(f.sectors * 512);
+  const w16 = (o, v) => { img[o] = v & 255; img[o + 1] = (v >> 8) & 255; };
+  const w32 = (o, v) => { w16(o, v & 0xFFFF); w16(o + 2, (v >>> 16) & 0xFFFF); };
+  const str = (o, s, n) => { for (let i = 0; i < n; i++) img[o + i] = i < s.length ? s.charCodeAt(i) : 32; };
+
+  // boot sector: BPB and a stub that says the disk does not boot
+  img.set([0xEB, 0x3C, 0x90], 0);
+  str(3, "MSDOS5.0", 8);
+  w16(11, 512); img[13] = f.spc; w16(14, 1); img[16] = 2; w16(17, f.root); w16(19, f.sectors);
+  img[21] = f.media; w16(22, f.fat); w16(24, f.spt); w16(26, f.heads); w32(28, 0); w32(32, 0);
+  img[36] = 0; img[37] = 0; img[38] = 0x29; w32(39, serial >>> 0);
+  str(43, label || "NO NAME", 11); str(54, "FAT12", 8);
+  const code = [0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0xFB, 0xBE, 0x60, 0x7C,
+                0xAC, 0x08, 0xC0, 0x74, 0x09, 0xB4, 0x0E, 0xBB, 0x07, 0x00, 0xCD, 0x10, 0xEB, 0xF2,
+                0x31, 0xC0, 0xCD, 0x16, 0xCD, 0x19];
+  img.set(code, 0x3E);
+  const msg = "This disk does not boot. Press a key to try again.\r\n";
+  for (let i = 0; i < msg.length; i++) img[0x60 + i] = msg.charCodeAt(i);
+  img[510] = 0x55; img[511] = 0xAA;
+
+  // FAT (both copies written at the end)
+  const fat = new Uint8Array(f.fat * 512);
+  const setFat = (n, v) => {
+    const o = Math.floor(n * 3 / 2);
+    if (n & 1) { fat[o] = (fat[o] & 0x0F) | ((v & 0x0F) << 4); fat[o + 1] = (v >> 4) & 0xFF; }
+    else { fat[o] = v & 0xFF; fat[o + 1] = (fat[o + 1] & 0xF0) | ((v >> 8) & 0x0F); }
+  };
+  setFat(0, 0xF00 | f.media); setFat(1, 0xFFF);
+  let next = 2;
+  const alloc = (n) => {
+    if (n === 0) return 0;
+    const first = next;
+    for (let i = 0; i < n; i++) setFat(first + i, i === n - 1 ? 0xFFF : first + i + 1);
+    next += n;
+    return first;
+  };
+  const clusterOffset = (c) => (L.dataStart + (c - 2) * f.spc) * 512;
+
+  const entry = (o, name11, attr, cluster, size, d) => {
+    str(o, name11, 11); img[o + 11] = attr;
+    w16(o + 14, dosTime(d)); w16(o + 16, dosDate(d)); w16(o + 18, dosDate(d));
+    w16(o + 22, dosTime(d)); w16(o + 24, dosDate(d)); w16(o + 26, cluster); w32(o + 28, size);
+  };
+  const name11 = (dos) => {
+    const [b, e = ""] = dos.split(".");
+    return b.padEnd(8, " ") + e.padEnd(3, " ");
+  };
+
+  // a directory's entries at offset `o` (root: fixed area; others: their clusters)
+  const writeDir = (list, o, self, parent, d) => {
+    if (self) { entry(o, ".          ", 0x10, self, 0, d); entry(o + 32, "..         ", 0x10, parent, 0, d); o += 64; }
+    for (const c of list) {
+      const cl = alloc(clustersFor(c, cb));
+      const t = c.mtime || now;
+      if (c.dir) {
+        entry(o, name11(c.dos), 0x10, cl, 0, t);
+        writeDir(c.children, clusterOffset(cl), cl, self, t);
+      } else {
+        entry(o, name11(c.dos), 0x20, cl, c.size, t);
+        if (c.size) img.set(c.data, clusterOffset(cl));
+      }
+      o += 32;
+    }
+  };
+  const rootOff = (1 + 2 * f.fat) * 512;
+  let ro = rootOff;
+  if (label) { entry(ro, label.padEnd(11, " "), 0x08, 0, 0, now); ro += 32; }
+  writeDir(children, ro, 0, 0, now);
+  img.set(fat, 512);
+  img.set(fat, 512 + f.fat * 512);
+  return img;
+}
+
+// A zip with one stored (uncompressed) file
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipOne(name, data, d) {
+  const nb = Array.from(name, (ch) => ch.charCodeAt(0) & 255);
+  const crc = crc32(data), t = dosTime(d), dt = dosDate(d);
+  const lh = new Uint8Array(30 + nb.length), ch = new Uint8Array(46 + nb.length), end = new Uint8Array(22);
+  const dv = (a) => new DataView(a.buffer);
+  let v = dv(lh);
+  v.setUint32(0, 0x04034b50, true); v.setUint16(4, 20, true); v.setUint16(6, 0, true); v.setUint16(8, 0, true);
+  v.setUint16(10, t, true); v.setUint16(12, dt, true); v.setUint32(14, crc, true);
+  v.setUint32(18, data.length, true); v.setUint32(22, data.length, true); v.setUint16(26, nb.length, true);
+  lh.set(nb, 30);
+  v = dv(ch);
+  v.setUint32(0, 0x02014b50, true); v.setUint16(4, 20, true); v.setUint16(6, 20, true);
+  v.setUint16(12, t, true); v.setUint16(14, dt, true); v.setUint32(16, crc, true);
+  v.setUint32(20, data.length, true); v.setUint32(24, data.length, true); v.setUint16(28, nb.length, true);
+  v.setUint32(42, 0, true);
+  ch.set(nb, 46);
+  v = dv(end);
+  v.setUint32(0, 0x06054b50, true); v.setUint16(8, 1, true); v.setUint16(10, 1, true);
+  v.setUint32(12, ch.length, true); v.setUint32(16, lh.length + data.length, true);
+  const out = new Uint8Array(lh.length + data.length + ch.length + end.length);
+  out.set(lh, 0); out.set(data, lh.length); out.set(ch, lh.length + data.length);
+  out.set(end, lh.length + data.length + ch.length);
+  return out;
+}
+/* CORE END */
+
+// ---------------------------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const fmtBytes = (n) => n.toLocaleString("en-US") + " bytes";
+const kb = (n) => (n / 1024).toLocaleString("en-US", { maximumFractionDigits: 1 }) + " KB";
+
+let format = FORMATS[3];
+let tree = [];            // the root's nodes: {name, dir, children, file, size, mtime, custom, dos, example}
+let skipped = 0;
+let nextId = 1;
+
+const SKIP = /^(\.DS_Store|\._.*|\.Spotlight-V100|\.Trashes|\.fseventsd|\.TemporaryItems|Thumbs\.db|desktop\.ini|Icon\r)$/;
+
+function node(name, dir, extra) { return Object.assign({ id: nextId++, name, dir, children: [], size: 0, custom: null }, extra || {}); }
+function findOrMakeDir(list, name) {
+  let d = list.find((n) => n.dir && n.name === name);
+  if (!d) { d = node(name, true); list.push(d); }
+  return d;
+}
+function addFile(path, file) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.some((p) => SKIP.test(p))) { skipped++; return; }
+  let list = tree;
+  for (const p of parts.slice(0, -1)) list = findOrMakeDir(list, p).children;
+  const name = parts[parts.length - 1];
+  const old = list.findIndex((n) => !n.dir && n.name === name);
+  const n = node(name, false, { file, size: file.size, mtime: new Date(file.lastModified || Date.now()) });
+  if (old >= 0) list[old] = n; else list.push(n);
+}
+function dropExamples() {
+  const before = tree.length;
+  tree = tree.filter((n) => !n.example);
+  if (tree.length !== before) $("examples").hidden = true;
+}
+
+// DOS names: custom names first, then the rest in order
+function assignNames(list) {
+  const taken = new Set();
+  for (const n of list) {
+    n.problem = null;
+    if (n.custom) {
+      const c = n.custom.toUpperCase();
+      if (!validDos(c)) n.problem = "Not a valid 8.3 name";
+      else if (taken.has(c)) n.problem = "Two files have this name";
+      n.dos = c; taken.add(c);
+    }
+  }
+  for (const n of list) if (!n.custom) { n.dos = shortName(n.name, taken); taken.add(n.dos); }
+  for (const n of list) if (n.dir) assignNames(n.children);
+}
+
+function flatten(list, depth, out) {
+  for (const n of list) { out.push({ n, depth }); if (n.dir) flatten(n.children, depth + 1, out); }
+  return out;
+}
+function anyProblem(list) { return list.some((n) => n.problem || (n.dir && anyProblem(n.children))); }
+
+function render() {
+  assignNames(tree);
+  const L = layout(format), cb = L.clusterBytes;
+  const rows = flatten(tree, 0, []);
+  const body = $("rows");
+  body.textContent = "";
+  if (!rows.length) {
+    const tr = document.createElement("tr"), td = document.createElement("td");
+    td.colSpan = 6; td.className = "empty"; td.textContent = "No files yet. Drop some above.";
+    tr.append(td); body.append(tr);
+  }
+  for (const { n, depth } of rows) {
+    const tr = document.createElement("tr");
+    const tdName = document.createElement("td"); tdName.className = "orig";
+    const ind = document.createElement("span"); ind.className = "ind"; ind.style.width = (depth * 18) + "px";
+    tdName.append(ind, document.createTextNode(n.name + (n.dir ? "/" : "")));
+    if (n.dir) tdName.classList.add("folder");
+    const tdDos = document.createElement("td"); tdDos.className = "dos";
+    const inp = document.createElement("input"); inp.type = "text"; inp.id = "dos-" + n.id;
+    inp.value = n.dos; inp.spellcheck = false; inp.autocomplete = "off";
+    inp.setAttribute("aria-label", "DOS name of " + n.name);
+    if (n.problem) inp.classList.add("invalid");
+    inp.addEventListener("change", () => {
+      const v = inp.value.trim().toUpperCase();
+      n.custom = v && v !== shortName(n.name, new Set()) ? v : null;
+      render();
+    });
+    tdDos.append(inp);
+    const tdSize = document.createElement("td"); tdSize.className = "num mono";
+    tdSize.textContent = n.dir ? "" : n.size.toLocaleString("en-US");
+    const tdCl = document.createElement("td"); tdCl.className = "num mono";
+    tdCl.textContent = clustersFor(n, cb);
+    const tdSt = document.createElement("td");
+    const chip = document.createElement("span");
+    const renamed = !n.custom && n.dos !== n.name.toUpperCase();
+    if (n.problem) { chip.className = "chip bad"; chip.textContent = n.problem; }
+    else if (n.custom) { chip.className = "chip ok"; chip.textContent = "Your name"; }
+    else if (renamed) { chip.className = "chip warn"; chip.textContent = "Shortened"; chip.title = "DOS allows 8 characters, a dot and 3 more, without spaces"; }
+    else { chip.className = "chip ok"; chip.textContent = "As is"; }
+    tdSt.append(chip);
+    const tdX = document.createElement("td");
+    const x = document.createElement("button"); x.type = "button"; x.className = "x"; x.textContent = "×";
+    x.setAttribute("aria-label", "Remove " + n.name);
+    x.addEventListener("click", () => { removeNode(tree, n); render(); });
+    tdX.append(x);
+    tr.append(tdName, tdDos, tdSize, tdCl, tdSt, tdX);
+    body.append(tr);
+  }
+  $("skipped").hidden = skipped === 0;
+  $("skipped").textContent = skipped + " macOS metadata file" + (skipped === 1 ? " was" : "s were") + " left out.";
+
+  // the disk
+  for (const b of $("formats").children) b.setAttribute("aria-pressed", b.dataset.id === format.id ? "true" : "false");
+  $("geo").textContent = `${format.cyl} cylinders · ${format.heads} heads · ${format.spt} sectors/track · ` +
+    `${format.spc === 1 ? "1 sector" : format.spc + " sectors"} per cluster\nBoot 1 · FATs 2×${format.fat} · root ${L.rootSectors} · ${L.clusters} clusters`;
+  const need = tally(tree, cb);
+  const usedBytes = need * cb, capBytes = L.clusters * cb;
+  const over = need > L.clusters;
+  $("bar").classList.toggle("over", over);
+  $("bar").firstElementChild.style.width = Math.min(100, need / L.clusters * 100) + "%";
+  $("used").textContent = kb(usedBytes) + " used";
+  $("free").textContent = over ? kb(usedBytes - capBytes) + " too much" : kb(capBytes - usedBytes) + " free";
+  const rootUsed = tree.length + 1;
+  const rootOver = rootUsed > format.root;
+  $("rootcount").textContent = `Root folder: ${rootUsed} of ${format.root} entries (the label takes one)`;
+  $("rootcount").style.color = rootOver ? "var(--bad)" : "";
+  drawMap(need, L);
+
+  const label = $("label").value.toUpperCase();
+  const labelOk = validLabel(label);
+  $("label-msg").hidden = labelOk;
+  $("label-msg").textContent = "Letters, digits and _ - ! # $ % & ' ( ) @ ^ ` { } ~ only, not starting with a space.";
+
+  const problems = anyProblem(tree);
+  const reason = !tree.length ? "Add some files first." : over ? "The files do not fit on this disk." :
+    rootOver ? "Too many entries in the root folder: put some in a folder." :
+    problems ? "Fix the names marked in red." : !labelOk ? "Fix the volume label." : "";
+  $("save").disabled = !!reason;
+  $("save").title = reason;
+  if (reason && tree.length) showMsg(reason, "bad"); else if (!reason) showMsg("", "");
+}
+function removeNode(list, target) {
+  const i = list.indexOf(target);
+  if (i >= 0) { list.splice(i, 1); return true; }
+  return list.some((n) => n.dir && removeNode(n.children, target));
+}
+function showMsg(text, kind) {
+  const m = $("save-msg");
+  m.hidden = !text; m.textContent = text; m.className = "msg " + kind;
+}
+
+function drawMap(used, L) {
+  const cv = $("map"), cs = getComputedStyle(document.documentElement);
+  const w = cv.clientWidth || 300, total = L.clusters + 1;   // one cell for the system area
+  const cell = total > 1500 ? 5 : total > 600 ? 7 : 11, gap = 1;
+  const cols = Math.max(1, Math.floor((w + gap) / (cell + gap)));
+  const sysCells = Math.max(1, Math.round((L.dataStart) / format.spc));
+  const cells = sysCells + L.clusters, rowsN = Math.ceil(cells / cols);
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.height = (rowsN * (cell + gap)) + "px";
+  cv.width = Math.round(w * dpr); cv.height = Math.round(rowsN * (cell + gap) * dpr);
+  const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const col = (n) => cs.getPropertyValue(n).trim();
+  const cSys = col("--system"), cUsed = col("--accent"), cFree = col("--line"), cBad = col("--bad");
+  for (let i = 0; i < cells; i++) {
+    g.fillStyle = i < sysCells ? cSys : (i - sysCells < used ? (used > L.clusters ? cBad : cUsed) : cFree);
+    g.fillRect((i % cols) * (cell + gap), Math.floor(i / cols) * (cell + gap), cell, cell);
+  }
+}
+
+// adding files
+async function readEntry(entry, path) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    addFile(path + entry.name, file);
+  } else if (entry.isDirectory) {
+    if (SKIP.test(entry.name)) { skipped++; return; }
+    const reader = entry.createReader();
+    let batch;
+    let any = false;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) { any = true; await readEntry(e, path + entry.name + "/"); }
+    } while (batch.length);
+    if (!any) { let list = tree; for (const p of (path + entry.name).split("/").filter(Boolean)) list = findOrMakeDir(list, p).children; }
+  }
+}
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => e.preventDefault());
+drop.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dropExamples();
+  const items = [...(e.dataTransfer.items || [])];
+  const entries = items.map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) { for (const en of entries) await readEntry(en, ""); }
+  else for (const f of e.dataTransfer.files) addFile(f.name, f);
+  render();
+});
+$("add-files").addEventListener("click", () => $("pick-files").click());
+$("add-folder").addEventListener("click", () => $("pick-folder").click());
+$("pick-files").addEventListener("change", (e) => {
+  dropExamples();
+  for (const f of e.target.files) addFile(f.name, f);
+  e.target.value = ""; render();
+});
+$("pick-folder").addEventListener("change", (e) => {
+  dropExamples();
+  for (const f of e.target.files) addFile(f.webkitRelativePath || f.name, f);
+  e.target.value = ""; render();
+});
+$("clear-examples").addEventListener("click", () => { dropExamples(); render(); });
+$("label").addEventListener("input", render);
+
+for (const f of FORMATS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.dataset.id = f.id; b.textContent = f.name;
+  b.addEventListener("click", () => { format = f; render(); });
+  $("formats").append(b);
+}
+
+// saving: inside Claude a zip through the viewer's save prompt (the viewer saves only some
+// file types, .img is not one); opened elsewhere, the .img itself
+let downloads = null, inClaude = !!(window.claude && window.claude.use);
+function saveHow() {
+  $("save-how").textContent = downloads
+    ? "Saves a .zip with the .img inside: this viewer only saves certain file types. Double-click the zip to get the image."
+    : inClaude ? "Saving is not available in this view." : "Saves the .img file.";
+}
+saveHow();
+if (inClaude) {
+  (async () => {
+    try { downloads = await window.claude.use("downloads"); } catch (e) { downloads = null; }
+    saveHow();
+  })();
+}
+
+async function collectData(list) {
+  for (const n of list) {
+    if (n.dir) await collectData(n.children);
+    else n.data = n.file ? new Uint8Array(await n.file.arrayBuffer()) : n.bytes;
+  }
+}
+$("save").addEventListener("click", async () => {
+  const btn = $("save");
+  btn.disabled = true;
+  try {
+    await collectData(tree);
+    const label = $("label").value.toUpperCase().trim();
+    const now = new Date();
+    const img = buildImage(format, label, tree, now, (Math.random() * 0xFFFFFFFF) >>> 0);
+    const base = ($("imgname").value.trim() || "disk").replace(/\.img$/i, "").replace(/[\\/:*?"<>|]/g, "_");
+    if (downloads) {
+      const zip = zipOne(base + ".img", img, now);
+      try {
+        await downloads.save({ filename: base + ".zip", data: new Blob([zip]) });
+        showMsg(`Saved ${base}.zip (${base}.img inside, ${fmtBytes(img.length)}).`, "ok");
+      } catch (err) {
+        const code = err && err.code;
+        showMsg(code === "declined" ? "Not saved." : code === "rate_limited" ? "Another save is waiting for an answer. Try again in a moment." :
+          "This view cannot save files (" + (code || "unavailable") + ").", code === "declined" ? "" : "bad");
+      }
+    } else if (!inClaude) {
+      const url = URL.createObjectURL(new Blob([img], { type: "application/octet-stream" }));
+      const a = document.createElement("a"); a.href = url; a.download = base + ".img";
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showMsg(`Saved ${base}.img (${fmtBytes(img.length)}).`, "ok");
+    } else {
+      showMsg("This view cannot save files.", "bad");
+    }
+  } finally {
+    btn.disabled = false;
+    render();
+  }
+});
+
+// example files, so the first view shows what happens to names
+function example(path, text) {
+  const bytes = new TextEncoder().encode(text);
+  const parts = path.split("/");
+  let list = tree;
+  for (const p of parts.slice(0, -1)) { list = findOrMakeDir(list, p).children; }
+  list.push(node(parts[parts.length - 1], false, { size: bytes.length, bytes, mtime: new Date(2026, 9, 30, 12, 0), example: true }));
+}
+example("Read me first.txt", "Example file. Remove the examples and add your own.\r\n");
+example("autoexec.bat", "@ECHO OFF\r\nPROMPT $P$G\r\n");
+example("notes.markdown", "# Notes\r\n");
+example("Saved games/level-01.sav", "example");
+example("Saved games/Level 2 backup.sav", "example");
+for (const n of tree) if (n.dir) n.example = true;
+$("examples").hidden = false;
+
+window.addEventListener("resize", () => render());
+try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => render()); } catch (e) {}
+new MutationObserver(() => render()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+render();
+</script>
+
+</body>
+</html>

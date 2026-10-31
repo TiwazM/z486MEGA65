@@ -229,6 +229,29 @@ package video_modes_pkg is
       V_POL       => '1'         -- vertical sync pulse polarity (1 = positive, 0 = negative)
    );
 
+   -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): 1280x1024 @ 59.79 Hz with reduced
+   -- blanking (90.000 MHz, 63.20 kHz: the rates of VESA CVT-RB 1280x1024, whose 91 MHz the
+   -- MMCM cannot make from an integer multiplier; VESA DMT's 108 MHz is too fast for the HDMI
+   -- domain), a 5:4 monitor's own resolution: the scaler shows a 4:3 picture as 1280x960
+   -- between bars, and the monitor scales nothing. No CEA VIC.
+   constant C_SVGA_1280_1024_60 : video_modes_t := (
+      CLK_KHZ     => 90000,      -- 90.000 MHz
+      CLK_SEL     => "110",
+      CEA_CTA_VIC => 0,          -- not a CEA mode
+      ASPECT      => "01",       -- aspect ratio: 01=4:3, 10=16:9 (the AVI InfoFrame has no 5:4)
+      PIXEL_REP   => '0',        -- no pixel repetition
+      H_PIXELS    => 1280,       -- horizontal display width in pixels
+      V_PIXELS    => 1024,       -- vertical display width in rows
+      H_FP        => 40,         -- horizontal front porch width in pixels
+      H_PULSE     => 32,         -- horizontal sync pulse width in pixels
+      H_BP        => 72,         -- horizontal back porch width in pixels
+      V_FP        => 3,          -- vertical front porch width in rows
+      V_PULSE     => 7,          -- vertical sync pulse width in rows
+      V_BP        => 23,         -- vertical back porch width in rows
+      H_POL       => '1',        -- horizontal sync pulse polarity (1 = positive, 0 = negative):
+      V_POL       => '0'         -- CVT-RB's (positive H, negative V)
+   );
+
    type video_modes_vector is array(natural range<>) of video_modes_t;
 
    type video_mode_type is (
@@ -241,7 +264,9 @@ package video_modes_pkg is
       C_VIDEO_SVGA_800_60   ,  -- SVGA 800x600     @ 60 Hz
       -- M2M-UPSTREAM rtg-native-modes (Megamiga 2026-10-15)
       C_VIDEO_SVGA_1024_60  ,  -- VESA 1024x768    @ 60 Hz
-      C_VIDEO_HDMI_1080_30     -- HDMI 1920x1080   @ 30 Hz
+      C_VIDEO_HDMI_1080_30  ,  -- HDMI 1920x1080   @ 30 Hz
+      -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31)
+      C_VIDEO_SVGA_1280_60     -- 1280x1024        @ 59.79 Hz, reduced blanking
    );
 
    pure function video_mode_to_slv(video_mode : video_mode_type) return std_logic_vector;
@@ -264,6 +289,7 @@ package body video_modes_pkg is
          when C_VIDEO_SVGA_800_60   => return "0110";
          when C_VIDEO_SVGA_1024_60  => return "0111";   -- M2M-UPSTREAM rtg-native-modes
          when C_VIDEO_HDMI_1080_30  => return "1000";   -- M2M-UPSTREAM rtg-native-modes
+         when C_VIDEO_SVGA_1280_60  => return "1001";   -- M2M-UPSTREAM sxga-mode
       end case;
    end function video_mode_to_slv;
 
@@ -279,6 +305,7 @@ package body video_modes_pkg is
          when "0110" => return C_VIDEO_SVGA_800_60;
          when "0111" => return C_VIDEO_SVGA_1024_60;    -- M2M-UPSTREAM rtg-native-modes
          when "1000" => return C_VIDEO_HDMI_1080_30;    -- M2M-UPSTREAM rtg-native-modes
+         when "1001" => return C_VIDEO_SVGA_1280_60;    -- M2M-UPSTREAM sxga-mode
          when others => return C_VIDEO_HDMI_16_9_50;
       end case;
    end function slv_to_video_mode;

@@ -177,37 +177,48 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 -- (mega65.vhd C_MENU_*):
 --     0  z486                    headline
 --     1  ----
---     2  Floppy A: %s            manual load 0: the file browser, FDD_PREP mounts it
---     3  ----
---     4  HDMI: %s                submenu
---     5    HDMI mode             headline
---     6    ----
---     7    720p 60 Hz 16:9       C_MENU_HDMI_720P (default)
---     8    480p 59.94 Hz 4:3     C_MENU_HDMI_480P
---     9    ----
---    10    Back to main menu
---    11  ----
---    12  Help
---    13  Reset the PC            C_MENU_RESET
---    14  ----
---    15  Close Menu
+--     2  Floppy A: %s            manual load 0: the file browser, DISK_PREP mounts it
+--     3  Floppy B: %s            manual load 1
+--     4  Hard disk: %s           manual load 2 (the PC sees it after a reset)
+--     5  ----
+--     6  HDMI: %s                submenu
+--     7    HDMI mode             headline
+--     8    ----
+--     9    720p 60 Hz 16:9       C_MENU_HDMI_720P (default; the 4:3 picture between bars)
+--    10    480p 59.94 Hz 4:3     C_MENU_HDMI_480P
+--    11    800x600 60 Hz         C_MENU_HDMI_800
+--    12    1024x768 60 Hz        C_MENU_HDMI_1024
+--    13    1280x1024 60 Hz 5:4   C_MENU_HDMI_1280 (a 5:4 monitor's own resolution, reduced
+--                                blanking: 1280x960 between bars, the monitor scales nothing)
+--    14    ----
+--    15    Back to main menu
+--    16  ----
+--    17  Help
+--    18  Reset the PC            C_MENU_RESET
+--    19  ----
+--    20  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change.
-constant OPTM_SIZE         : natural := 16;
+constant OPTM_SIZE         : natural := 21;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 10;   -- the screen lines of the main menu (0-4, 11-15)
+constant OPTM_DY           : natural := 12;   -- the screen lines of the main menu (0-6, 16-20)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
    "\n"                       &
    " Floppy A: %s\n"          &
+   " Floppy B: %s\n"          &
+   " Hard disk: %s\n"         &
    "\n"                       &
    " HDMI: %s\n"              &
    " HDMI mode\n"             &
    "\n"                       &
    " 720p 60 Hz 16:9\n"       &
    " 480p 59.94 Hz 4:3\n"     &
+   " 800x600 60 Hz\n"         &
+   " 1024x768 60 Hz\n"        &
+   " 1280x1024 60 Hz 5:4\n"   &
    "\n"                       &
    " Back to main menu\n"     &
    "\n"                       &
@@ -220,25 +231,32 @@ constant OPTM_ITEMS        : string :=
 constant OPTM_G_HDMI       : integer := 1;
 constant OPTM_G_RESET      : integer := 2;
 constant OPTM_G_FDD_A      : integer := 3;
+constant OPTM_G_FDD_B      : integer := 4;
+constant OPTM_G_HDD        : integer := 5;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
 constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,            --  0 z486
                                              OPTM_G_LINE,                              --  1
                                              OPTM_G_FDD_A + OPTM_G_LOAD_ROM + OPTM_G_START,  --  2 Floppy A: %s
-                                             OPTM_G_LINE,                              --  3
-                                             OPTM_G_SUBMENU,                           --  4 HDMI: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            --  5 HDMI mode
-                                             OPTM_G_LINE,                              --  6
-                                             OPTM_G_HDMI + OPTM_G_STDSEL,              --  7 720p 60 Hz
-                                             OPTM_G_HDMI,                              --  8 480p 59.94 Hz
-                                             OPTM_G_LINE,                              --  9
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 10 Back
-                                             OPTM_G_LINE,                              -- 11
-                                             OPTM_G_HELP,                              -- 12 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 13 Reset the PC
+                                             OPTM_G_FDD_B + OPTM_G_LOAD_ROM,           --  3 Floppy B: %s
+                                             OPTM_G_HDD + OPTM_G_LOAD_ROM,             --  4 Hard disk: %s
+                                             OPTM_G_LINE,                              --  5
+                                             OPTM_G_SUBMENU,                           --  6 HDMI: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            --  7 HDMI mode
+                                             OPTM_G_LINE,                              --  8
+                                             OPTM_G_HDMI + OPTM_G_STDSEL,              --  9 720p 60 Hz
+                                             OPTM_G_HDMI,                              -- 10 480p 59.94 Hz
+                                             OPTM_G_HDMI,                              -- 11 800x600 60 Hz
+                                             OPTM_G_HDMI,                              -- 12 1024x768 60 Hz
+                                             OPTM_G_HDMI,                              -- 13 1280x1024 60 Hz
                                              OPTM_G_LINE,                              -- 14
-                                             OPTM_G_CLOSE                              -- 15 Close Menu
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 15 Back
+                                             OPTM_G_LINE,                              -- 16
+                                             OPTM_G_HELP,                              -- 17 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 18 Reset the PC
+                                             OPTM_G_LINE,                              -- 19
+                                             OPTM_G_CLOSE                              -- 20 Close Menu
                                            );
 
 begin
