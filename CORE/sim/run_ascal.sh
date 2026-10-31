@@ -4,6 +4,7 @@
 # the reference) and with a slow one (fetches take ~1.3 lines, like 1280x1024 on the HyperRAM),
 # then compares the output lines. With CORE/sim/build/ascal_orig.vhd (an ascal without the
 # patch, e.g. git show 4096e0e:M2M/vhdl/av_pipeline/ascal.vhd) it runs that one the same way.
+# Run 5 resets ascal in the middle of an input write burst (G_RST, M2M-UPSTREAM reset-write).
 # Output in CORE/sim/build/ (ascal_<run>.txt line checksums, ascal_<run>.ppm frame 4).
 set -e
 root=${0:A:h:h:h}
@@ -24,12 +25,13 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
         chk xvhdl -2008 -work pat /core/M2M/vhdl/av_pipeline/ascal.vhd /core/CORE/sim/tb_ascal.vhd &&
         chk xelab -debug off pat.tb_ascal -generic_top G_LAT=2  -generic_top G_GAP=1 -generic_top G_RUN=1 -s ascal_s1 &&
         chk xelab -debug off pat.tb_ascal -generic_top G_LAT=16 -generic_top G_GAP=8 -generic_top G_RUN=2 -s ascal_s2 &&
+        chk xelab -debug off pat.tb_ascal -generic_top G_RST=1 -generic_top G_FRAMES=4 -generic_top G_RUN=5 -s ascal_s5 &&
         if [ $orig = 1 ]; then
             chk xvhdl -2008 -work orig ascal_orig.vhd /core/CORE/sim/tb_ascal.vhd &&
             chk xelab -debug off orig.tb_ascal -generic_top G_LAT=2  -generic_top G_GAP=1 -generic_top G_RUN=3 -s ascal_s3 &&
             chk xelab -debug off orig.tb_ascal -generic_top G_LAT=16 -generic_top G_GAP=8 -generic_top G_RUN=4 -s ascal_s4
         fi &&
-        for r in 1 2 3 4; do
+        for r in 1 2 3 4 5; do
             [ -d xsim.dir/ascal_s\$r ] && xsim ascal_s\$r -R -log xsim_ascal_\$r.log > /dev/null &
         done; wait"
 
@@ -40,6 +42,11 @@ cmp_runs() {   # reference, run, name
     print "$3: $n of $t lines differ from run $1"
 }
 cmp_runs 1 2 "patched, slow memory"
+if grep -q FAIL xsim_ascal_5.log; then
+    print "reset in a write burst: $(grep -o 'FAIL.*' xsim_ascal_5.log)"
+else
+    print "reset in a write burst: ok"
+fi
 if (( orig )); then
     cmp_runs 1 3 "original, fast memory"
     cmp_runs 1 4 "original, slow memory"

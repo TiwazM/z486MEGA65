@@ -9,6 +9,10 @@
 -- G_LAT 2, G_GAP 1 every fetch fits in its line; with G_LAT 16, G_GAP 8 (~80 clocks a burst,
 -- the input writes take ~40 % of the memory, like the HyperRAM's) a fetch takes ~1.3 lines.
 --
+-- G_RST 1 resets ascal once in the middle of an input write burst (frame 2) and the memory with
+-- it, as M2M's hr_rst resets the HyperRAM side with ascal (M2M-UPSTREAM reset-write): a write
+-- burst the memory took and never got the rest of is a FAIL (the HyperRAM would wait for good).
+--
 -- Writes one checksum per output line of frames 3 .. G_FRAMES-1 to build/ascal_<G_RUN>.txt,
 -- and frame 4 as a P3 picture to build/ascal_<G_RUN>.ppm. run_ascal.sh compares the runs.
 --
@@ -37,6 +41,7 @@ entity tb_ascal is
       G_OH     : natural := 480;
       G_MEMW   : natural := 65536;   -- memory words (16 bytes)
       G_RAM    : natural := 2**18;   -- ascal's RAMSIZE (one frame buffer)
+      G_RST    : natural := 0;       -- 1: a reset in the middle of a write burst
       G_RUN    : natural := 0        -- output file number
    );
 end entity tb_ascal;
@@ -72,7 +77,23 @@ begin
    i_clk   <= not i_clk   after 20 ns;      -- 25 MHz
    o_clk   <= not o_clk   after 5.5555 ns;  -- 90 MHz
    avl_clk <= not avl_clk after 5 ns;       -- 100 MHz
-   reset_na <= '1' after 1 us;
+   p_reset : process
+   begin
+      reset_na <= '0';
+      wait for 1 us;
+      reset_na <= '1';
+      if G_RST = 1 then
+         wait for 9 ms;                    -- frame 2
+         wait until rising_edge(avl_clk) and avl_write = '1';
+         wait until rising_edge(avl_clk);
+         wait until rising_edge(avl_clk);
+         report "tb_ascal: reset in a write burst" severity note;
+         reset_na <= '0';
+         wait for 200 ns;
+         reset_na <= '1';
+      end if;
+      wait;
+   end process p_reset;
 
    p_in : process (i_clk)
       -- the VGA font's "6" and "8", rows 0..15
@@ -163,6 +184,7 @@ begin
       variable adr    : natural range 0 to C_MEMW-1;
       variable left   : natural range 0 to 255;
       variable cnt    : natural;
+      variable idle   : natural := 0;
       variable seed   : unsigned(31 downto 0) := x"12345678";
       variable w      : std_logic_vector(C_DW-1 downto 0);
 
@@ -239,6 +261,15 @@ begin
                   cnt := cnt - 1;
                end if;
             when S_WDAT =>
+               if avl_write = '1' then
+                  idle := 0;
+               else
+                  idle := idle + 1;
+                  if idle = 1000 then
+                     report "tb_ascal: FAIL: a write burst stopped with " & integer'image(left) &
+                            " beats to go: the memory waits for good" severity failure;
+                  end if;
+               end if;
                if avl_waitrequest = '0' and avl_write = '1' then
                   store(adr, avl_writedata, avl_byteenable);
                   adr  := (adr + 1) mod C_MEMW;
@@ -255,6 +286,14 @@ begin
                   cnt := cnt - 1;
                end if;
          end case;
+         -- reset with ascal, as hr_rst resets the HyperRAM side (synchronous, so a request
+         -- ascal still shows at the first clock out of reset starts a burst)
+         if reset_na = '0' then
+            st   := S_IDLE;
+            idle := 0;
+            avl_readdatavalid <= '0';
+            avl_waitrequest   <= '0';
+         end if;
       end if;
    end process p_mem;
 

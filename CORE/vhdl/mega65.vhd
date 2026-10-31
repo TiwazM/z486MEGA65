@@ -30,6 +30,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+library xpm;
+use xpm.vcomponents.all;
+
 library work;
 use work.globals.all;
 use work.types_pkg.all;
@@ -366,6 +369,8 @@ signal video_clk              : std_logic;
 signal video_rst              : std_logic;
 signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
+signal main_hr_rst            : std_logic;
+signal main_ddram_rst         : std_logic;
 signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
 signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
 
@@ -735,7 +740,10 @@ begin
    -- releases them) and by "Reset the PC" (m2m-rom.asm, through the CSR). It also stays in
    -- reset until its BIOS ROMs are in HyperRAM: z486's boot loader copies them from there the
    -- moment it leaves reset, and the Shell releases the core before PREP_START loads them.
-   main_pc_reset <= main_rst or main_reset_m2m_i or main_reset_core_i or not main_pc_roms_ok(0);
+   -- And while the HyperRAM side is in reset (main_hr_rst, below): the reset button resets
+   -- HyperRAM with the core, and a boot read sent before it is back was lost (stage 2 for good).
+   main_pc_reset <= main_rst or main_hr_rst or main_reset_m2m_i or main_reset_core_i or
+                    not main_pc_roms_ok(0);
 
    -- Power LED: green; blue while the reset button is held long. Drive LED: off (no drives yet).
    main_power_led_o     <= '1';
@@ -1152,6 +1160,22 @@ begin
    main_hr_addr <= "1"   & main_ddram_addr(18 downto 0) when main_ddram_addr(28 downto 19) = "0011111110" else
                    "011" & main_ddram_addr(16 downto 0);
 
+   -- HyperRAM's reset in main_clk: a core reset (the reset button) resets HyperRAM, its arbiter
+   -- and the HyperRAM side of the bridge (clk_m2m's hr_rst), so the main side's request FIFO
+   -- resets with them, and the PC waits for them (main_pc_reset)
+   i_cdc_hr_rst : xpm_cdc_async_rst
+      generic map (
+         RST_ACTIVE_HIGH => 1,
+         DEST_SYNC_FF    => 4
+      )
+      port map (
+         src_arst  => hr_rst_i,
+         dest_clk  => main_clk,
+         dest_arst => main_hr_rst
+      ); -- i_cdc_hr_rst
+
+   main_ddram_rst <= main_rst or main_hr_rst;
+
    i_avm_fifo_ddram : entity work.avm_fifo
       generic map (
          G_WR_DEPTH     => 16,
@@ -1162,7 +1186,7 @@ begin
       )
       port map (
          s_clk_i               => main_clk,
-         s_rst_i               => main_rst,
+         s_rst_i               => main_ddram_rst,
          s_avm_waitrequest_o   => main_ddram_busy,
          s_avm_write_i         => main_ddram_we,
          s_avm_read_i          => main_ddram_rd,

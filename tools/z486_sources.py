@@ -30,10 +30,25 @@ NETTYPE_NONE = re.compile(r"`default_nettype\s+none")
 # sdram.v: at or below FREQ66 it takes one cycle for tRP and tRCD, which is 15.6 ns at the
 # PC's 64 MHz, under the R6's IS42S16320F-6 (18 ns). Without the shortcut every value comes from
 # its nanoseconds: tRP and tRCD 2 cycles, tWR 1, tRC 4.
+# pic.v: the Bochs BIOS sets up the keyboard (POST 77) before the PICs (ICW1). A key released
+# in between (Ctrl+Alt+Del, Enter at a "reboot" prompt) raises IRQ1 before ICW1 clears IRR, and
+# an 8259 then waits for a new rising edge, which never comes while nobody reads port 60h: the
+# keyboard stays dead until a full reset (and IRQ12 the same for the mouse). After ICW1 the edge
+# detector takes an input that is high as a new edge, so a pending request is served once.
 PATCHES = {
     "z486_MiSTer/src/memory/sdram.v": [
         ("localparam integer FREQ66 = 75_000_000;   // pushing the edge",
          "localparam integer FREQ66 = 0;            // MEGA65: timing from FAST_GRADE's ns"),
+    ],
+    "z486_MiSTer/src/soc/pic.v": [
+        ("wire [7:0] edge_detect = interrupt_input & ~interrupt_last;",
+         "// MEGA65: an input that is high when ICW1 ends counts as a new edge (z486_sources.py)\n"
+         "reg icw1_last;\n"
+         "always @(posedge clk) begin\n"
+         "\tif(rst_n == 1'b0)   icw1_last <= 1'b0;\n"
+         "\telse                icw1_last <= init_icw1;\n"
+         "end\n"
+         "wire [7:0] edge_detect = interrupt_input & ~((icw1_last && ~init_icw1) ? 8'h00 : interrupt_last);"),
     ],
 }
 

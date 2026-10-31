@@ -42,7 +42,17 @@ boots from it.
 - `CORE/vhdl/mega65.vhd` maps z486's MiSTer DDR3 port into HyperRAM:
   DDR3 `0x3F800000` (the SVGA framebuffer, 4 MB) to HyperRAM `0x400000`, the
   rest (the boot image at `0x300C0000`) into `0x300000`-`0x3FFFFF`, through
-  `avm_fifo` and `avm_decrease` (64 to 16 bits). ascal shows the framebuffer
+  `avm_fifo` and `avm_decrease` (64 to 16 bits). The reset button resets
+  HyperRAM with the core (M2M's `hr_rst`), and ascal with it. ascal's write
+  request had no reset (`--avl_write_i<='0'` in M2M's ascal.vhd): a reset
+  during one of its input write bursts left it high, the HyperRAM side took
+  it for a new burst and waited for its beats for good. HyperRAM stopped (0
+  transactions a second), the screen repeated one line, z486's boot loader
+  waited for its first read (stage 2), and a long press did not help: the
+  next reset caught ascal writing again. It resets now (M2M-UPSTREAM
+  reset-write; `tb_ascal.vhd`'s G_RST replays it, the old ascal fails). The
+  bridge's z486 side resets with HyperRAM too, and the PC waits for it.
+  ascal shows the framebuffer
   from HyperRAM (M2M-UPSTREAM rtg-framebuffer). Below `0x300000` ascal keeps
   three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
   on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
@@ -95,7 +105,7 @@ boots from it.
   standard PS/2 mouse, also when nothing is plugged in: the BIOS's mouse
   functions, which CuteMouse calls, wait for good for a mouse that does not
   answer. `CORE/sim/run_ps2.sh` simulates the keyboard and the mouse against
-  z486's 8042 (`ps2.v`).
+  z486's 8042 (`ps2.v`), and the PIC patch below (`tb_pic.sv`).
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
@@ -290,6 +300,15 @@ printed on the MEGA65's keycaps:
 | MEGA | the Fn key above, nothing by itself |
 | F13 | the mouse's right button (see Mouse above) |
 | HELP | the menu |
+
+After Ctrl+Alt+Del, or Enter at a "restart" prompt, the keyboard could stay
+dead until a full reset. The Bochs BIOS sets up the keyboard (POST 77) before
+the interrupt controllers; a key released in between raises IRQ1, ICW1 then
+clears the request, and an 8259 waits for a new rising edge, which never
+comes while nobody reads port 60h. `tools/z486_sources.py` patches `pic.v`:
+after ICW1 an input that is already high counts as a new edge, so it is
+served once (the same for the mouse's IRQ12). `tb_pic.sv` replays the race;
+upstream's `pic.v` fails it.
 
 ## SDRAM clock
 

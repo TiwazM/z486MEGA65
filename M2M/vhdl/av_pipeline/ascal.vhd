@@ -1691,7 +1691,12 @@ BEGIN
       avl_readdataack<='0';
       avl_readack<='0';
       avl_read_i<='0';
-      --avl_write_i<='0';
+      -- M2M-UPSTREAM reset-write (z486 for MEGA65, 2026-10-31): the write request resets
+      -- too. It held through the reset: a reset during an input write burst left it high,
+      -- the HyperRAM side (reset with ascal, M2M's hr_rst) took it for a new burst and
+      -- waited for good for the beats (HyperRAM stopped; the reset button did not recover).
+      -- Original: --avl_write_i<='0';
+      avl_write_i<='0';
       avl_write_sync<='0';
       avl_write_sync2<='0';
       avl_write_pulse<='0';
