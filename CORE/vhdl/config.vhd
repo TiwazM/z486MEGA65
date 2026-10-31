@@ -191,35 +191,37 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    13    1024x768 60 Hz        C_MENU_HDMI_1024
 --    14    1280x1024 60 Hz 5:4   C_MENU_HDMI_1280 (a 5:4 monitor's own resolution, reduced
 --                                blanking: 1280x960 between bars, the monitor scales nothing)
---    15    ----
---    16    Back to main menu
---    17  Filter: %s              submenu: ascal's interpolation
---    18    Scaling filter        headline
---    19    ----
---    20    Sharp                 C_MENU_FLT_SHARP (default): sharp bilinear
---    21    Smooth                C_MENU_FLT_SMOOTH: bilinear
---    22    Pixels                C_MENU_FLT_PIXELS: nearest neighbour
---    23    ----
---    24    Back to main menu
---    25  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only)
---    26    Scanlines             headline
---    27    ----
---    28    Off                   C_MENU_SL_OFF (default)
---    29    25%                   C_MENU_SL_25
---    30    50%                   C_MENU_SL_50
---    31    ----
---    32    Back to main menu
---    33  ----
---    34  Help
---    35  Reset the PC            C_MENU_RESET
---    36  ----
---    37  Close Menu
+--    15    Native resolution     C_MENU_HDMI_NATIVE: the PC's own resolution, the monitor
+--                                scales (720x400 text in 720x480, 640x480, SVGA 1:1)
+--    16    ----
+--    17    Back to main menu
+--    18  Filter: %s              submenu: ascal's interpolation
+--    19    Scaling filter        headline
+--    20    ----
+--    21    Sharp                 C_MENU_FLT_SHARP (default): sharp bilinear
+--    22    Smooth                C_MENU_FLT_SMOOTH: bilinear
+--    23    Pixels                C_MENU_FLT_PIXELS: nearest neighbour
+--    24    ----
+--    25    Back to main menu
+--    26  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only)
+--    27    Scanlines             headline
+--    28    ----
+--    29    Off                   C_MENU_SL_OFF (default)
+--    30    25%                   C_MENU_SL_25
+--    31    50%                   C_MENU_SL_50
+--    32    ----
+--    33    Back to main menu
+--    34  ----
+--    35  Help
+--    36  Reset the PC            C_MENU_RESET
+--    37  ----
+--    38  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change.
-constant OPTM_SIZE         : natural := 38;
+constant OPTM_SIZE         : natural := 39;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 15;   -- the main menu's lines (0-7, 17, 25, 33-37)
+constant OPTM_DY           : natural := 15;   -- the main menu's lines (0-7, 18, 26, 34-38)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -237,6 +239,7 @@ constant OPTM_ITEMS        : string :=
    " 800x600 60 Hz\n"         &
    " 1024x768 60 Hz\n"        &
    " 1280x1024 60 Hz 5:4\n"   &
+   " Native resolution\n"     &
    "\n"                       &
    " Back to main menu\n"     &
    " Filter: %s\n"            &
@@ -288,29 +291,30 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_HDMI,                              -- 12 800x600 60 Hz
                                              OPTM_G_HDMI,                              -- 13 1024x768 60 Hz
                                              OPTM_G_HDMI,                              -- 14 1280x1024 60 Hz
-                                             OPTM_G_LINE,                              -- 15
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 16 Back
-                                             OPTM_G_SUBMENU,                           -- 17 Filter: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 18 Scaling filter
-                                             OPTM_G_LINE,                              -- 19
-                                             OPTM_G_FILTER + OPTM_G_STDSEL,            -- 20 Sharp
-                                             OPTM_G_FILTER,                            -- 21 Smooth
-                                             OPTM_G_FILTER,                            -- 22 Pixels
-                                             OPTM_G_LINE,                              -- 23
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 24 Back
-                                             OPTM_G_SUBMENU,                           -- 25 Scanlines: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 26 Scanlines
-                                             OPTM_G_LINE,                              -- 27
-                                             OPTM_G_SCAN + OPTM_G_STDSEL,              -- 28 Off
-                                             OPTM_G_SCAN,                              -- 29 25%
-                                             OPTM_G_SCAN,                              -- 30 50%
-                                             OPTM_G_LINE,                              -- 31
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 32 Back
-                                             OPTM_G_LINE,                              -- 33
-                                             OPTM_G_HELP,                              -- 34 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 35 Reset the PC
-                                             OPTM_G_LINE,                              -- 36
-                                             OPTM_G_CLOSE                              -- 37 Close Menu
+                                             OPTM_G_HDMI,                              -- 15 Native resolution
+                                             OPTM_G_LINE,                              -- 16
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 17 Back
+                                             OPTM_G_SUBMENU,                           -- 18 Filter: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 19 Scaling filter
+                                             OPTM_G_LINE,                              -- 20
+                                             OPTM_G_FILTER + OPTM_G_STDSEL,            -- 21 Sharp
+                                             OPTM_G_FILTER,                            -- 22 Smooth
+                                             OPTM_G_FILTER,                            -- 23 Pixels
+                                             OPTM_G_LINE,                              -- 24
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 25 Back
+                                             OPTM_G_SUBMENU,                           -- 26 Scanlines: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 27 Scanlines
+                                             OPTM_G_LINE,                              -- 28
+                                             OPTM_G_SCAN + OPTM_G_STDSEL,              -- 29 Off
+                                             OPTM_G_SCAN,                              -- 30 25%
+                                             OPTM_G_SCAN,                              -- 31 50%
+                                             OPTM_G_LINE,                              -- 32
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 33 Back
+                                             OPTM_G_LINE,                              -- 34
+                                             OPTM_G_HELP,                              -- 35 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 36 Reset the PC
+                                             OPTM_G_LINE,                              -- 37
+                                             OPTM_G_CLOSE                              -- 38 Close Menu
                                            );
 
 begin

@@ -60,6 +60,8 @@ port (
    qnice_ascal_polyphase_o : out std_logic;
    qnice_ascal_triplebuf_o : out std_logic;
    qnice_scanlines_o       : out std_logic_vector(1 downto 0);  -- 00 off, 01 25 %, 10 50 %
+   -- M2M-UPSTREAM native: bit 24 = the picture unscaled in a 23..12 x 11..0 window
+   qnice_native_o          : out std_logic_vector(24 downto 0);
    qnice_retro15kHz_o      : out std_logic;              -- 0 = normal frequency, 1 = retro 15 kHz frequency
    qnice_csync_o           : out std_logic;              -- 0 = normal HS/VS, 1 = Composite Sync
 
@@ -344,11 +346,12 @@ constant C_MENU_HDMI_480P     : natural := 11;
 constant C_MENU_HDMI_800      : natural := 12;
 constant C_MENU_HDMI_1024     : natural := 13;
 constant C_MENU_HDMI_1280     : natural := 14;  -- M2M-UPSTREAM sxga-mode
-constant C_MENU_FLT_SMOOTH    : natural := 21;  -- (20: Sharp, the default)
-constant C_MENU_FLT_PIXELS    : natural := 22;
-constant C_MENU_SL_25         : natural := 29;  -- (28: Off, the default)
-constant C_MENU_SL_50         : natural := 30;
-constant C_MENU_RESET         : natural := 35;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_HDMI_NATIVE   : natural := 15;  -- M2M-UPSTREAM native: the PC's own resolution
+constant C_MENU_FLT_SMOOTH    : natural := 22;  -- (21: Sharp, the default)
+constant C_MENU_FLT_PIXELS    : natural := 23;
+constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
+constant C_MENU_SL_50         : natural := 31;
+constant C_MENU_RESET         : natural := 36;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -407,6 +410,30 @@ signal qnice_dbg_snap         : std_logic_vector(255 downto 0);
 signal main_dbg_log_wr        : std_logic;
 signal main_dbg_log_entry     : std_logic_vector(9 downto 0);
 signal qnice_dbg_log_q        : std_logic_vector(9 downto 0);
+-- the IDE trace (pc_mgmt.vhd, pc_cdrom.vhd): sequence number, milliseconds, the event
+signal main_tr_we             : std_logic;
+signal main_tr_d              : std_logic_vector(63 downto 0);
+signal main_tr_seq            : unsigned(15 downto 0) := (others => '0');
+signal main_tr_div            : unsigned(15 downto 0) := (others => '0');
+signal main_tr_ms             : unsigned(15 downto 0) := (others => '0');
+signal main_tr_entry          : std_logic_vector(95 downto 0);
+signal qnice_tr_q             : std_logic_vector(95 downto 0);
+-- Native: the PC's picture size (main clock: the frame being measured, the last frame, the one
+-- that held for eight frames; QNICE: the HDMI mode and window for it)
+signal main_nat_de_d          : std_logic := '0';
+signal main_nat_vb_d          : std_logic := '0';
+signal main_nat_cnt           : unsigned(11 downto 0) := (others => '0');
+signal main_nat_wmax          : unsigned(11 downto 0) := (others => '0');
+signal main_nat_lines         : unsigned(11 downto 0) := (others => '0');
+signal main_nat_w             : unsigned(11 downto 0) := (others => '0');
+signal main_nat_h             : unsigned(11 downto 0) := (others => '0');
+signal main_nat_same          : natural range 0 to 7 := 0;
+signal main_nat_size          : std_logic_vector(23 downto 0) := (others => '0');
+signal qnice_nat_size         : std_logic_vector(23 downto 0);
+signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
+signal qnice_nat_on           : std_logic := '0';
+signal qnice_nat_w            : natural range 0 to 4095 := 640;
+signal qnice_nat_h            : natural range 0 to 4095 := 480;
 
 ---------------------------------------------------------------------------------------------
 -- The MEGA65 keyboard as a PS/2 keyboard (main clock)
@@ -837,7 +864,9 @@ begin
          buf_addr_o        => main_disk_buf_addr,
          buf_we_o          => main_disk_buf_we,
          buf_wd_o          => main_disk_buf_wd,
-         buf_rd_i          => main_disk_buf_rd
+         buf_rd_i          => main_disk_buf_rd,
+         trace_we_o        => main_tr_we,
+         trace_o           => main_tr_d
       ); -- i_pc_mgmt
 
    -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
@@ -989,6 +1018,99 @@ begin
          q_b        => qnice_dbg_log_q
       ); -- i_dbg_log
 
+   -- The IDE trace: the last 512 events of the disks' controllers (pc_mgmt.vhd has the list),
+   -- each with its sequence number and the time in 1.024 ms steps (65536 clocks). Not cleared
+   -- by a PC reset: what led up to one stays readable.
+   p_main_trace : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         main_tr_div <= main_tr_div + 1;
+         if main_tr_div = x"FFFF" then
+            main_tr_ms <= main_tr_ms + 1;
+         end if;
+         if main_tr_we = '1' then
+            main_tr_seq <= main_tr_seq + 1;
+         end if;
+      end if;
+   end process p_main_trace;
+   main_tr_entry <= std_logic_vector(main_tr_seq) & std_logic_vector(main_tr_ms) & main_tr_d;
+
+   i_ide_trace : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 9,
+         DATA_WIDTH => 96,
+         FALLING_B  => true                    -- QNICE's device convention
+      )
+      port map (
+         clock_a    => main_clk,
+         address_a  => std_logic_vector(main_tr_seq(8 downto 0)),
+         data_a     => main_tr_entry,
+         wren_a     => main_tr_we,
+         q_a        => open,
+         clock_b    => qnice_clk_i,
+         address_b  => qnice_dev_addr_i(11 downto 3),
+         q_b        => qnice_tr_q
+      ); -- i_ide_trace
+
+   -- Native (M2M-UPSTREAM native): the PC's picture size as ascal sees it: the pixels (ce) of
+   -- the widest line's display enable, the lines of a frame; the SVGA framebuffer's size while
+   -- ascal shows it. A size counts once it held for eight frames (mode changes pass through
+   -- odd frames).
+   p_main_native : process (main_clk)
+      variable v_de : std_logic;
+      variable v_w  : unsigned(11 downto 0);
+      variable v_l  : unsigned(11 downto 0);
+   begin
+      if rising_edge(main_clk) then
+         if video_ce_o = '1' then
+            v_de := not (video_hblank_o or video_vblank_o);
+            v_w  := main_nat_wmax;
+            v_l  := main_nat_lines;
+            main_nat_de_d <= v_de;
+            main_nat_vb_d <= video_vblank_o;
+            if v_de = '1' then
+               main_nat_cnt <= main_nat_cnt + 1;
+            elsif main_nat_de_d = '1' then             -- a line ended
+               if main_nat_cnt > v_w then
+                  v_w := main_nat_cnt;
+               end if;
+               v_l := v_l + 1;
+               main_nat_cnt <= (others => '0');
+            end if;
+            if video_vblank_o = '1' and main_nat_vb_d = '0' then   -- a frame ended
+               if v_w = main_nat_w and v_l = main_nat_h then
+                  if main_nat_same = 7 then
+                     main_nat_size <= std_logic_vector(v_w & v_l);
+                  else
+                     main_nat_same <= main_nat_same + 1;
+                  end if;
+               else
+                  main_nat_same <= 0;
+               end if;
+               main_nat_w <= v_w;
+               main_nat_h <= v_l;
+               v_w := (others => '0');
+               v_l := (others => '0');
+            end if;
+            main_nat_wmax  <= v_w;
+            main_nat_lines <= v_l;
+         end if;
+         if main_fb_en = '1' then
+            main_nat_size <= fb_hsize_o & fb_vsize_o;
+         end if;
+      end if;
+   end process p_main_native;
+
+   i_cdc_native : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 24
+      )
+      port map (
+         src_data_i => main_nat_size,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_nat_size
+      ); -- i_cdc_native
+
    -- The L2 cache's switch into the PC's clock
    i_cdc_l2_on : entity work.cdc_stable
       generic map (
@@ -1118,7 +1240,61 @@ begin
    -- QNICE clock domain: video and audio settings, core devices (none yet)
    ---------------------------------------------------------------------------------------------
 
-   qnice_video_mode_o <= C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
+   -- Native: the smallest HDMI mode the PC's picture fits into at its own size: 640x480 at
+   -- 60 Hz for 640x480 and 640x400, 720x480 for 720x400 text, 800x600 and 1024x768 for SVGA.
+   -- The core gives 320/360-pixel lines without the VGA's pixel doubling and 200-line modes
+   -- without line doubling: those come doubled (320x200 as 640x400). The scaler copies pixels
+   -- into a window of that size in the middle; the monitor scales. Nothing sensible yet (the
+   -- BIOS before the VGA BIOS) or larger than 1024x768: 640x480 or 1280x1024, scaled.
+   p_qnice_native : process (qnice_clk_i)
+      variable v_w  : natural range 0 to 4095;
+      variable v_h  : natural range 0 to 4095;
+      variable v_tw : natural range 0 to 8191;
+      variable v_th : natural range 0 to 8191;
+   begin
+      if rising_edge(qnice_clk_i) then
+         v_w := to_integer(unsigned(qnice_nat_size(23 downto 12)));
+         v_h := to_integer(unsigned(qnice_nat_size(11 downto 0)));
+         if v_w <= 400 then
+            v_tw := 2 * v_w;
+         else
+            v_tw := v_w;
+         end if;
+         if v_h <= 300 then
+            v_th := 2 * v_h;
+         else
+            v_th := v_h;
+         end if;
+         qnice_nat_on <= '1';
+         if v_w < 256 or v_h < 160 then
+            qnice_nat_mode <= C_VIDEO_HDMI_640_60;
+            qnice_nat_on   <= '0';
+         elsif v_tw <= 640 and v_th <= 480 then
+            qnice_nat_mode <= C_VIDEO_HDMI_640_60;
+         elsif v_tw <= 720 and v_th <= 480 then
+            qnice_nat_mode <= C_VIDEO_HDMI_720_5994;
+         elsif v_tw <= 800 and v_th <= 600 then
+            qnice_nat_mode <= C_VIDEO_SVGA_800_60;
+         elsif v_tw <= 1024 and v_th <= 768 then
+            qnice_nat_mode <= C_VIDEO_SVGA_1024_60;
+         else
+            qnice_nat_mode <= C_VIDEO_SVGA_1280_60;
+            qnice_nat_on   <= '0';
+         end if;
+         if v_tw <= 4095 and v_th <= 4095 then
+            qnice_nat_w <= v_tw;
+            qnice_nat_h <= v_th;
+         end if;
+      end if;
+   end process p_qnice_native;
+
+   qnice_native_o     <= qnice_nat_on & std_logic_vector(to_unsigned(qnice_nat_w, 12)) &
+                         std_logic_vector(to_unsigned(qnice_nat_h, 12))
+                            when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                         (others => '0');
+
+   qnice_video_mode_o <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                         C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
                          C_VIDEO_SVGA_1024_60  when qnice_osm_control_i(C_MENU_HDMI_1024) = '1' else
                          C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_HDMI_800)  = '1' else
                          C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
@@ -1134,12 +1310,14 @@ begin
    qnice_osm_cfg_scaling_o    <= (others => '1');
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
    -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
-   qnice_ascal_mode_o         <= "01" when qnice_osm_control_i(C_MENU_FLT_SMOOTH) = '1' else
+   qnice_ascal_mode_o         <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                                 "01" when qnice_osm_control_i(C_MENU_FLT_SMOOTH) = '1' else
                                  "00" when qnice_osm_control_i(C_MENU_FLT_PIXELS) = '1' else
                                  "10";
    -- the Scanlines menu, in every HDMI mode: lined up in 1280x1024 only, where a 480-line mode
    -- is exactly doubled (in the others a line is 1.25 to 1.92 output lines, the dark lines beat)
-   qnice_scanlines_o          <= "01" when qnice_osm_control_i(C_MENU_SL_25) = '1' else
+   qnice_scanlines_o          <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                                 "01" when qnice_osm_control_i(C_MENU_SL_25) = '1' else
                                  "10" when qnice_osm_control_i(C_MENU_SL_50) = '1' else
                                  "00";
    qnice_ascal_polyphase_o    <= '0';
@@ -1161,6 +1339,9 @@ begin
    --                log count, VGA vsync count, snapshot count; 0x0018..1C the L2's line
    --                fills from the cache (lo, hi) and from the SDRAM (lo, hi), whether it is on
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
+   --    0x2000..2FFF read: the IDE trace (p_main_trace), event n at 0x2000 + 8 * (n mod 512):
+   --                its sequence number, milliseconds, then the event (pc_mgmt.vhd) in four
+   --                words, the high one first
    p_qnice_pc_ctl : process (qnice_clk_i)
    begin
       if falling_edge(qnice_clk_i) then
@@ -1202,6 +1383,16 @@ begin
             qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 143 downto 16 * v_word + 128);
          elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
             qnice_dev_data_o <= "000000" & qnice_dbg_log_q;
+         elsif qnice_dev_addr_i(27 downto 12) = x"0002" then
+            case v_word is
+               when 0      => qnice_dev_data_o <= qnice_tr_q(95 downto 80);
+               when 1      => qnice_dev_data_o <= qnice_tr_q(79 downto 64);
+               when 2      => qnice_dev_data_o <= qnice_tr_q(63 downto 48);
+               when 3      => qnice_dev_data_o <= qnice_tr_q(47 downto 32);
+               when 4      => qnice_dev_data_o <= qnice_tr_q(31 downto 16);
+               when 5      => qnice_dev_data_o <= qnice_tr_q(15 downto 0);
+               when others => null;
+            end case;
          end if;
       end if;
    end process p_qnice_dev_data;

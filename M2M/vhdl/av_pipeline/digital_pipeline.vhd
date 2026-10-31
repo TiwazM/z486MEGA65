@@ -98,6 +98,11 @@ entity digital_pipeline is
       -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second line of the HDMI
       -- picture darker by 25 % (01) or 50 % (10), 00 off (hdmi_clk_i domain)
       hdmi_scanlines_i         : in  std_logic_vector(1 downto 0) := "00";
+      -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = ascal's window is 23..12 x
+      -- 11..0 output pixels in the middle of the picture instead of the video mode's 4:3 one:
+      -- the core asks for an HDMI mode at its own resolution and a window of its picture's
+      -- size (or a whole multiple of it), so the scaler copies pixels and the monitor scales
+      hdmi_native_i            : in  std_logic_vector(24 downto 0) := (others => '0');
 
       -- M2M-UPSTREAM screen-center (AExp 2026-07-08): signed input-crop edge
       -- offsets (MiSTer-style "choose the source rectangle") from the CFD
@@ -168,6 +173,8 @@ architecture synthesis of digital_pipeline is
    signal hdmi_shift             : integer;
 
    -- Auto-calculate display dimensions based on an 4:3 aspect ratio (base window)
+   signal hdmi_native_w          : integer;                         -- M2M-UPSTREAM native
+   signal hdmi_native_h          : integer;
    signal hdmi_hmin_base         : integer;
    signal hdmi_hmax_base         : integer;
    signal hdmi_vmin_base         : integer;
@@ -273,7 +280,11 @@ begin
 
    -- In HDMI 4:3 mode, ignore crop (zoom-in).
    -- We are using constants here to avoid that large networks are synthesized.
-   hdmi_hmin_base <= 0                                                                     when hdmi_crop_mode_i = '1' else
+   hdmi_native_w  <= to_integer(unsigned(hdmi_native_i(23 downto 12)));
+   hdmi_native_h  <= to_integer(unsigned(hdmi_native_i(11 downto 0)));
+
+   hdmi_hmin_base <= (hdmi_video_mode.H_PIXELS - hdmi_native_w) / 2                        when hdmi_native_i(24) = '1' else  -- M2M-UPSTREAM native
+                0                                                                         when hdmi_crop_mode_i = '1' else
                 (G_VIDEO_MODE_VECTOR(0).H_PIXELS-G_VIDEO_MODE_VECTOR(0).V_PIXELS*4/3)/2   when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_50  else
                 (G_VIDEO_MODE_VECTOR(1).H_PIXELS-G_VIDEO_MODE_VECTOR(1).V_PIXELS*4/3)/2   when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else
@@ -286,7 +297,8 @@ begin
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 0; -- Not used
 
-   hdmi_hmax_base <= hdmi_video_mode.H_PIXELS-1                                               when hdmi_crop_mode_i = '1' else
+   hdmi_hmax_base <= (hdmi_video_mode.H_PIXELS - hdmi_native_w) / 2 + hdmi_native_w - 1       when hdmi_native_i(24) = '1' else  -- M2M-UPSTREAM native
+                hdmi_video_mode.H_PIXELS-1                                                when hdmi_crop_mode_i = '1' else
                 (G_VIDEO_MODE_VECTOR(0).H_PIXELS+G_VIDEO_MODE_VECTOR(0).V_PIXELS*4/3)/2-1 when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_50  else
                 (G_VIDEO_MODE_VECTOR(1).H_PIXELS+G_VIDEO_MODE_VECTOR(1).V_PIXELS*4/3)/2-1 when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
                 hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else
@@ -299,7 +311,8 @@ begin
                 hdmi_video_mode.H_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 hdmi_video_mode.H_PIXELS-1; -- Not used
 
-   hdmi_vmin_base <= 0                                                                        when hdmi_crop_mode_i = '1' else
+   hdmi_vmin_base <= (hdmi_video_mode.V_PIXELS - hdmi_native_h) / 2                           when hdmi_native_i(24) = '1' else  -- M2M-UPSTREAM native
+                0                                                                         when hdmi_crop_mode_i = '1' else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_50  else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
                 0                                                                         when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else
@@ -312,7 +325,8 @@ begin
                 (G_VIDEO_MODE_VECTOR(9).V_PIXELS-G_VIDEO_MODE_VECTOR(9).H_PIXELS*3/4)/2   when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 0; -- Not used
 
-   hdmi_vmax_base <= hdmi_video_mode.V_PIXELS-1                                               when hdmi_crop_mode_i = '1' else
+   hdmi_vmax_base <= (hdmi_video_mode.V_PIXELS - hdmi_native_h) / 2 + hdmi_native_h - 1       when hdmi_native_i(24) = '1' else  -- M2M-UPSTREAM native
+                hdmi_video_mode.V_PIXELS-1                                                when hdmi_crop_mode_i = '1' else
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_50  else
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else

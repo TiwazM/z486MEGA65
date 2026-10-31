@@ -119,7 +119,21 @@ boots from it.
   menu has no memory before that, and the line read "Hard disk:  Hard
   dis..." (the line's own text taken for the name).
 - HDMI modes: 720p 60 Hz (the PC's 4:3 picture between bars), 480p, 800x600,
-  1024x768 and 1280x1024 at 60 Hz. 1280x1024 is a 5:4 monitor's own
+  1024x768 and 1280x1024 at 60 Hz, and "Native resolution": the HDMI output
+  follows the PC's own picture size and the monitor does the only scaling
+  (M2M-UPSTREAM native, `digital_pipeline.vhd`: ascal's window is the
+  picture's size in the middle of the output). `mega65.vhd` measures the
+  picture as ascal sees it (the widest line's pixels, the lines of a frame;
+  a size counts once it held for eight frames) and picks the smallest mode it
+  fits into: 720x400 text in 720x480 (40 lines of bars), 640x480 and 640x400
+  in 640x480, SVGA 800x600 and 1024x768 in their own modes; 320- and
+  360-pixel lines and 200-line modes come doubled (the core gives them
+  without the VGA's doubling), so 320x200 is 640x400. Native uses nearest
+  neighbour and no scanlines, and the monitor resyncs when the PC changes
+  mode, as a real VGA monitor does. On an R6 with a 1280x1024 monitor the DOS
+  prompt came out as 720x480 and The 7th Guest's VESA screens as 640x480,
+  switching by themselves. The HDMI modes all exist already; the
+  PC's 70 Hz text mode goes out at 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
   resolution: the picture is 1280x960 between bars and the monitor scales
   nothing, where 480p or 720p are scaled twice (by the core and by the
   monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
@@ -163,6 +177,12 @@ boots from it.
   memory, `D`/`P` a device's registers, as MegaMac does), no debug mode
   needed. `qmon.py status` (`disks` the mounted images, the sector counts and
   times; `boot` and `sweep` reset the PC at other SDRAM clock phases).
+  `qmon.py ide [N]` prints the last N of 512 events of the IDE trace
+  (`pc_mgmt.vhd`, `pc_cdrom.vhd`; window 2 of `C_DEV_PC_CTL`): every command
+  of both channels with its task file, every status the controllers set,
+  every block done, reset, floppy request and SD answer, with milliseconds
+  before the newest. It is not cleared by a PC reset, so it shows what led up
+  to a hang.
   `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
   Cursor Up, then press Help).
 

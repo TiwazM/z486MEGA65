@@ -17,6 +17,9 @@
 #                             2 s); on/off switches it (on empties it first)
 #   qmon.py disks clear       zero the disks' statistics
 #   qmon.py disks watch [s]   sectors per second over s seconds (default 10)
+#   qmon.py ide [N]           the IDE trace (mega65.vhd, pc_mgmt.vhd): the last N events
+#                             (default 40, at most 512) of both IDE channels and the floppies,
+#                             with milliseconds before the newest
 import os, re, sys, termios, time
 
 PORT = os.environ.get("QMON_PORT", "/dev/cu.usbserial-101")
@@ -214,6 +217,76 @@ def disks_watch(secs):
           (dt, rd, rd / dt, rd / dt / 2, wr, wr / dt, wr / dt / 2))
 
 
+ST_BITS = [(0x80, "BSY"), (0x40, "DRDY"), (0x10, "DSC"), (0x08, "DRQ"), (0x04, "IRQ"),
+           (0x02, "LAST"), (0x01, "ERR")]
+
+
+def st_text(st):
+    return "+".join(n for b, n in ST_BITS if st & b) or "0"
+
+
+def ide_event(t, a, b, c, d):
+    unit = ["A:", "B:", "HDD", "CD"]
+    if t == 1:
+        lba = (b & 0xF) << 24 | d
+        where = "LBA %d" % lba if b & 0x40 else "CHS cyl %d sec %d" % (d >> 8, d & 0xFF)
+        return "IDE0 command %02X  %s  count %d%s" % (a, where, c or 256, "  (slave)" if b & 0x10 else "")
+    if t == 2:
+        return "IDE0 status %s  error %02X  count %d  cyl/sec %06X" % (st_text(a), b, c, d)
+    if t == 3:
+        return "IDE0 block done  %s%s  left %d  LBA %d" % ("write" if a & 2 else "read",
+                                                         "" if a & 1 else " (none going on)", c, d)
+    if t == 4:
+        return "IDE0 reset  drive/head %02X" % a
+    if t == 5:
+        return "floppy %s %s LBA %d" % ("write" if a & 1 else "read", "B:" if d & 0x8000 else "A:",
+                                        d & 0x7FFF)
+    if t == 6:
+        return "SD %s %s LBA %d  ahead %d%s" % (unit[b & 3], "write" if a & 2 else "read", d, c,
+                                                "  FAILED" if a & 1 else "")
+    if t == 8:
+        return "IDE1 command %02X  drive/head %02X  features %02X  limit %d" % (a, b, c, d >> 16)
+    if t == 9:
+        return "IDE1 status %s  error %02X  reason %02X  bytes %d  words %d" % (
+            st_text(a), b, c, d >> 16, d & 0xFFFF)
+    if t == 10:
+        return "IDE1 packet %02X %02X  LBA %d  byte 8 %02X" % (a, b, d, c)
+    if t == 11:
+        return "IDE1 block done  phase %s  position %d" % (
+            ["none", "packet", "data in", "data out"][a & 3], d)
+    if t == 12:
+        return "IDE1 reset  drive/head %02X" % a
+    return "? %X %02X %02X %02X %08X" % (t, a, b, c, d)
+
+
+def ide(n):
+    pc_dev()
+    poke(0xFFF5, 0x0002)                   # the IDE trace: device addresses 0x2000.., window 2
+    raw = dump(0x8000, 0x8FFF)
+    ev = []
+    for i in range(512):
+        w = raw[8 * i:8 * i + 6]
+        if None in w or w[2] >> 12 == 0:
+            continue
+        ev.append(w)
+    if not ev:
+        print("no IDE events yet")
+        return
+    # the ring holds the last 512 sequence numbers: the newest is the one without a successor
+    # (the numbers wrap at 65536)
+    seqs = {w[0] for w in ev}
+    ends = [q for q in seqs if (q + 1) & 0xFFFF not in seqs]
+    newest = ends[0] if len(ends) == 1 else max(seqs)
+    ev = [w for w in ev if (newest - w[0]) & 0xFFFF < 512]
+    ev.sort(key=lambda w: (newest - w[0]) & 0xFFFF, reverse=True)
+    t_new = ev[-1][1]
+    for w in ev[-n:]:
+        t, a = w[2] >> 12, w[2] & 0xFF
+        b, c = w[3] >> 8, w[3] & 0xFF
+        d = w[4] << 16 | w[5]
+        print("%5d  -%6d ms  %s" % (w[0], (t_new - w[1]) & 0xFFFF, ide_event(t, a, b, c, d)))
+
+
 args = sys.argv[1:]
 if args and args[0] == "l2":
     l2(args[1] if len(args) > 1 else "")
@@ -223,6 +296,8 @@ elif args[:2] == ["disks", "watch"]:
     disks_watch(float(args[2]) if len(args) > 2 else 10)
 elif args and args[0] == "disks":
     disks()
+elif args and args[0] == "ide":
+    ide(int(args[1]) if len(args) > 1 else 40)
 elif args and args[0] == "status":
     s = status()
     print(line(s), " vga_chk %d vga_bad %d sdram_busy %d reset %d snap %d" %

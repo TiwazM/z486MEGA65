@@ -237,6 +237,9 @@ port (
    -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second HDMI line darker,
    -- 00 off, 01 25 %, 10 50 % (digital_pipeline.vhd)
    qnice_scanlines_i       : in    std_logic_vector(1 downto 0) := "00";
+   -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = the picture unscaled in a
+   -- window of 23..12 x 11..0 HDMI pixels in the middle (digital_pipeline.vhd)
+   qnice_native_i          : in    std_logic_vector(24 downto 0) := (others => '0');
    qnice_flip_joyports_i   : in    std_logic;
    qnice_osm_control_m_o   : out   std_logic_vector(255 downto 0);
    qnice_gp_reg_o          : out   std_logic_vector(255 downto 0);
@@ -1003,6 +1006,7 @@ begin
          qnice_poly_wr_i         => qnice_poly_wr,
          qnice_ascal_mode_i      => qnice_ascal_mode,
          qnice_scanlines_i       => qnice_scanlines_i,   -- M2M-UPSTREAM scanlines
+         qnice_native_i          => qnice_native_i,      -- M2M-UPSTREAM native
 
          -- M2M-UPSTREAM screen-center: HDMI ascal INPUT-crop per-edge offsets from
          -- the CFD gp_reg (words 4-7, low 12 bits each); QNICE clock domain

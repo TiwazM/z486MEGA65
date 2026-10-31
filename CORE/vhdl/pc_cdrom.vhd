@@ -69,7 +69,16 @@ entity pc_cdrom is
 
       -- the sector buffer (disk_sd's ring slot of the answer; read data one clock later)
       buf_addr_o        : out std_logic_vector(8 downto 0);
-      buf_rd_i          : in  std_logic_vector(7 downto 0)
+      buf_rd_i          : in  std_logic_vector(7 downto 0);
+
+      -- the IDE trace (pc_mgmt.vhd's format): 6 an SD answer (B = 3, the unit), 8 a command
+      -- (A command, B drive/head, C features, data the byte count limit & sector), 9 its
+      -- registers set (A status, B error, C interrupt reason, data byte count & block words),
+      -- 10 a packet (A, B, C its bytes 0, 1, 8, data bytes 2..5), 11 request 101 (A the phase:
+      -- 1 packet, 2 data in, 3 data out; data the transfer's position), 12 a reset (A
+      -- drive/head)
+      trace_we_o        : out std_logic := '0';
+      trace_o           : out std_logic_vector(63 downto 0) := (others => '0')
    );
 end entity pc_cdrom;
 
@@ -558,6 +567,7 @@ begin
          mgmt_read_o  <= '0';
          mgmt_write_o <= '0';
          d_start      <= '0';
+         trace_we_o   <= '0';
          done_s       <= done_s(1 downto 0) & sd_done_i;
 
          case state is
@@ -592,6 +602,10 @@ begin
             -- 2 cylinder, 3 (LBA48) 0, 4 the block size in words, 5 status/drive-head last (it
             -- rewinds ide.v's buffer pointers and clears the request)
             when S_WREGS =>
+               if idx = 0 then
+                  trace_we_o <= '1';
+                  trace_o    <= x"90" & w_st & w_err & w_cnt & w_cyl & w_words;
+               end if;
                b_addr <= C_IDE & std_logic_vector(to_unsigned(idx, 8));
                case idx is
                   when 0      => b_data <= w_err & x"80";
@@ -668,6 +682,8 @@ begin
             -- reset (request 110): BSY, then the signature (b_q: register 5 = {cmd, drive/head})
             ----------------------------------------------------------------------------------
             when S_RST1 =>
+               trace_we_o <= '1';
+               trace_o    <= x"C0" & b_q(7 downto 0) & x"0000" & x"00000000";
                w_err   <= x"01";
                w_cnt   <= x"01";
                w_sec   <= x"01";
@@ -721,6 +737,8 @@ begin
                state <= S_CMD;
 
             when S_CMD =>
+               trace_we_o <= '1';
+               trace_o    <= x"80" & t_cmd & t_dh & t_feat & t_cyl & t_sec & x"00";
                -- the registers as read, by default
                w_err   <= x"00";
                w_cnt   <= t_cnt;
@@ -791,6 +809,9 @@ begin
             -- request 101: the PC has written the packet, read a block or written one
             ----------------------------------------------------------------------------------
             when S_BLK =>
+               trace_we_o <= '1';
+               trace_o    <= x"B0" & std_logic_vector(to_unsigned(t_phase'pos(phase), 8)) &
+                             x"0000" & std_logic_vector(x_pos);
                case phase is
                   when P_PKT =>
                      idx   <= 0;
@@ -840,6 +861,8 @@ begin
             -- the packet's command
             ----------------------------------------------------------------------------------
             when S_SCSI =>
+               trace_we_o <= '1';
+               trace_o    <= x"A0" & cdb(0) & cdb(1) & cdb(8) & cdb(2) & cdb(3) & cdb(4) & cdb(5);
                v_alloc := to_integer(unsigned(cdb(7)) & unsigned(cdb(8)));   -- the 10-byte ones'
                if ua = '1' and cdb(0) /= x"12" and cdb(0) /= x"03" then
                   ua <= '0';
@@ -1086,6 +1109,9 @@ begin
 
             when S_SD_WAIT =>
                if done_s(2) /= done_s(1) then
+                  trace_we_o <= '1';
+                  trace_o    <= x"60" & "0000000" & sd_err_i & x"03" & sd_req_cnt_o(7 downto 0) &
+                                sd_req_lba_o;
                   if sd_err_i = '1' then
                      fail(x"3", x"11", x"00");       -- MEDIUM ERROR, unrecovered read error
                   else

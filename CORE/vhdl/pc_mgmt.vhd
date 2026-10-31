@@ -93,7 +93,21 @@ entity pc_mgmt is
       buf_addr_o        : out std_logic_vector(8 downto 0) := (others => '0');
       buf_we_o          : out std_logic := '0';
       buf_wd_o          : out std_logic_vector(7 downto 0) := (others => '0');
-      buf_rd_i          : in  std_logic_vector(7 downto 0)
+      buf_rd_i          : in  std_logic_vector(7 downto 0);
+
+      -- the IDE trace (mega65.vhd keeps it): one event per clock at most, bits 63..60 the
+      -- event, 59..56 0, then three bytes A, B, C and 32 bits of data (CD-ROM events from
+      -- pc_cdrom.vhd too)
+      --   1 a command, first channel: A command, B drive/head, C count, data cylinder & sector
+      --   2 its registers set: A pc_mgmt's status (w_st), B error, C count, data cylinder & sector
+      --   3 request 101 (a block done): A bit 1 write, bit 0 a transfer going on, C sectors
+      --     left, data the LBA
+      --   4 a reset (request 110): A drive/head
+      --   5 a floppy request: A bit 0 write, data drive (bit 15) and LBA
+      --   6 an SD answer: A bit 1 write, bit 0 failed, B the unit, C count (7..0), data the LBA
+      --   8-12 the CD-ROM drive (pc_cdrom.vhd)
+      trace_we_o        : out std_logic;
+      trace_o           : out std_logic_vector(63 downto 0)
    );
 end entity pc_mgmt;
 
@@ -259,6 +273,12 @@ architecture synthesis of pc_mgmt is
    signal cd_req_lba  : std_logic_vector(31 downto 0);
    signal cd_req_cnt  : std_logic_vector(8 downto 0);
    signal cd_buf_addr : std_logic_vector(8 downto 0);
+   signal cd_tr_we    : std_logic;
+   signal cd_tr       : std_logic_vector(63 downto 0);
+
+   -- this side's trace events
+   signal tr_we       : std_logic := '0';
+   signal tr          : std_logic_vector(63 downto 0) := (others => '0');
 
    -- the units as disk_sd has them (crossed) and as the PC's controllers have them
    signal m_dst       : std_logic_vector(159 downto 0);
@@ -350,6 +370,8 @@ begin
    sd_req_lba_o     <= cd_req_lba when cd_gnt = '1' else pm_req_lba;
    sd_req_cnt_o     <= cd_req_cnt when cd_gnt = '1' else pm_req_cnt;
    buf_addr_o       <= cd_buf_addr when cd_gnt = '1' else pm_buf_addr;
+   trace_we_o       <= tr_we or cd_tr_we;
+   trace_o          <= cd_tr when cd_tr_we = '1' else tr;
 
    i_cdrom : entity work.pc_cdrom
       port map (
@@ -370,7 +392,9 @@ begin
          sd_done_i        => sd_done_i,
          sd_err_i         => sd_err_i,
          buf_addr_o       => cd_buf_addr,
-         buf_rd_i         => buf_rd_i
+         buf_rd_i         => buf_rd_i,
+         trace_we_o       => cd_tr_we,
+         trace_o          => cd_tr
       ); -- i_cdrom
 
    p_mgmt : process (clk_i)
@@ -383,6 +407,7 @@ begin
          pm_read  <= '0';
          pm_write <= '0';
          buf_we_o     <= '0';
+         tr_we        <= '0';
          done_s       <= done_s(1 downto 0) & sd_done_i;
 
          case state is
@@ -418,6 +443,10 @@ begin
             -- the IDE task file: 0 error/block, 1 sector/count, 2 cylinder, 3, 4 (LBA48) 0, 5
             -- status/drive-head last (it rewinds ide.v's buffer pointer and clears the request)
             when S_WREGS =>
+               if idx = 0 then
+                  tr_we <= '1';
+                  tr    <= x"20" & w_st & w_err & w_cnt & x"00" & w_cyl & w_sec;
+               end if;
                b_addr <= C_IDE & std_logic_vector(to_unsigned(idx, 8));
                case idx is
                   when 0      => b_data <= w_err & w_blk;
@@ -678,6 +707,8 @@ begin
             -- a floppy sector
             ----------------------------------------------------------------------------------
             when S_REQ_GOT =>
+               tr_we <= '1';
+               tr    <= x"50" & "0000000" & r_wr & x"0000" & x"0000" & b_q;
                -- b_q: bit 15 = drive B:, 14..0 = the LBA
                pm_req_unit <= '0' & b_q(15);
                pm_req_lba  <= x"0000" & '0' & b_q(14 downto 0);
@@ -701,6 +732,9 @@ begin
 
             when S_SD_WAIT =>
                if done_s(2) /= done_s(1) then
+                  tr_we <= '1';
+                  tr    <= x"60" & "000000" & pm_req_wr & sd_err_i & "000000" & pm_req_unit &
+                           pm_req_cnt(7 downto 0) & pm_req_lba;
                   r_ok  <= not sd_err_i;
                   idx   <= 0;
                   state <= sd_next;
@@ -779,6 +813,8 @@ begin
             -- the hard disk: reset (request 110)
             ----------------------------------------------------------------------------------
             when S_IDE_RST1 =>
+               tr_we <= '1';
+               tr    <= x"40" & b_q(7 downto 0) & x"0000" & x"00000000";
                -- b_q: reg 5 = {cmd, drive/head}: answer for the drive selected (the slave, never
                -- there, reads cylinder FFFFh)
                w_err <= x"00";
@@ -824,6 +860,8 @@ begin
                state <= S_IDE_CMD;
 
             when S_IDE_CMD =>
+               tr_we <= '1';
+               tr    <= x"10" & t_cmd & t_dh & t_cnt & x"00" & t_cyl & t_sec;
                -- the registers as read, by default
                w_err <= x"00";
                w_blk <= x"00";
@@ -993,6 +1031,9 @@ begin
             -- the hard disk: request 101, the CPU has a block: the next read, or this write
             ----------------------------------------------------------------------------------
             when S_IDE_BLK =>
+               tr_we <= '1';
+               tr    <= x"30" & "000000" & i_wr & i_act & x"00" & std_logic_vector(i_cnt) &
+                        "0000" & std_logic_vector(i_lba);
                if i_act = '0' then
                   w_err <= x"04";                    -- nothing was going on: aborted
                   w_blk <= x"00";
