@@ -441,8 +441,18 @@ ARCHITECTURE rtl OF ascal IS
   SIGNAL o_iendframe0,o_iendframe02,o_iendframe1,o_iendframe12 : std_logic;
   SIGNAL o_bufup0,o_bufup1,o_inter : std_logic;
   SIGNAL o_ibuf0,o_ibuf1,o_obuf0,o_obuf1 : natural RANGE 0 TO 2;
-  TYPE enum_o_state IS (sDISP,sHSYNC,sREAD,sWAITREAD);
+  -- M2M-UPSTREAM late-fetch (z486 for MEGA65, 2026-10-31): the line fetch (sREAD,
+  -- sWAITREAD) moved out of this state machine into the reader (o_rstate), which
+  -- takes the fetches that sQUEUE queues. Before, a fetch that took longer than an
+  -- output line (1280x1024 with reduced blanking: 15.8 us lines, 15 HyperRAM bursts
+  -- of 128 bytes take ~13-20 us) held up the next line's vertical accounting: it ran
+  -- late, missed the o_vcpt_pre2=o_vmin start of frame (the line address then ran
+  -- on through the whole RAM: noise) and left o_vacptl/o_vfrac behind the display.
+  -- Original: TYPE enum_o_state IS (sDISP,sHSYNC,sREAD,sWAITREAD);
+  TYPE enum_o_state IS (sDISP,sHSYNC,sQUEUE);
   SIGNAL o_state : enum_o_state;
+  TYPE enum_o_rstate IS (sRIDLE,sREAD,sWAITREAD);
+  SIGNAL o_rstate : enum_o_rstate;
   TYPE enum_o_copy IS (sWAIT,sSHIFT,sCOPY);
   SIGNAL o_copy : enum_o_copy;
   SIGNAL o_pshift : natural RANGE 0 TO 15;
@@ -497,6 +507,21 @@ ARCHITECTURE rtl OF ascal IS
   SIGNAL o_alt,o_altx : unsigned(3 DOWNTO 0);
   SIGNAL o_hdown,o_vdown : std_logic;
   SIGNAL o_primv,o_lastv,o_bibv : unsigned(0 TO 2);
+  -- M2M-UPSTREAM late-fetch: the fetches waiting for the reader, oldest first: the
+  -- line (o_vacpt), its line buffers (o_alt) and the preload (o_fload: 2 = line 0,
+  -- 1 = line 1, 0 = the line o_vacpt); the fetch being read (o_rvacpt, o_alt,
+  -- o_rkind); its bursts' line buffers, a FIFO like o_primv (o_altx took o_alt as
+  -- each burst's copy began, by then possibly the next fetch's)
+  TYPE arr_alt IS ARRAY (natural RANGE <>) OF unsigned(3 DOWNTO 0);
+  TYPE arr_line IS ARRAY (natural RANGE <>) OF unsigned(11 DOWNTO 0);
+  TYPE arr_fload IS ARRAY (natural RANGE <>) OF natural RANGE 0 TO 3;
+  SIGNAL o_rqv : arr_line(0 TO 2);
+  SIGNAL o_rqa : arr_alt(0 TO 2);
+  SIGNAL o_rqf : arr_fload(0 TO 2);
+  SIGNAL o_rqn : natural RANGE 0 TO 3;
+  SIGNAL o_rvacpt : unsigned(11 DOWNTO 0);
+  SIGNAL o_rkind : natural RANGE 0 TO 3;
+  SIGNAL o_altv : arr_alt(0 TO 2);
   TYPE arr_uint4 IS ARRAY (natural RANGE <>) OF natural RANGE 0 TO 15;
   SIGNAL o_off : arr_uint4(0 TO 2);
   SIGNAL o_bibu : std_logic :='0';
@@ -1866,6 +1891,10 @@ BEGIN
     VARIABLE hcarry_v,vcarry_v : boolean;
     VARIABLE dif_v : natural RANGE 0 TO 8*OHRES-1;
     VARIABLE off_v : natural RANGE 0 TO 15;
+    VARIABLE rqv_v : arr_line(0 TO 2);   -- M2M-UPSTREAM late-fetch: the queue
+    VARIABLE rqa_v : arr_alt(0 TO 2);
+    VARIABLE rqf_v : arr_fload(0 TO 2);
+    VARIABLE rqn_v : natural RANGE 0 TO 3;
   BEGIN
     IF o_reset_na='0' THEN
       o_acpt<=0;
@@ -1878,6 +1907,8 @@ BEGIN
       o_sh<='0';
       o_copy<=sWAIT;
       o_state<=sDISP;
+      o_rstate<=sRIDLE;                  -- M2M-UPSTREAM late-fetch
+      o_rqn<=0;
       o_read<='0';
       o_read_pre<='0';
       o_readlev<=0;
@@ -2103,22 +2134,69 @@ BEGIN
           END IF;
           o_vcarrym <= o_vcarrym OR vcarry_v;
           o_prim <= false;
-          o_hbcpt<=0; -- Clear burst counter on line
+          -- M2M-UPSTREAM late-fetch: the reader clears o_hbcpt at each fetch.
+          -- Original: o_hbcpt<=0; -- Clear burst counter on line
           o_divstart<=to_std_logic(NOT vcarry_v);
           IF NOT vcarry_v  OR o_fload>0 THEN
             IF (o_vpe='1' AND o_vcarrym) OR o_fload>0 THEN
-              o_state<=sREAD;
+              o_state<=sQUEUE;           -- M2M-UPSTREAM late-fetch, original: sREAD
             ELSE
               o_state<=sDISP;
             END IF;
           END IF;
-          
+
+        WHEN sQUEUE =>
+          -- M2M-UPSTREAM late-fetch: queue this line's fetch for the reader (sHSYNC's
+          -- o_vacpt, o_vacptl and o_fload are in place now; the original's sREAD
+          -- took them as the fetch went, the same values when it was not late). A
+          -- full queue drops the fetch: its line buffer shows an older line.
+          rqv_v:=o_rqv; rqa_v:=o_rqa; rqf_v:=o_rqf; rqn_v:=o_rqn;
+          IF rqn_v<3 THEN
+            rqv_v(rqn_v):=o_vacpt;
+            IF o_fload=2 THEN
+              rqa_v(rqn_v):="1111";
+            ELSIF o_fload=1 THEN
+              rqa_v(rqn_v):="0100";
+            ELSE
+              rqa_v(rqn_v):=altx(o_vacptl + 1);
+            END IF;
+            rqf_v(rqn_v):=o_fload;
+            rqn_v:=rqn_v+1;
+          END IF;
+          o_rqv<=rqv_v; o_rqa<=rqa_v; o_rqf<=rqf_v; o_rqn<=rqn_v;
+          -- the original counted a preload line off as its fetch ended
+          IF o_fload>=1 THEN
+            o_fload<=o_fload-1;
+          END IF;
+          o_state<=sDISP;
+
+          --------------------------------------------------
+      END CASE;
+
+      ------------------------------------------------------
+      -- M2M-UPSTREAM late-fetch: the reader, the original sREAD and sWAITREAD, for one
+      -- queued fetch after the other. It takes a fetch when sQUEUE does not queue one
+      -- in the same clock (rather than merge the two).
+      CASE o_rstate IS
+        WHEN sRIDLE =>
+          IF o_rqn>0 AND o_state/=sQUEUE THEN
+            o_rvacpt<=o_rqv(0);
+            o_alt   <=o_rqa(0);
+            o_rkind <=o_rqf(0);
+            o_rqv(0 TO 1)<=o_rqv(1 TO 2);
+            o_rqa(0 TO 1)<=o_rqa(1 TO 2);
+            o_rqf(0 TO 1)<=o_rqf(1 TO 2);
+            o_rqn<=o_rqn-1;
+            o_hbcpt<=0;
+            o_rstate<=sREAD;
+          END IF;
+
         WHEN sREAD =>
           -- Read a block
           IF o_readlev<2 AND o_adrsb='1' THEN
             lev_inc_v:='1';
             o_read_pre<=NOT o_read_pre;
-            o_state <=sWAITREAD;
+            o_rstate <=sWAITREAD;
             o_bibu<=NOT o_bibu;
           END IF;
           prim_v:=to_std_logic(o_hbcpt=0);
@@ -2129,38 +2207,34 @@ BEGIN
             off_v:=0;
           END IF;
           o_adrsa<='1';
-          
+
         WHEN sWAITREAD =>
           IF o_readack='1' THEN
             o_hbcpt<=o_hbcpt+1;
             IF o_hbcpt<o_hburst-1 THEN
               -- If not finshed line, read more
-              o_state<=sREAD;
+              o_rstate<=sREAD;
             ELSE
-              o_state<=sDISP;
-              IF o_fload>=1 THEN
-                o_fload<=o_fload-1;
-              END IF;
+              o_rstate<=sRIDLE;
             END IF;
           END IF;
-          
-          --------------------------------------------------
       END CASE;
-      
+
       o_read<=o_read_pre AND o_run;
-      o_rline<=o_vacpt(0); -- Even/Odd line for interlaced video
-      
-      o_adrs_pre<=to_integer(o_vacpt) * to_integer(o_stride);
+      -- M2M-UPSTREAM late-fetch: the fetch's line (original: o_vacpt(0))
+      o_rline<=o_rvacpt(0); -- Even/Odd line for interlaced video
+
+      -- M2M-UPSTREAM late-fetch: the fetch's line and preload (original: o_vacpt and
+      -- o_fload), its line buffers set as the reader takes it (original: here, from
+      -- o_fload and o_vacptl)
+      o_adrs_pre<=to_integer(o_rvacpt) * to_integer(o_stride);
       IF o_adrsa='1' THEN
-        IF o_fload=2 THEN
+        IF o_rkind=2 THEN
           o_adrs<=to_unsigned(o_hbcpt * N_BURST,32);
-          o_alt<="1111";
-        ELSIF o_fload=1 THEN
+        ELSIF o_rkind=1 THEN
           o_adrs<=to_unsigned(o_hbcpt * N_BURST,32) + o_stride;
-          o_alt<="0100";
         ELSE
           o_adrs<=to_unsigned(o_adrs_pre + (o_hbcpt * N_BURST),32);
-          o_alt<=altx(o_vacptl + 1);
         END IF;
       END IF;
       
@@ -2175,7 +2249,7 @@ BEGIN
             IF o_off(0)>0 AND o_primv(0)='1' THEN
               o_copy<=sSHIFT;
             END IF;
-            o_altx<=o_alt;
+            o_altx<=o_altv(0);           -- M2M-UPSTREAM late-fetch, original: o_alt
           END IF;
           o_adturn<='0';
           o_pshift<=o_off(0) -1;
@@ -2323,25 +2397,29 @@ BEGIN
         o_lastv(0 TO 1)<=o_lastv(1 TO 2); -- Last buffer of line
         o_bibv (0 TO 1)<=o_bibv (1 TO 2); -- Double buffer select
         o_off  (0 TO 1)<=o_off  (1 TO 2); -- Start offset
+        o_altv (0 TO 1)<=o_altv (1 TO 2); -- Line buffers (M2M-UPSTREAM late-fetch)
       END IF;
-      
+
       IF lev_inc_v='1' THEN
         IF o_readlev=0 OR (o_readlev=1 AND lev_dec_v='1') THEN
           o_primv(0)<=prim_v;
           o_lastv(0)<=last_v;
           o_bibv (0)<=bib_v;
           o_off  (0)<=off_v;
+          o_altv (0)<=o_alt;
         ELSIF (o_readlev=1 AND lev_dec_v='0') OR
               (o_readlev=2 AND lev_dec_v='1') THEN
           o_primv(1)<=prim_v;
           o_lastv(1)<=last_v;
           o_bibv (1)<=bib_v;
           o_off  (1)<=off_v;
+          o_altv (1)<=o_alt;
         END IF;
         o_primv(2)<=prim_v;
         o_lastv(2)<=last_v;
         o_bibv (2)<=bib_v;
         o_off  (2)<=off_v;
+        o_altv (2)<=o_alt;
       END IF;
       
       ------------------------------------------------------

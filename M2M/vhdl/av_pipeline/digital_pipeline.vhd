@@ -310,7 +310,7 @@ begin
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else  -- M2M-UPSTREAM rtg-native-modes
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else  -- M2M-UPSTREAM rtg-native-modes
-                (G_VIDEO_MODE_VECTOR(9).V_PIXELS+G_VIDEO_MODE_VECTOR(9).H_PIXELS*3/4)/2   when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
+                (G_VIDEO_MODE_VECTOR(9).V_PIXELS+G_VIDEO_MODE_VECTOR(9).H_PIXELS*3/4)/2-1 when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else  -- M2M-UPSTREAM sxga-mode
                 hdmi_video_mode.V_PIXELS-1; -- Not used
 
    -- M2M-UPSTREAM screen-center: expose the ascal-measured input size (also

@@ -107,7 +107,16 @@ boots from it.
   `video_out_clock.vhd`, values from Xilinx's MMCM functions; the HDMI
   domain is timed at it), and the scaler is built without its bicubic and
   polyphase interpolators (`ASCAL_MASK` in `globals.vhd`), whose DSP paths
-  were the slowest of that domain.
+  were the slowest of that domain. Its 15.8 µs lines are shorter than the
+  scaler's fetch of a 640-pixel line from the HyperRAM (15 bursts, ~13-20
+  µs with the input's writes in between); ascal's line accounting waited for
+  each fetch, fell behind, missed the start of the frame and showed noise.
+  The fetches now run on their own from a queue (M2M-UPSTREAM late-fetch,
+  `ascal.vhd`), so the accounting keeps the display's time;
+  `CORE/sim/run_ascal.sh` compares ascal with a slow memory against a fast
+  one. On a 5:4 monitor 1280x1024 is the sharpest mode by far: 800x600 is
+  1.25x (every fourth pixel doubled, then smoothed) and the monitor scales
+  it again.
 - L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
   between the CPU's memory port and the SDRAM, as on a 486 board:
   direct-mapped, 16-byte lines, write-through. A line fill that hits is
