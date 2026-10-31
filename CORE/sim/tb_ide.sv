@@ -86,19 +86,20 @@ module tb_ide;
     wire sd_req, sd_req_wr, sd_done, sd_err;
     wire [1:0] sd_req_unit;
     wire [31:0] sd_req_lba;
+    wire [8:0] sd_req_cnt;
     wire [8:0] buf_addr;
     wire buf_we;
     wire [7:0] buf_wd, buf_rd;
-    wire [119:0] mnt;
+    wire [159:0] mnt;
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
 
     pc_mgmt #(.G_CLK_HZ(6400000)) mgmt (
         .clk_i(clk), .rst_i(!reset_n),
         .mgmt_address_o(mgmt_address), .mgmt_read_o(mgmt_read), .mgmt_write_o(mgmt_write),
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
-        .fdd_request_i(2'b00), .ide_request_i(ide_request), .rtc_i(rtc_word), .mnt_i(mnt),
+        .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
-        .sd_req_lba_o(sd_req_lba), .sd_done_i(sd_done), .sd_err_i(sd_err),
+        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_done_i(sd_done), .sd_err_i(sd_err),
         .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd)
     );
 
@@ -115,7 +116,7 @@ module tb_ide;
         .qnice_data_o(q_rdata), .qnice_wait_o(q_wait),
         .sd_q2c_i(q2c), .sd_c2q_o(c2q), .mnt_o(mnt),
         .req_i(sd_req), .req_wr_i(sd_req_wr), .req_unit_i(sd_req_unit), .req_lba_i(sd_req_lba),
-        .done_o(sd_done), .done_err_o(sd_err),
+        .req_cnt_i(sd_req_cnt), .done_o(sd_done), .done_err_o(sd_err),
         .main_clk_i(clk), .buf_addr_i(buf_addr), .buf_we_i(buf_we), .buf_wd_i(buf_wd),
         .buf_rd_o(buf_rd)
     );
@@ -137,32 +138,61 @@ module tb_ide;
         pattern = 16'(lba * 1000 + w * 3 + 16'h1234);
     endfunction
 
-    // The SD engine port: ready; a START moves one block after a while
+    // The SD engine port: ready; a START moves COUNT blocks from ADDR on (a write: one), each
+    // after a while; block k only once k < LIMIT (it waits), ABORT ends a read at the next block
+    // boundary. RDBLK: the block within the transfer. preempt_after ends a read early after
+    // that many blocks (as QNICE's own SD access does), err_block fails the transfer that
+    // reaches that SD block once.
     reg e_busy = 0, e_done = 0, e_err = 0, e_blk = 0, e_rdwe = 0;
     reg [8:0] e_rdidx = 0, e_wridx = 0;
     reg [7:0] e_rddata = 0;
-    assign q2c = {e_wridx, 16'd0, e_rddata, e_rdidx, 16'd0, e_rdwe, e_blk, e_err, e_done,
+    reg [15:0] e_rdblk = 0;
+    assign q2c = {e_wridx, 16'd0, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
                   e_busy, 1'b1};
-    integer eng_reads = 0, eng_writes = 0, write_errors = 0;
+    integer eng_reads = 0, eng_blocks = 0, eng_writes = 0, eng_aborts = 0, write_errors = 0;
+    integer preempt_after = -1, err_block = -1, max_ahead = 0;
     integer expect_write_lba [integer];
     always begin
-        integer b, i;
-        bit wr;
+        integer b, i, k, n;
+        bit wr, stop;
         @(posedge qclk);
         if (c2q[0]) begin
             b = c2q[34:3];
             wr = c2q[1];
-            if (c2q[50:35] != 1) $fatal(1, "engine: count %0d", c2q[50:35]);
+            n = c2q[50:35];
             e_busy <= 1;
             repeat (40) @(posedge qclk);
             if (!wr) begin
-                for (i = 0; i < 512; i++) begin
-                    e_rdwe <= 1; e_rdidx <= i; e_rddata <= sdbyte(b, i);
-                    @(posedge qclk);
-                end
-                e_rdwe <= 0;
                 eng_reads++;
+                stop = 0;
+                for (k = 0; k < n && !stop; k++) begin
+                    while (!c2q[2] && k >= c2q[66:51]) @(posedge qclk);
+                    if (c2q[2]) begin
+                        stop = 1;
+                    end else if (b + k == err_block) begin
+                        err_block = -1;
+                        e_err <= 1;
+                        stop = 1;
+                    end else begin
+                        e_rdblk <= k;
+                        for (i = 0; i < 512; i++) begin
+                            e_rdwe <= 1; e_rdidx <= i; e_rddata <= sdbyte(b + k, i);
+                            @(posedge qclk);
+                        end
+                        e_rdwe <= 0;
+                        e_blk <= 1; @(posedge qclk); e_blk <= 0;
+                        eng_blocks++;
+                        if (c2q[2]) stop = 1;
+                        if (preempt_after > 0) begin
+                            preempt_after--;
+                            if (preempt_after == 0) begin preempt_after = -1; stop = 1; end
+                        end
+                    end
+                end
+                if (c2q[2]) eng_aborts++;
+                repeat (10) @(posedge qclk);
             end else begin
+                if (n != 1) $fatal(1, "engine: write count %0d", n);
                 for (i = 0; i < 512; i++) begin
                     e_wridx <= i;
                     @(posedge qclk);
@@ -179,9 +209,9 @@ module tb_ide;
                 end
                 @(posedge qclk);
                 eng_writes++;
+                e_blk <= 1; @(posedge qclk); e_blk <= 0;
             end
-            e_blk <= 1; @(posedge qclk); e_blk <= 0;
-            e_done <= 1; @(posedge qclk); e_done <= 0;
+            e_done <= 1; @(posedge qclk); e_done <= 0; e_err <= 0;
             e_busy <= 0;
         end
     end
@@ -350,11 +380,39 @@ module tb_ide;
               $sformatf("IDENTIFY: C %0d H %0d S %0d, %0d sectors, model %04x, status %02x",
                         id[1], id[3], id[6], {id[61], id[60]}, id[27], st));
 
-        // reads: across the two extents (79 | 80), then a single one far in
+        // reads: across the two extents (79 | 80: two runs), then a single one far in
+        k = eng_reads;
         read_sectors(8'h20, 78, 3);
         read_sectors(8'h20, 150000, 1);
-        // writes, then the same sectors read by the controller's buffer path again
+        check(eng_reads - k == 3, $sformatf("reads across the extents: %0d SD reads", eng_reads - k));
+        // 64 sectors in one SD read (twice the ring: the engine waits for the PC)
+        k = eng_reads; sum = eng_blocks;
+        read_sectors(8'h20, 1000, 64);
+        check(eng_reads - k == 1 && eng_blocks - sum == 64,
+              $sformatf("64 sectors: %0d SD reads, %0d blocks", eng_reads - k, eng_blocks - sum));
+        // again, from the ring: the last 20 of them, no SD read
+        k = eng_reads;
+        read_sectors(8'h20, 1044, 20);
+        check(eng_reads == k, $sformatf("from the ring: %0d SD reads", eng_reads - k));
+        // one older than the ring holds: an SD read
+        k = eng_reads;
+        read_sectors(8'h20, 1010, 1);
+        check(eng_reads - k == 1, $sformatf("older than the ring: %0d SD reads", eng_reads - k));
+        // QNICE takes the card after 5 blocks: the rest in a second transfer
+        k = eng_reads; preempt_after = 5;
+        read_sectors(8'h20, 20000, 12);
+        check(eng_reads - k == 2, $sformatf("preempted run: %0d SD reads", eng_reads - k));
+        // a failing block: tried again from it
+        k = eng_reads; sum = eng_blocks; err_block = blk(30003);
+        read_sectors(8'h20, 30000, 8);
+        check(err_block == -1 && eng_reads - k == 2 && eng_blocks - sum == 8,
+              $sformatf("an SD error: %0d SD reads, %0d blocks", eng_reads - k, eng_blocks - sum));
+        // writes drop the drive's run: the sectors are read from the card again
+        read_sectors(8'h20, 4, 4);
         write_sectors(5, 2);
+        k = eng_reads;
+        read_sectors(8'h20, 5, 1);
+        check(eng_reads - k == 1, $sformatf("after a write: %0d SD reads", eng_reads - k));
         // SET MULTIPLE (1), READ MULTIPLE
         outb(16'h1f2, 8'h01); outb(16'h1f6, 8'ha0); outb(16'h1f7, 8'hc6);
         wait_ready(st);
@@ -367,9 +425,7 @@ module tb_ide;
         check((st & 8'h01) && er == 8'h04, $sformatf("unknown command FAh: status %02x, error %02x", st, er));
         // the reads still work after it
         read_sectors(8'h21, 0, 1);
-
-        check(eng_reads == 3 + 1 + 2 + 1 && eng_writes == 2,
-              $sformatf("engine: %0d reads, %0d writes", eng_reads, eng_writes));
+        check(eng_writes == 2, $sformatf("engine: %0d writes", eng_writes));
         if (errors == 0) $display("PASS: all checks");
         else $display("FAILED: %0d checks", errors);
         $finish;

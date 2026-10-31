@@ -92,6 +92,8 @@ entity av_pipeline is
       qnice_poly_a_i          : in  std_logic_vector( 9 downto 0);
       qnice_poly_wr_i         : in  std_logic;
       qnice_ascal_mode_i      : in  std_logic_vector( 4 downto 0);
+      -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): see digital_pipeline.vhd
+      qnice_scanlines_i       : in  std_logic_vector( 1 downto 0) := "00";
 
       -- M2M-UPSTREAM screen-center (AExp 2026-07-08): signed input-crop edge
       -- offsets for the HDMI ascal input window; qnice_clk domain, CDC'd to the
@@ -252,6 +254,7 @@ signal video_h_freq           : std_logic_vector(15 downto 0); -- horizontal syn
 
 -- On-Screen-Menu (OSM) for HDMI
 signal hdmi_osm_cfg_scaling   : std_logic_vector(8 downto 0);
+signal hdmi_scanlines         : std_logic_vector(1 downto 0);   -- M2M-UPSTREAM scanlines
 signal hdmi_osm_cfg_enable    : std_logic;
 signal hdmi_osm_cfg_xy        : std_logic_vector(15 downto 0);
 signal hdmi_osm_cfg_dxdy      : std_logic_vector(15 downto 0);
@@ -774,7 +777,7 @@ begin
    -- Clock domain crossing: QNICE to HDMI
    i_qnice2hdmi: xpm_cdc_array_single
       generic map (
-         WIDTH => 47
+         WIDTH => 49                                  -- M2M-UPSTREAM scanlines (was 47)
       )
       port map (
          src_clk                => qnice_clk_i,
@@ -784,13 +787,15 @@ begin
          src_in(36 downto 33)   => qnice_video_mode_i,
          src_in(37)             => qnice_zoom_crop_i,
          src_in(46 downto 38)   => qnice_osm_cfg_scaling_i,
+         src_in(48 downto 47)   => qnice_scanlines_i,
          dest_clk               => hdmi_clk_i,
          dest_out(15 downto 0)  => hdmi_osm_cfg_xy,
          dest_out(31 downto 16) => hdmi_osm_cfg_dxdy,
          dest_out(32)           => hdmi_osm_cfg_enable,
          dest_out(36 downto 33) => hdmi_video_mode,
          dest_out(37)           => hdmi_zoom_crop,
-         dest_out(46 downto 38) => hdmi_osm_cfg_scaling
+         dest_out(46 downto 38) => hdmi_osm_cfg_scaling,
+         dest_out(48 downto 47) => hdmi_scanlines
       ); -- i_qnice2hdmi
 
 
@@ -886,6 +891,7 @@ begin
 
          -- QNICE connection to ascal's mode register
          qnice_ascal_mode_i       => unsigned(qnice_ascal_mode_i),
+         hdmi_scanlines_i         => hdmi_scanlines,       -- M2M-UPSTREAM scanlines
 
          -- M2M-UPSTREAM screen-center: per-edge ascal INPUT-crop offsets (video domain)
          himin_off_i              => signed(vid_himin_off),

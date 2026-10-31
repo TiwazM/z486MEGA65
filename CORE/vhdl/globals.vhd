@@ -90,13 +90,14 @@ constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     --
 -- ROMs are in HyperRAM (m2m-rom.asm, PREP_START); until QNICE sets it, the PC stays in reset.
 constant C_DEV_PC_CTL         : std_logic_vector(15 downto 0) := x"0100";
 
--- The disks, floppy drives A: and B: and the hard disk (disk_sd.vhd has the register map): the
--- image files' extent maps and sizes, written by m2m-rom.asm (DISK_PREP). One device per drive
--- for the Shell's manual loads: each has its own CSR in window 0xFFFF (the Shell takes a line
--- as loaded while its device's CSR says so); the other windows are the same for all three.
+-- The disks, floppy drives A: and B:, the hard disk and the CD-ROM (disk_sd.vhd has the register
+-- map): the image files' extent maps and sizes, written by m2m-rom.asm (DISK_PREP). One device
+-- per drive for the Shell's manual loads: each has its own CSR in window 0xFFFF (the Shell takes
+-- a line as loaded while its device's CSR says so); the other windows are the same for all four.
 constant C_DEV_PC_DISK        : std_logic_vector(15 downto 0) := x"0101";   -- A:
 constant C_DEV_PC_DISK_B      : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_PC_DISK_HD     : std_logic_vector(15 downto 0) := x"0103";
+constant C_DEV_PC_DISK_CD     : std_logic_vector(15 downto 0) := x"0104";
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System: not used
@@ -110,9 +111,9 @@ constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 ----------------------------------------------------------------------------------------------------------
 -- System for handling simulated cartridges and ROM loaders. The framework's auto-loader writes
 -- one byte per HyperRAM word; z486 reads its BIOS ROMs packed, so m2m-rom.asm loads them itself
--- (PREP_START). Manual loads 0, 1 and 2 are the menu's "Floppy A:", "Floppy B:" and "Hard disk:"
--- lines (the same device three times, so that the Shell tells them apart): the file browser,
--- then DISK_PREP mounts the image (the Shell streams nothing into the device).
+-- (PREP_START). Manual loads 0 to 3 are the menu's "Floppy A:", "Floppy B:", "Hard disk:" and
+-- "CD-ROM:" lines (one device each, so that the Shell tells them apart): the file browser, then
+-- DISK_PREP mounts the image (the Shell streams nothing into the device).
 ----------------------------------------------------------------------------------------------------------
 
 type crtrom_buf_array is array(natural range<>) of std_logic_vector;
@@ -128,10 +129,11 @@ constant C_CRTROMTYPE_SDRAM      : std_logic_vector(15 downto 0) := x"0002";
 constant C_CRTROMTYPE_MANDATORY  : std_logic_vector(15 downto 0) := x"0003";
 constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 
-constant C_CRTROMS_MAN_NUM       : natural := 3;
+constant C_CRTROMS_MAN_NUM       : natural := 4;
 constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK_B,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK_HD,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_PC_DISK_CD,
                                                          x"EEEE");
 
 constant C_CRTROMS_AUTO_NUM      : natural := 0;

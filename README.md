@@ -47,8 +47,21 @@ boots from it.
   three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
   on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
   changed (a flickering clock, stray lines, the cursor). The scaler
-  interpolates sharp bilinear: the 720x400 text mode scales by 1.2 (480p,
-  720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes uneven.
+  interpolates sharp bilinear by default: the 720x400 text mode scales by 1.2
+  (480p, 720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes
+  uneven. The menu's "Filter" switches it (Sharp, Smooth = bilinear, Pixels =
+  nearest neighbour), and "Scanlines" darkens every second output line by
+  25 % or 50 % (a register stage behind ascal, M2M-UPSTREAM scanlines,
+  `digital_pipeline.vhd`). They line up with the PC's lines only in 1280x1024,
+  where a 480-line mode is exactly two lines each; in the other modes a PC
+  line is 1.25 to 1.92 output lines and the dark lines beat into bands.
+  ascal's bilinear path (Smooth, Sharp) left one clock before the nearest one
+  and wrote every pixel one output pixel to the left: the picture moved left,
+  at 800x600 the PC's first column was gone, and thin strokes broke (the top
+  of a "6"). It now runs one stage later (M2M-UPSTREAM filter-align); Smooth
+  matches a centre-aligned bilinear exactly, Sharp's edges sit where Pixels'
+  do (`CORE/sim/tb_ascal.vhd` with `G_PAT=1`: "68" text at 720x400 into
+  1280x960 and 800x600).
 - Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
   for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
   MMCM at VCO 1280 MHz.
@@ -90,12 +103,21 @@ boots from it.
   then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
   requests) and the hard disk, the master of the first IDE channel (`ide.v`:
   IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
-  types following the images. `disk_sd` reads and writes each sector straight
-  in the image file through the SD host controller's engine port (Megamiga's
+  types following the images; the CD-ROM drive, an ATAPI device on the second
+  channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does), which
+  `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
+  image file through the SD host controller's engine port (Megamiga's
   sd-host), with the file's extent map from the firmware (fragmented files are
-  fine). See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against
-  z486's `floppy.v`, `ide.v` and `rtc.v`.
-- Menu: floppy A:, floppy B:, hard disk, HDMI mode, help, "Reset the PC".
+  fine); reads come in runs of one SD command each through a 32-sector ring.
+  See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against z486's
+  `floppy.v`, `ide.v` and `rtc.v` (`tb_cdrom.sv`: both IDE channels, the
+  packets a DOS CD-ROM driver sends).
+- Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
+  scanlines, help, "Reset the PC". An image mounted at start-up
+  (`/z486/hdd.img`, `/z486/cdrom.iso`, `/z486/floppy.img`) shows its name
+  once the menu opens (`DAN_FLUSH`): the
+  menu has no memory before that, and the line read "Hard disk:  Hard
+  dis..." (the line's own text taken for the name).
 - HDMI modes: 720p 60 Hz (the PC's 4:3 picture between bars), 480p, 800x600,
   1024x768 and 1280x1024 at 60 Hz. 1280x1024 is a 5:4 monitor's own
   resolution: the picture is 1280x960 between bars and the monitor scales
@@ -144,8 +166,7 @@ boots from it.
   `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
   Cursor Up, then press Help).
 
-Not wired yet: joysticks, the second IDE channel (a CD-ROM), the MEGA65's own
-floppy drive.
+Not wired yet: joysticks, CD audio, the MEGA65's own floppy drive.
 
 ## SD card
 
@@ -154,6 +175,7 @@ floppy drive.
 /z486/boot1.rom    the VGA BIOS
 /z486/floppy.img   optional: drive A: at start-up (a raw floppy image)
 /z486/hdd.img      optional: the hard disk at start-up (a raw disk image)
+/z486/cdrom.iso    optional: the CD-ROM's disc at start-up (an ISO image)
 ```
 
 Both come with z486_MiSTer, in
@@ -167,8 +189,8 @@ internal SD card.
 
 ## Disks
 
-The menu's "Floppy A:", "Floppy B:" and "Hard disk:" lines mount an image file
-from the card, under any name; writes go to the file.
+The menu's "Floppy A:", "Floppy B:", "Hard disk:" and "CD-ROM:" lines mount an
+image file from the card, under any name; writes go to the file.
 
 - **Floppies:** raw images of 360K, 720K, 1.2M, 1.44M or 2.88M; the size gives
   the geometry and the drive type in the CMOS. A floppy mounted while the PC
@@ -179,10 +201,19 @@ from the card, under any name; writes go to the file.
   4 GB less 512 bytes, the largest file FAT32 holds. The BIOS looks for disks
   only when the PC starts: after mounting one from the menu, "Reset the PC".
   It reads the size from IDENTIFY (LBA) and translates for DOS.
+- **CD-ROM:** an ISO image (whole 2048-byte sectors, one data track), any
+  time: the drive is always there, the master of the second IDE channel
+  (ports 170h/376h, IRQ 15), with or without a disc, and a new disc is a
+  media change for the driver. The BIOS lists it ("IDE1 master: CD-ROM z486
+  MEGA65 CD-ROM"); MS-DOS 6.22 reads it with `DEVICE=OAKCDROM.SYS
+  /D:MSCD001` and `MSCDEX /D:MSCD001` (tested on the board; OAKCDROM.SYS
+  comes with Windows 98's boot disk). No CD audio: an ISO has none, and PLAY
+  AUDIO is refused; a `.bin` (2352-byte raw sectors) has to become an ISO
+  first (`bchunk game.bin game.cue game`).
 - **Eject:** every folder of the file browser starts with `<No Disk>` (right
   after `<..>`): choosing it empties the drive. A mount lasts until the
-  MEGA65 is switched off; only `/z486/floppy.img` and `/z486/hdd.img` come
-  back by themselves.
+  MEGA65 is switched off; only `/z486/floppy.img`, `/z486/hdd.img` and
+  `/z486/cdrom.iso` come back by themselves.
 
 An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
 
@@ -195,10 +226,24 @@ and let the installer partition and format C: (it restarts the PC in between)
 and install, swapping the floppies through the menu's "Floppy A:" line. To
 start from C: afterwards, choose `<No Disk>` for A: and "Reset the PC".
 
-Each sector goes to the card on its own, so writing is slow (DOS without a
-disk cache rewrites the FAT for every file). `tools/qmon.py disks` shows the
-sector counts and the time per sector (`disks clear` zeroes them, `disks
-watch 10` counts sectors per second over 10 seconds).
+Reads come in runs: one multi-block SD read (CMD18) for the sectors the PC
+will read next (what an IDE command still wants, a track on a floppy), within
+the image's extent, into a ring of 32 sectors. The PC's sector is answered as
+soon as it is in, and the next ones come out of the ring; the card waits (its
+clock stopped) while the ring is full, so a 64-sector DOS cluster is one SD
+command. A read elsewhere ends the run. Before, every sector was an SD
+command of its own, about 440 µs: Dr. Hardware measured 997 KB/s with 64 KB
+blocks; with the runs 2989 KB/s (10 KB blocks: 1036 -> 2624 KB/s), the
+average sector 456 -> 146 µs. Its access time stayed 6.1-6.2 ms. A CD-ROM
+READ is one run too: its 2048-byte sectors are four of the image's. Writes still go to
+the card one sector at a time (DOS without a disk cache rewrites the FAT for
+every file). `tools/qmon.py disks` shows the sector counts, the time per
+sector and the SD transfers (`disks clear` zeroes them, `disks watch 10`
+counts sectors per second over 10 seconds).
+
+Checked on the board with MS-DOS 6.22 (`fc /b` of a file against itself and
+against fresh copies, 25,151 sectors read and 2,325 written): no wrong data,
+no failed or repeated transfers.
 
 `tools/floppy-packer.html`, a page that runs in any browser without a server,
 packs files into a FAT12 floppy image of any of the five sizes, with DOS's
@@ -326,6 +371,15 @@ registers, 150.5 block RAM tiles, 86 DSPs.
 | `hdmi_clk` | 13.468 ns | +1.707 ns | +2.032 ns | +1.599 ns | +1.854 ns |
 | `qnice_clk` | 20.000 ns | +0.561 ns | +0.635 ns | +1.198 ns | +0.999 ns |
 | `pc_audio_clk` | 40.723 ns | +3.308 ns | +7.496 ns | +8.900 ns | +7.557 ns |
+
+A build can meet every constraint and still not start the PC: the first CD-ROM
+build (2026-10-31) hung before the BIOS's POST 77, z486's watchdog reporting
+`Z386 STALL R=1 C=F000 E=0000FFF0` (the first fetch never answered), at every
+SDRAM clock phase and after a power cycle. The same sources with the drive
+switched off booted, and so did the next full build with it on (a different
+placement): something outside the timing analysis was marginal in that one
+placement. If a new build shows no POST 77, build again before suspecting the
+change.
 
 The first booting build (the SDRAM clock at 292.5 degrees) had +0.327 ns, out of
 97,745 endpoints, with 67.1K LUTs (50%), 33.8K registers and 141.5 block RAM

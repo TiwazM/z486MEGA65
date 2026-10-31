@@ -29,6 +29,11 @@
 --     else aborted (error 04h). Request 101: the CPU has the block, the next one follows. Data
 --     goes into ide.v's buffer before the registers that announce it (no RDP: ide.v never
 --     stalls the CPU).
+--   * The CD-ROM drive (pc_cdrom.vhd, the second channel's ide.v at F1xx): it asks for the bus
+--     when it has work, and gets it in S_IDLE when nothing else is waiting (S_CD): then its bus
+--     accesses, its sector requests (unit 3) and its sector buffer reads go out instead of
+--     these. Its requests toggle sd_req_o as well (the two toggles are XORed: only the one
+--     with the bus ever toggles).
 --
 -- Bus timing (floppy.v and ide.v): mgmt_read_o / mgmt_write_o are one-clock pulses, the address
 -- stays one clock after each pulse (ide.v moves its buffer pointer on the pulse's trailing edge,
@@ -65,11 +70,12 @@ entity pc_mgmt is
       mgmt_readdata_i   : in  std_logic_vector(15 downto 0);
       fdd_request_i     : in  std_logic_vector(1 downto 0);  -- bit 0 read, bit 1 write/format
       ide_request_i     : in  std_logic_vector(2 downto 0);  -- 110 reset, 100 command, 101 block
+      ide1_request_i    : in  std_logic_vector(2 downto 0);  -- the second channel's (the CD-ROM)
 
       rtc_i             : in  std_logic_vector(64 downto 0); -- the framework's (BCD)
 
       -- the units as disk_sd mounted them (QNICE clock; disk_sd.vhd's mnt_o)
-      mnt_i             : in  std_logic_vector(119 downto 0);
+      mnt_i             : in  std_logic_vector(159 downto 0);
 
       -- sector requests to disk_sd (a toggle; unit, wr and lba stable from one clock before it)
       -- and its answers (QNICE clock: a toggle, err stable with it)
@@ -77,6 +83,9 @@ entity pc_mgmt is
       sd_req_wr_o       : out std_logic := '0';
       sd_req_unit_o     : out std_logic_vector(1 downto 0) := (others => '0');
       sd_req_lba_o      : out std_logic_vector(31 downto 0) := (others => '0');
+      -- the sectors a hard disk read command still wants from this one on (1..256), which
+      -- disk_sd reads ahead in one SD transfer; 0 = not known (the floppies)
+      sd_req_cnt_o      : out std_logic_vector(8 downto 0) := (others => '0');
       sd_done_i         : in  std_logic;
       sd_err_i          : in  std_logic;
 
@@ -209,6 +218,7 @@ architecture synthesis of pc_mgmt is
       S_HW_BLOCK, S_HW_POP, S_HW_SD, S_HW_DONE,
       S_IDE_BLK,
       S_WREGS,
+      S_CD,
       S_BUS_W, S_BUS_R
    );
    signal state       : t_state := S_START;
@@ -226,8 +236,32 @@ architecture synthesis of pc_mgmt is
    signal idx         : natural range 0 to 511 := 0;
    signal cnt         : natural range 0 to C_EJECT_WAIT := 0;
 
+   -- this side's bus accesses, sector requests and buffer reads (the CD-ROM's go out instead
+   -- in S_CD)
+   signal pm_address  : std_logic_vector(15 downto 0) := (others => '0');
+   signal pm_read     : std_logic := '0';
+   signal pm_write    : std_logic := '0';
+   signal pm_wdata    : std_logic_vector(15 downto 0) := (others => '0');
+   signal pm_req_wr   : std_logic := '0';
+   signal pm_req_unit : std_logic_vector(1 downto 0) := (others => '0');
+   signal pm_req_lba  : std_logic_vector(31 downto 0) := (others => '0');
+   signal pm_req_cnt  : std_logic_vector(8 downto 0) := (others => '0');
+   signal pm_buf_addr : std_logic_vector(8 downto 0) := (others => '0');
+
+   -- the CD-ROM drive
+   signal cd_bus_req  : std_logic;
+   signal cd_gnt      : std_logic;
+   signal cd_address  : std_logic_vector(15 downto 0);
+   signal cd_read     : std_logic;
+   signal cd_write    : std_logic;
+   signal cd_wdata    : std_logic_vector(15 downto 0);
+   signal cd_req      : std_logic;
+   signal cd_req_lba  : std_logic_vector(31 downto 0);
+   signal cd_req_cnt  : std_logic_vector(8 downto 0);
+   signal cd_buf_addr : std_logic_vector(8 downto 0);
+
    -- the units as disk_sd has them (crossed) and as the PC's controllers have them
-   signal m_dst       : std_logic_vector(119 downto 0);
+   signal m_dst       : std_logic_vector(159 downto 0);
    type t_b4  is array (0 to 1) of std_logic_vector(3 downto 0);
    type t_b16 is array (0 to 1) of std_logic_vector(15 downto 0);
    signal a_mounted   : std_logic_vector(1 downto 0) := "00";
@@ -291,7 +325,7 @@ begin
 
    i_cdc_mount : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE => 120
+         G_DATA_SIZE => 160
       )
       port map (
          src_data_i => mnt_i,
@@ -304,7 +338,40 @@ begin
    -- write protected, 117..86 sectors, 83..80 generation.
    m_cur <= m_dst(40 * m_drv + 39 downto 40 * m_drv);
 
-   sd_req_o <= req;
+   -- this side's outputs, or the CD-ROM's while it has the bus
+   cd_gnt           <= '1' when state = S_CD else '0';
+   mgmt_address_o   <= cd_address when cd_gnt = '1' else pm_address;
+   mgmt_read_o      <= cd_read    when cd_gnt = '1' else pm_read;
+   mgmt_write_o     <= cd_write   when cd_gnt = '1' else pm_write;
+   mgmt_writedata_o <= cd_wdata   when cd_gnt = '1' else pm_wdata;
+   sd_req_o         <= req xor cd_req;
+   sd_req_wr_o      <= '0'        when cd_gnt = '1' else pm_req_wr;
+   sd_req_unit_o    <= "11"       when cd_gnt = '1' else pm_req_unit;
+   sd_req_lba_o     <= cd_req_lba when cd_gnt = '1' else pm_req_lba;
+   sd_req_cnt_o     <= cd_req_cnt when cd_gnt = '1' else pm_req_cnt;
+   buf_addr_o       <= cd_buf_addr when cd_gnt = '1' else pm_buf_addr;
+
+   i_cdrom : entity work.pc_cdrom
+      port map (
+         clk_i            => clk_i,
+         rst_i            => rst_i,
+         bus_req_o        => cd_bus_req,
+         bus_gnt_i        => cd_gnt,
+         mgmt_address_o   => cd_address,
+         mgmt_read_o      => cd_read,
+         mgmt_write_o     => cd_write,
+         mgmt_writedata_o => cd_wdata,
+         mgmt_readdata_i  => mgmt_readdata_i,
+         ide_request_i    => ide1_request_i,
+         mnt_i            => m_dst(159 downto 120),
+         sd_req_o         => cd_req,
+         sd_req_lba_o     => cd_req_lba,
+         sd_req_cnt_o     => cd_req_cnt,
+         sd_done_i        => sd_done_i,
+         sd_err_i         => sd_err_i,
+         buf_addr_o       => cd_buf_addr,
+         buf_rd_i         => buf_rd_i
+      ); -- i_cdrom
 
    p_mgmt : process (clk_i)
       variable v_byte : std_logic_vector(7 downto 0);
@@ -313,8 +380,8 @@ begin
       variable v_sum  : natural range 0 to 65535;
    begin
       if rising_edge(clk_i) then
-         mgmt_read_o  <= '0';
-         mgmt_write_o <= '0';
+         pm_read  <= '0';
+         pm_write <= '0';
          buf_we_o     <= '0';
          done_s       <= done_s(1 downto 0) & sd_done_i;
 
@@ -325,10 +392,10 @@ begin
             ----------------------------------------------------------------------------------
             when S_BUS_W =>
                -- 0: address and data out, 1: the write pulse, 2/3: the address stays
-               mgmt_address_o   <= b_addr;
-               mgmt_writedata_o <= b_data;
+               pm_address   <= b_addr;
+               pm_wdata <= b_data;
                if b_ph = 1 then
-                  mgmt_write_o <= '1';
+                  pm_write <= '1';
                end if;
                if b_ph = 3 then
                   b_ph  <= 0;
@@ -339,7 +406,7 @@ begin
 
             when S_BUS_R =>
                -- 0: address out, 3: the data has settled
-               mgmt_address_o <= b_addr;
+               pm_address <= b_addr;
                if b_ph = 3 then
                   b_q   <= mgmt_readdata_i;
                   b_ph  <= 0;
@@ -500,7 +567,7 @@ begin
             -- idle: a disk change, a hard disk request, a floppy request, the RTC
             ----------------------------------------------------------------------------------
             when S_IDLE =>
-               mgmt_address_o <= x"0000";
+               pm_address <= x"0000";
                if m_dst(3 downto 0) /= a_gen(0) or m_dst(39) /= a_mounted(0) or
                   m_dst(43 downto 40) /= a_gen(1) or m_dst(79) /= a_mounted(1) then
                   -- a floppy changed: the first one that did
@@ -549,6 +616,14 @@ begin
                   idx       <= 0;
                   time_ret  <= S_IDLE;
                   state     <= S_TIME;
+               elsif cd_bus_req = '1' then
+                  state <= S_CD;                     -- the CD-ROM drive has the bus
+               end if;
+
+            -- until the CD-ROM drive gives the bus back
+            when S_CD =>
+               if cd_bus_req = '0' then
+                  state <= S_IDLE;
                end if;
 
             ----------------------------------------------------------------------------------
@@ -604,9 +679,10 @@ begin
             ----------------------------------------------------------------------------------
             when S_REQ_GOT =>
                -- b_q: bit 15 = drive B:, 14..0 = the LBA
-               sd_req_unit_o <= '0' & b_q(15);
-               sd_req_lba_o  <= x"0000" & '0' & b_q(14 downto 0);
-               sd_req_wr_o   <= r_wr;
+               pm_req_unit <= '0' & b_q(15);
+               pm_req_lba  <= x"0000" & '0' & b_q(14 downto 0);
+               pm_req_cnt  <= (others => '0');
+               pm_req_wr   <= r_wr;
                r_ok          <= '0';
                idx           <= 0;
                r_serve       <= a_mounted(to_integer(unsigned(b_q(15 downto 15))));
@@ -632,18 +708,18 @@ begin
 
             -- 512 bytes into the FIFO: buffer address, a clock for the RAM, then the write
             when S_PUSH =>
-               buf_addr_o <= std_logic_vector(to_unsigned(idx, 9));
-               mgmt_address_o <= C_FDD & x"0F";
+               pm_buf_addr <= std_logic_vector(to_unsigned(idx, 9));
+               pm_address <= C_FDD & x"0F";
                case b_ph is
                   when 0 | 1 =>
                      b_ph <= b_ph + 1;
                   when 2 =>
                      if r_ok = '1' then
-                        mgmt_writedata_o <= x"00" & buf_rd_i;
+                        pm_wdata <= x"00" & buf_rd_i;
                      else
-                        mgmt_writedata_o <= x"0000";
+                        pm_wdata <= x"0000";
                      end if;
-                     mgmt_write_o <= '1';
+                     pm_write <= '1';
                      b_ph <= 3;
                   when others =>
                      b_ph <= 0;
@@ -657,7 +733,7 @@ begin
 
             -- 512 bytes out of the FIFO: the head (registered) settles, is sampled, then popped
             when S_POP =>
-               mgmt_address_o <= C_FDD & x"0F";
+               pm_address <= C_FDD & x"0F";
                if b_ph = 3 then
                   b_ph  <= 0;
                   state <= S_POP_GOT;
@@ -667,10 +743,10 @@ begin
 
             when S_POP_GOT =>
                v_byte      := mgmt_readdata_i(7 downto 0);
-               buf_addr_o  <= std_logic_vector(to_unsigned(idx, 9));
+               pm_buf_addr  <= std_logic_vector(to_unsigned(idx, 9));
                buf_wd_o    <= v_byte;
                buf_we_o    <= '1';
-               mgmt_read_o <= '1';                  -- pop it
+               pm_read <= '1';                  -- pop it
                if idx = 511 then
                   state <= S_POP_DONE;
                else
@@ -690,7 +766,7 @@ begin
             -- floppy.v drops the request once the FIFO is full (read) or empty (write); then
             -- the next one may come (after its 4000-clock gap at least)
             when S_REQ_END =>
-               mgmt_address_o <= x"0000";
+               pm_address <= x"0000";
                if fdd_request_i = "00" then
                   state <= S_IDLE;
                elsif cnt = 4095 then
@@ -811,13 +887,13 @@ begin
 
             -- IDENTIFY: 256 words into the buffer, then the registers (END: the block is the last)
             when S_IDE_IDENT =>
-               mgmt_address_o <= C_IDE & x"0F";
+               pm_address <= C_IDE & x"0F";
                case b_ph is
                   when 0 =>
-                     mgmt_writedata_o <= ident(idx, h_total);
+                     pm_wdata <= ident(idx, h_total);
                      b_ph <= 1;
                   when 1 =>
-                     mgmt_write_o <= '1';
+                     pm_write <= '1';
                      b_ph <= 2;
                   when others =>
                      b_ph <= 0;
@@ -841,33 +917,38 @@ begin
             -- the hard disk: reading, one sector per block
             ----------------------------------------------------------------------------------
             when S_HR_SD =>
-               sd_req_unit_o <= "10";
-               sd_req_lba_o  <= "0000" & std_logic_vector(i_lba);
-               sd_req_wr_o   <= '0';
+               pm_req_unit <= "10";
+               pm_req_lba  <= "0000" & std_logic_vector(i_lba);
+               if i_cnt = 0 then
+                  pm_req_cnt <= '1' & x"00";      -- 256
+               else
+                  pm_req_cnt <= '0' & std_logic_vector(i_cnt);
+               end if;
+               pm_req_wr   <= '0';
                sd_next       <= S_HR_STREAM;
                b_ph          <= 0;
                state         <= S_SD_ASK;
 
             -- 256 words: the low byte, the high byte, then the write (zeros if the card failed)
             when S_HR_STREAM =>
-               mgmt_address_o <= C_IDE & x"0F";
+               pm_address <= C_IDE & x"0F";
                case b_ph is
                   when 0 =>
-                     buf_addr_o <= std_logic_vector(to_unsigned(2 * idx, 9));
+                     pm_buf_addr <= std_logic_vector(to_unsigned(2 * idx, 9));
                      b_ph <= 1;
                   when 1 =>
-                     buf_addr_o <= std_logic_vector(to_unsigned(2 * idx + 1, 9));
+                     pm_buf_addr <= std_logic_vector(to_unsigned(2 * idx + 1, 9));
                      b_ph <= 2;
                   when 2 =>
                      i_lo <= buf_rd_i;
                      b_ph <= 3;
                   when 3 =>
                      if r_ok = '1' then
-                        mgmt_writedata_o <= buf_rd_i & i_lo;
+                        pm_wdata <= buf_rd_i & i_lo;
                      else
-                        mgmt_writedata_o <= x"0000";
+                        pm_wdata <= x"0000";
                      end if;
-                     mgmt_write_o <= '1';
+                     pm_write <= '1';
                      b_ph <= 4;
                   when others =>
                      b_ph <= 0;
@@ -933,19 +1014,19 @@ begin
 
             -- 256 words out of ide.v's buffer (sampled, then the read pulse), into the sector
             when S_HW_POP =>
-               mgmt_address_o <= C_IDE & x"0F";
+               pm_address <= C_IDE & x"0F";
                case b_ph is
                   when 0 | 1 | 2 =>
                      b_ph <= b_ph + 1;
                   when 3 =>
                      i_lo        <= mgmt_readdata_i(15 downto 8);
-                     buf_addr_o  <= std_logic_vector(to_unsigned(2 * idx, 9));
+                     pm_buf_addr  <= std_logic_vector(to_unsigned(2 * idx, 9));
                      buf_wd_o    <= mgmt_readdata_i(7 downto 0);
                      buf_we_o    <= '1';
-                     mgmt_read_o <= '1';
+                     pm_read <= '1';
                      b_ph <= 4;
                   when others =>
-                     buf_addr_o <= std_logic_vector(to_unsigned(2 * idx + 1, 9));
+                     pm_buf_addr <= std_logic_vector(to_unsigned(2 * idx + 1, 9));
                      buf_wd_o   <= i_lo;
                      buf_we_o   <= '1';
                      b_ph <= 0;
@@ -958,10 +1039,11 @@ begin
                end case;
 
             when S_HW_SD =>
-               mgmt_address_o <= C_IDE & x"0F";
-               sd_req_unit_o  <= "10";
-               sd_req_lba_o   <= "0000" & std_logic_vector(i_lba);
-               sd_req_wr_o    <= '1';
+               pm_address <= C_IDE & x"0F";
+               pm_req_unit  <= "10";
+               pm_req_lba   <= "0000" & std_logic_vector(i_lba);
+               pm_req_cnt   <= '0' & x"01";
+               pm_req_wr    <= '1';
                sd_next        <= S_HW_DONE;
                state          <= S_SD_ASK;
 

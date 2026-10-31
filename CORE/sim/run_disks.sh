@@ -3,13 +3,15 @@
 #   CORE/sim/tb_floppy.sv  floppy drives A: and B: (floppy.v, rtc.v) against pc_mgmt.vhd and
 #                          disk_sd.vhd
 #   CORE/sim/tb_ide.sv     the hard disk (ide.v, rtc.v) against the same
-# CORE/sim/run_disks.sh [tb_floppy|tb_ide] runs one; without an argument, both. Output in
-# CORE/sim/build/.
+#   CORE/sim/tb_cdrom.sv   the CD-ROM drive (ide.v of both channels) against pc_mgmt.vhd with
+#                          pc_cdrom.vhd and disk_sd.vhd
+# CORE/sim/run_disks.sh [tb_floppy|tb_ide|tb_cdrom] runs one; without an argument, all three.
+# Output in CORE/sim/build/.
 set -e
 root=${0:A:h:h:h}
 vom=${VIVADO_ON_MAC:-$HOME/Documents/vivado-on-mac}
 image=${M65_IMAGE:-m65build}
-tbs=${1:-tb_floppy tb_ide}
+tbs=${1:-tb_floppy tb_ide tb_cdrom}
 mkdir -p "$root/CORE/sim/build"
 
 # sdhost.vhd holds the package and the controller: only the package is needed
@@ -26,10 +28,10 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
               /core/z486_MiSTer/src/common/dpram.v &&
         xvlog --relax -sv /core/z486_MiSTer/src/soc/floppy.v /core/z486_MiSTer/src/soc/rtc.v \
               /core/z486_MiSTer/src/soc/ide.v /core/z486_MiSTer/src/iobus_adapter.sv \
-              /core/CORE/sim/tb_floppy.sv /core/CORE/sim/tb_ide.sv &&
+              /core/CORE/sim/tb_floppy.sv /core/CORE/sim/tb_ide.sv /core/CORE/sim/tb_cdrom.sv &&
         xvhdl -2008 sdhost_pkg.vhd /core/M2M/vhdl/cdc_stable.vhd /core/M2M/vhdl/tdp_ram.vhd \
                     /core/M2M/vhdl/2port2clk_ram.vhd /core/M2M/vhdl/qnice_csr.vhd \
-                    /core/CORE/vhdl/pc_mgmt.vhd /core/CORE/vhdl/disk_sd.vhd &&
+                    /core/CORE/vhdl/pc_cdrom.vhd /core/CORE/vhdl/pc_mgmt.vhd /core/CORE/vhdl/disk_sd.vhd &&
         for tb in $tbs; do
             xelab --relax -debug off \$tb -s \${tb}_snap && xsim \${tb}_snap -R || exit 1
         done"

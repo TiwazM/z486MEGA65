@@ -7,9 +7,10 @@
 ; callbacks below are the ones the Megamiga fork's Shell needs: the M2M
 ; template's plus HANDLE_CORE_IO (core-io-hook), BROWSE_EXTRA (cfg-strings),
 ; FAR_CALL (code-banks) and CFG_SIGCHECK / CFG_SIGSET (the settings file
-; signature). PREP_START loads the PC's BIOS ROMs and mounts /z486/hdd.img
-; and /z486/floppy.img, if they are there; the menu's "Floppy A:", "Floppy B:"
-; and "Hard disk:" lines mount others (PREP_LOAD_IMAGE, DISK_PREP).
+; signature). PREP_START loads the PC's BIOS ROMs and mounts /z486/hdd.img,
+; /z486/cdrom.iso and /z486/floppy.img, if they are there; the menu's
+; "Floppy A:", "Floppy B:", "Hard disk:" and "CD-ROM:" lines mount others
+; (PREP_LOAD_IMAGE, DISK_PREP).
 ;
 ; Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's
 ; firmware (Johan Smolinski); licensed under GPL v3
@@ -55,8 +56,9 @@ FILTER_FILES    XOR     R8, R8
                 RET
 
 ; PREP_LOAD_IMAGE: R8 = file handle, R9 = context, R10 = the menu line's group.
-; The manual loads are the "Floppy A:", "Floppy B:" and "Hard disk:" lines:
-; DISK_PREP mounts the image and the Shell streams nothing into the device.
+; The manual loads are the "Floppy A:", "Floppy B:", "Hard disk:" and
+; "CD-ROM:" lines: DISK_PREP mounts the image and the Shell streams nothing
+; into the device.
 ; The browser's "<No Disk>" (BROWSE_EXTRA, SF_VIRTUAL /= 0: an empty handle)
 ; ejects the line's drive instead (DISK_EJECT); the line then shows
 ; "<No Disk>".
@@ -66,8 +68,11 @@ PREP_LOAD_IMAGE XOR     R9, R9                  ; R9: the unit
                 RBRA    _PLI_HDD, !Z
                 MOVE    1, R9
 _PLI_HDD        CMP     PC_OPTM_G_HDD, R10
-                RBRA    _PLI_GO, !Z
+                RBRA    _PLI_CD, !Z
                 MOVE    2, R9
+_PLI_CD         CMP     PC_OPTM_G_CD, R10
+                RBRA    _PLI_GO, !Z
+                MOVE    3, R9
 _PLI_GO         MOVE    R10, @--SP
                 MOVE    SF_VIRTUAL, R10
                 CMP     0, @R10
@@ -79,9 +84,10 @@ _PLI_EJECT      MOVE    @SP++, R10
                 RSUB    DISK_EJECT, 1
                 RET
 
-; DISK_EJECT: unit R9 (0 A:, 1 B:, 2 the hard disk) has no image any more:
-; MODE 0, which pc_mgmt.vhd sees as an eject (a floppy's change line; the
-; hard disk is gone for the PC at once). Output: R8 = R9 = 0; R10..R12 kept.
+; DISK_EJECT: unit R9 (0 A:, 1 B:, 2 the hard disk, 3 the CD-ROM) has no
+; image any more: MODE 0, which pc_mgmt.vhd sees as an eject (a floppy's
+; change line; the hard disk is gone for the PC at once; the CD-ROM drive has
+; no disc). Output: R8 = R9 = 0; R10..R12 kept.
 DISK_EJECT      INCRB
                 MOVE    M2M$RAMROM_DEV, R0
                 MOVE    PC_DEV_DISK, @R0
@@ -98,23 +104,25 @@ DISK_EJECT      INCRB
                 RET
 
 ; ----------------------------------------------------------------------------
-; The disks (disk_sd.vhd): floppy drives A: and B: and the hard disk. An image
-; file is read and written in place through the SD host controller's engine
-; port; its extent map tells the hardware where the sectors are (Megamac's
-; DISK_PREP).
+; The disks (disk_sd.vhd): floppy drives A: and B:, the hard disk and the
+; CD-ROM's disc. An image file is read and written in place through the SD
+; host controller's engine port; its extent map tells the hardware where the
+; sectors are (Megamac's DISK_PREP).
 ;
 ; DISK_PREP: mount the image file R8 (an open handle) as unit R9 (0 = A:,
-; 1 = B:, 2 = the hard disk; its registers at 0x20 * R9, its extent map at
-; map word 2048 * R9: window 1 + R9 / 2, offset 2048 * (R9 & 1)):
+; 1 = B:, 2 = the hard disk, 3 = the CD-ROM; its registers at 0x20 * R9, its
+; extent map at map word 2048 * R9: window 1 + R9 / 2, offset 2048 *
+; (R9 & 1)):
 ;   1. a floppy's size must be a standard one (FDD_SIZES): its geometry; a
-;      hard disk's any whole number of 512-byte sectors;
+;      hard disk's any whole number of 512-byte sectors, a CD-ROM's (an ISO
+;      image) of 2048-byte sectors;
 ;   2. the unit goes away (MODE 0) while it changes;
 ;   3. the file's extent map (FAT32$FILE_MAP: up to 511 extents, so
 ;      fragmented files are fine);
 ;   4. sectors, the cluster base (DEV_CLUSTER - (2 << shift)), shift and a
-;      floppy's geometry, then MODE (mounted, the card's slot) last:
-;      pc_mgmt.vhd then inserts the floppy, or has the hard disk for the
-;      PC's next start;
+;      floppy's geometry, then MODE (mounted, the card's slot; a CD-ROM write
+;      protected) last: pc_mgmt.vhd then inserts the floppy, or has the hard
+;      disk for the PC's next start; pc_cdrom.vhd has a new disc;
 ;   5. the handle to its end: the Shell's manual load streams nothing.
 ; Output: R8 = 0 (OK) or an error code with R9 = the message; R10..R12 kept.
 ; ----------------------------------------------------------------------------
@@ -140,10 +148,15 @@ DISK_PREP       INCRB
                 MOVE    R0, R1
                 ADD     FAT32$FDH_SIZE_LO, R1
                 MOVE    @R1, R3                 ; R3: size lo
-                CMP     2, @SP
+                MOVE    0x01FF, R4              ; R4: the sector size - 1
+                CMP     3, @SP
+                RBRA    _DP_HDD, !Z
+                MOVE    0x07FF, R4              ; the CD-ROM: 2048-byte sectors
+                RBRA    _DP_WHOLE, 1
+_DP_HDD         CMP     2, @SP
                 RBRA    _DP_FDD, !Z
-                MOVE    R3, R1                  ; the hard disk: whole sectors,
-                AND     0x01FF, R1              ; at least one
+_DP_WHOLE       MOVE    R3, R1                  ; the hard disk, the CD-ROM: whole
+                AND     R4, R1                  ; sectors, at least one
                 RBRA    _DP_BADHD, !Z
                 MOVE    R3, R5                  ; R6:R5 = size >> 9
                 AND     0xFFFB, SR
@@ -237,20 +250,25 @@ _DP_SHD         MOVE    2, R2
                 MOVE    R7, R1
                 ADD     1, R1
                 MOVE    R5, @R1++               ; 1 SECTS lo
-                CMP     2, @SP
-                RBRA    _DP_FSECT, !Z
-                MOVE    R6, @R1++               ; 2 SECTS hi (the hard disk)
+                MOVE    @SP, R4
+                AND     2, R4                   ; units 2 and 3: no floppy
+                RBRA    _DP_FSECT, Z
+                MOVE    R6, @R1++               ; 2 SECTS hi (the hard disk, the CD-ROM)
                 RBRA    _DP_BASE, 1
 _DP_FSECT       MOVE    0, @R1++                ; 2 SECTS hi (a floppy)
 _DP_BASE        MOVE    R10, @R1++              ; 3 BASE lo
                 MOVE    R11, @R1++              ; 4 BASE hi
                 MOVE    R3, @R1++               ; 5 SHIFT
-                CMP     2, @SP
-                RBRA    _DP_MODE, Z             ; (the hard disk: no geometry)
+                MOVE    @SP, R4
+                AND     2, R4
+                RBRA    _DP_MODE, !Z            ; (the hard disk, the CD-ROM: no geometry)
                 MOVE    @R6++, @R1++            ; 6 cylinders
                 MOVE    @R6, @R1++              ; 7 sectors per track
                 MOVE    2, @R1                  ; 8 heads
-_DP_MODE        MOVE    R8, @R7                 ; MODE last
+_DP_MODE        CMP     3, @SP
+                RBRA    _DP_MODE2, !Z
+                OR      4, R8                   ; the CD-ROM: write protected
+_DP_MODE2       MOVE    R8, @R7                 ; MODE last
 
                 ; 5. the handle to its end
                 MOVE    R0, R8
@@ -272,6 +290,9 @@ _DP_OK          XOR     R8, R8
                 RBRA    _DP_RET, 1
 _DP_BADHD       MOVE    DISK_E_SIZE, R8
                 MOVE    ERR_HDD_SIZE, R9
+                CMP     3, @SP
+                RBRA    _DP_RET, !Z
+                MOVE    ERR_CD_SIZE, R9
                 RBRA    _DP_RET, 1
 _DP_BADSZ       MOVE    DISK_E_SIZE, R8
                 MOVE    ERR_FDD_SIZE, R9
@@ -298,10 +319,13 @@ ERR_FDD_SIZE    .ASCII_P "Not a floppy image: it\n"
                 .ASCII_W "must be 360K, 720K,\n1.2M, 1.44M or 2.88M.\n"
 ERR_HDD_SIZE    .ASCII_P "Not a disk image: its\n"
                 .ASCII_W "size must be whole\n512-byte sectors.\n"
+ERR_CD_SIZE     .ASCII_P "Not a CD image (ISO):\n"
+                .ASCII_W "its size must be whole\n2048-byte sectors.\n"
 ERR_DISK_FRAG   .ASCII_W "The image file has too\nmany fragments.\n"
 ERR_DISK_FAT    .ASCII_W "Cannot read the image\nfile (FAT32 error).\n"
 FDD_AUTO        .ASCII_W "/z486/floppy.img"
 HDD_AUTO        .ASCII_W "/z486/hdd.img"
+CD_AUTO         .ASCII_W "/z486/cdrom.iso"
 
 ; DISK_AUTO: mount the file R10 (a path) from the device R8 as unit R9, if it
 ; is there; its menu line then shows its name. Output: C = 1: mounted.
@@ -330,30 +354,47 @@ _DA_NO          SYSCALL(leave, 1)
                 RET
 
 ; DISK_AUTO_NAME: the menu line of manual load R9 (0 A:, 1 B:, 2 the hard
-; disk) shows the auto-mounted image R8 (a path) like a manual load
+; disk, 3 the CD-ROM) shows the auto-mounted image R8 (a path) like a manual load
 ; (Megamac's DISK_AUTO_NAME): its device's CSR (PC_DEV_DISK + R9) says
-; "loaded", which the Shell polls (CRTROM_MLST_GET), CRTROM_MAN_LDF[R9] = 1
-; and the file name after the last '/' in the line's OPTM_HEAP buffer
-; ((vdrives + submenus + R9) * OSM_O_DX), at most the width - 2 characters,
-; one more for the ellipsis, the "%s is replaced" flag in the buffer's last
-; word = 0. Registers preserved.
+; "loaded", and DAN_FLUSH puts the name into the line once the menu has its
+; heap. At PREP_START it has none yet (HELP_MENU makes it when the menu first
+; opens): before, the name was skipped, the menu drew the line unloaded (the
+; line's text in its buffer), then the Shell's poll of the CSR marked it loaded
+; and put that text in for the name: "Hard disk:  Hard dis...". Registers
+; preserved.
 DISK_AUTO_NAME  SYSCALL(enter, 1)
-                MOVE    R8, R0                  ; R0: the path
-                MOVE    R9, R1                  ; R1: the manual load
                 MOVE    PC_DEV_DISK, R4         ; its device's CSR: loaded
-                ADD     R1, R4
+                ADD     R9, R4
                 MOVE    M2M$RAMROM_DEV, R5
                 MOVE    R4, @R5
                 MOVE    M2M$RAMROM_4KWIN, R5
                 MOVE    CRTROM_CSR_4KWIN, @R5
                 MOVE    CRTROM_CSR_STATUS, R5
                 MOVE    CRTROM_CSR_ST_OK, @R5
-                MOVE    OPTM_HEAP, R4
+                MOVE    DAN_PEND, R4            ; the name, for DAN_FLUSH
+                ADD     R9, R4
+                MOVE    R8, @R4
+                SYSCALL(leave, 1)
+                RET
+
+; DAN_FLUSH (from HANDLE_CORE_IO): once the Shell has the menu heap, the
+; names that DISK_AUTO_NAME keeps for the auto-mounted images go into their
+; lines' OPTM_HEAP buffers ((vdrives + submenus + unit) * @SCR$OSM_O_DX): the
+; file name after the last '/', at most the width - 2 characters, one more for
+; the ellipsis, the "%s is replaced" flag in the buffer's last word = 0, as
+; shell.asm's _HM_SDMOUNTED3..5 do it. In the menu's key loop HANDLE_IO comes
+; before the Shell's poll of the CSRs (CRTROM_MLST_GET), which then sees the
+; line loaded and draws it with the name. Registers preserved.
+DAN_FLUSH       SYSCALL(enter, 1)
+                XOR     R1, R1                  ; R1: the unit
+_DANF_UNIT      MOVE    OPTM_HEAP, R4
                 MOVE    @R4, R4                 ; R4: the heap (0: no menu yet)
                 RBRA    _DAN_RET, Z
-                MOVE    CRTROM_MAN_LDF, R5
-                ADD     R1, R5
-                MOVE    1, @R5                  ; loaded
+                MOVE    DAN_PEND, R2
+                ADD     R1, R2
+                MOVE    @R2, R0                 ; R0: the unit's path (0: none)
+                RBRA    _DANF_NEXT, Z
+                MOVE    0, @R2
                 MOVE    R0, R5                  ; R5: the name = after the last '/'
                 MOVE    R0, R6
 _DAN_BN         CMP     0, @R6
@@ -395,6 +436,9 @@ _DAN_FLAG       MOVE    SCR$OSM_O_DX, R8        ; "%s is replaced" = 0
                 SUB     1, R8
                 ADD     R4, R8
                 MOVE    0, @R8
+_DANF_NEXT      ADD     1, R1
+                CMP     4, R1
+                RBRA    _DANF_UNIT, !Z
 _DAN_RET        SYSCALL(leave, 1)
                 RET
 
@@ -490,13 +534,22 @@ _PCS_VGA        MOVE    R8, R7                  ; R7: device handle
                 RSUB    PC_ROM_LOAD, 1
                 RBRA    _PCS_RET, C
 
-                ; the hard disk /z486/hdd.img and floppy drive A:
-                ; /z486/floppy.img, if they are there (then 150 ms for a
-                ; floppy, so that pc_mgmt.vhd has inserted it, 100 ms after
-                ; the eject, before the BIOS looks for drives)
+                ; the hard disk /z486/hdd.img, the CD-ROM /z486/cdrom.iso and
+                ; floppy drive A: /z486/floppy.img, if they are there (then
+                ; 150 ms for a floppy, so that pc_mgmt.vhd has inserted it,
+                ; 100 ms after the eject, before the BIOS looks for drives)
+                MOVE    DAN_PEND, R8            ; no names kept (RAM outlives
+                MOVE    0, @R8++                ; a QNICE reset)
+                MOVE    0, @R8++
+                MOVE    0, @R8++
+                MOVE    0, @R8
                 MOVE    R7, R8
                 MOVE    2, R9
                 MOVE    HDD_AUTO, R10
+                RSUB    DISK_AUTO, 1
+                MOVE    R7, R8
+                MOVE    3, R9
+                MOVE    CD_AUTO, R10
                 RSUB    DISK_AUTO, 1
                 MOVE    R7, R8
                 XOR     R9, R9
@@ -682,6 +735,7 @@ CUSTOM_MSG      XOR     R8, R8
 ; words); every command ends with "QMON> ", a broken one after "?". Any other
 ; byte is ignored. The Shell's device and window are put back afterwards.
 HANDLE_CORE_IO  SYSCALL(enter, 1)
+                RSUB    DAN_FLUSH, 1            ; auto-mounted names into the menu
                 MOVE    IO$UART_SRA, R0
                 MOVE    @R0, R1
                 AND     0x0001, R1              ; a byte from the serial port?
@@ -869,7 +923,7 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "5"
+CFG_SIG_VAL     .ASCII_W "7"
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -968,11 +1022,16 @@ END_OF_ROM      .DW 0
 ; PREP_START's file handle for the BIOS ROMs
 PC_ROM_FILE     .BLOCK  FAT32$FDH_STRUCT_SIZE
 
+; DISK_AUTO_NAME's auto-mounted paths per unit (0: none), for DAN_FLUSH
+DAN_PEND        .BLOCK  4
+
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 21-line menu: 20 + 263 item characters + 1 + 4 x 21 + 1 + (1
-; submenu + 3 manual loads + 1) x 30 = 519 words; the Shell checks it at boot
-; (ERR_FATAL_HEAP1/2). The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 576
+; for this 38-line menu: 20 + 361 item characters + 1 + 5 x 38 (the line
+; arrays and the dependency array) + 1 + (3 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 781 words. The Shell checks it when the menu first opens
+; (ERR_FATAL_HEAP1/2; 768 was 13 short: "Heap corruption", error code 000D).
+; The rest of the heap is the file browser's.
+MENU_HEAP_SIZE  .EQU 832
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -980,7 +1039,7 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 19232
+HEAP_SIZE       .EQU 19040
 HEAP            .BLOCK 1
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's

@@ -12,6 +12,9 @@
 -- Writes one checksum per output line of frames 3 .. G_FRAMES-1 to build/ascal_<G_RUN>.txt,
 -- and frame 4 as a P3 picture to build/ascal_<G_RUN>.ppm. run_ascal.sh compares the runs.
 --
+-- The filters (G_MODE) on a text screen: G_PAT 1 is 720x400 of "68" in the VGA font's 9x16
+-- cells (G_IW, G_IH), scaled into a G_OW x G_OH window (1280x960 as in 1280x1024, 800x600).
+--
 -- Licensed under GPL v3
 ----------------------------------------------------------------------------------
 
@@ -25,6 +28,15 @@ entity tb_ascal is
       G_LAT    : natural := 16;      -- memory latency per burst (avl clocks)
       G_GAP    : natural := 8;       -- clocks per beat
       G_FRAMES : natural := 7;
+      G_MODE   : natural := 10;      -- ascal's mode: 8 nearest, 9 bilinear, 10 sharp bilinear
+                                     -- (+ triple buffering)
+      G_PAT    : natural := 0;       -- 0 colour ramps, 1 "68" text
+      G_IW     : natural := 320;     -- the input's active size
+      G_IH     : natural := 240;
+      G_OW     : natural := 640;     -- the output window (2x by default)
+      G_OH     : natural := 480;
+      G_MEMW   : natural := 65536;   -- memory words (16 bytes)
+      G_RAM    : natural := 2**18;   -- ascal's RAMSIZE (one frame buffer)
       G_RUN    : natural := 0        -- output file number
    );
 end entity tb_ascal;
@@ -33,12 +45,12 @@ architecture sim of tb_ascal is
 
    constant C_DW : natural := 128;
    constant C_AW : natural := 19;
-   constant C_MEMW : natural := 65536;   -- 1 MB; addresses wrap
+   constant C_MEMW : natural := G_MEMW;  -- addresses wrap
 
    signal i_clk, o_clk, avl_clk : std_logic := '0';
    signal reset_na : std_logic := '0';
 
-   -- input video: 320x240 of 400x262
+   -- input video: G_IW x G_IH of (G_IW + 80) x (G_IH + 22)
    signal i_r, i_g, i_b : unsigned(7 downto 0) := (others => '0');
    signal i_hs, i_vs, i_de : std_logic := '0';
 
@@ -63,28 +75,51 @@ begin
    reset_na <= '1' after 1 us;
 
    p_in : process (i_clk)
-      variable hc : natural range 0 to 399 := 0;
-      variable vc : natural range 0 to 261 := 0;
+      -- the VGA font's "6" and "8", rows 0..15
+      type t_glyph is array (0 to 15) of std_logic_vector(7 downto 0);
+      constant C_6 : t_glyph := (x"00", x"00", x"38", x"60", x"C0", x"C0", x"FC", x"C6",
+                                 x"C6", x"C6", x"C6", x"7C", x"00", x"00", x"00", x"00");
+      constant C_8 : t_glyph := (x"00", x"00", x"7C", x"C6", x"C6", x"C6", x"7C", x"C6",
+                                 x"C6", x"C6", x"C6", x"7C", x"00", x"00", x"00", x"00");
+      variable hc : natural range 0 to G_IW + 79 := 0;
+      variable vc : natural range 0 to G_IH + 21 := 0;
+      variable cx : natural;
+      variable v_on : boolean;
    begin
       if rising_edge(i_clk) then
-         if hc = 399 then
+         if hc = G_IW + 79 then
             hc := 0;
-            vc := (vc + 1) mod 262;
+            vc := (vc + 1) mod (G_IH + 22);
          else
             hc := hc + 1;
          end if;
-         i_de <= '1' when hc < 320 and vc < 240 else '0';
-         i_hs <= '1' when hc >= 340 and hc < 370 else '0';
-         i_vs <= '1' when vc >= 245 and vc < 247 else '0';
-         i_r  <= to_unsigned(hc mod 256, 8);
-         i_g  <= to_unsigned(vc, 8);
-         i_b  <= to_unsigned((hc * 3 + vc * 5) mod 256, 8);
+         i_de <= '1' when hc < G_IW and vc < G_IH else '0';
+         i_hs <= '1' when hc >= G_IW + 20 and hc < G_IW + 50 else '0';
+         i_vs <= '1' when vc >= G_IH + 5 and vc < G_IH + 7 else '0';
+         if G_PAT = 1 then
+            -- "68" in every pair of cells; column 0 and the last one marked (the edges)
+            cx := (hc / 9) mod 2;
+            v_on := (hc mod 9) < 8 and vc < G_IH and hc < G_IW and
+                  ((cx = 0 and C_6(vc mod 16)(7 - hc mod 9) = '1') or
+                   (cx = 1 and C_8(vc mod 16)(7 - hc mod 9) = '1'));
+            if hc = 0 or hc = G_IW - 1 then
+               i_r <= x"FF"; i_g <= x"00"; i_b <= x"00";
+            elsif v_on then
+               i_r <= x"AA"; i_g <= x"AA"; i_b <= x"AA";
+            else
+               i_r <= x"00"; i_g <= x"00"; i_b <= x"00";
+            end if;
+         else
+            i_r <= to_unsigned(hc mod 256, 8);
+            i_g <= to_unsigned(vc mod 256, 8);
+            i_b <= to_unsigned((hc * 3 + vc * 5) mod 256, 8);
+         end if;
       end if;
    end process p_in;
 
    i_ascal : entity work.ascal
       generic map (
-         MASK => x"07", RAMBASE => (others => '0'), RAMSIZE => to_unsigned(2**18, 32),
+         MASK => x"07", RAMBASE => (others => '0'), RAMSIZE => to_unsigned(G_RAM, 32),
          INTER => true, HEADER => false, DOWNSCALE => false, DOWNSCALE_NN => true,
          BYTESWAP => true, ADAPTIVE => true, PALETTE => true, PALETTE2 => true, FRAC => 6,
          OHRES => 2048, IHRES => 1024, N_DW => C_DW, N_AW => C_AW, N_BURST => 128
@@ -104,9 +139,11 @@ begin
          o_lltune => open,
          iauto => '1', himin => 0, himax => 0, vimin => 0, vimax => 0,
          i_hdmax => open, i_vdmax => open, i_interlaced => open,
-         run => '1', freeze => '0', mode => "01010",   -- triple buffered sharp bilinear
-         htotal => 712, hsstart => 660, hsend => 676, hdisp => 640, hmin => 0, hmax => 639,
-         vtotal => 528, vsstart => 515, vsend => 519, vdisp => 512, vmin => 16, vmax => 495,
+         run => '1', freeze => '0', mode => to_unsigned(G_MODE, 5),
+         htotal => G_OW + 72, hsstart => G_OW + 20, hsend => G_OW + 36, hdisp => G_OW,
+         hmin => 0, hmax => G_OW - 1,
+         vtotal => G_OH + 48, vsstart => G_OH + 35, vsend => G_OH + 39, vdisp => G_OH + 32,
+         vmin => 16, vmax => G_OH + 15,
          format => "01",
          poly_clk => '0', poly_dw => (others => '0'), poly_a => (others => '0'), poly_wr => '0',
          avl_clk => avl_clk, avl_waitrequest => avl_waitrequest, avl_readdata => avl_readdata,
@@ -238,7 +275,8 @@ begin
          if not opened then
             file_open(f_txt, "ascal_" & integer'image(G_RUN) & ".txt", write_mode);
             file_open(f_ppm, "ascal_" & integer'image(G_RUN) & ".ppm", write_mode);
-            write(l, string'("P3 640 512 255")); writeline(f_ppm, l);
+            write(l, "P3 " & integer'image(G_OW) & " " & integer'image(G_OH + 32) & " 255");
+            writeline(f_ppm, l);
             opened := true;
          end if;
          if o_vs = '1' and vs_d = '0' then

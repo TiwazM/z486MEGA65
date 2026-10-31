@@ -2678,23 +2678,28 @@ BEGIN
       o_hpixq(3 TO 6)<=o_hpixq(2 TO 5);
       
       -- BILINEAR / SHARP BILINEAR ---------------
+      -- M2M-UPSTREAM filter-align (z486 for MEGA65, 2026-10-31): the bilinear path one stage
+      -- later (o_hfrac(5) and (6), o_hpixq(6); original: (4) and (5), o_hpixq(5)), with the
+      -- fraction and the pixels paired as before. Its pixel left one clock before the
+      -- polyphase/nearest one and was written one output pixel to the left: the picture moved
+      -- left, and at 800x600 the PC's first column was gone (simulated, CORE/sim/tb_ascal.vhd).
       -- C5 : Pre-calc Sharp Bilinear
-      o_h_sbil_t<=sbil_frac1(o_hfrac(4));
+      o_h_sbil_t<=sbil_frac1(o_hfrac(5));
       
       -- C6 : Select
       o_h_bil_frac<=(OTHERS =>'0');
       IF o_hmode(0)='1' THEN -- Bilinear
         IF MASK(MASK_BILINEAR)='1' THEN
-          o_h_bil_frac<=bil_frac(o_hfrac(5));
+          o_h_bil_frac<=bil_frac(o_hfrac(6));
         END IF;
       ELSE -- Sharp Bilinear
         IF MASK(MASK_SHARP_BILINEAR)='1' THEN
-          o_h_bil_frac<=sbil_frac2(o_hfrac(5),o_h_sbil_t);
+          o_h_bil_frac<=sbil_frac2(o_hfrac(6),o_h_sbil_t);
         END IF;
       END IF;
      
       -- C7 : Opposite frac
-      o_h_bil_t<=bil_calc(o_h_bil_frac,o_hpixq(5));
+      o_h_bil_t<=bil_calc(o_h_bil_frac,o_hpixq(6));
       
       -- C8 : Bilinear / Sharp Bilinear
       o_h_bil_pix.r<=bound(o_h_bil_t.r,8+FRAC);

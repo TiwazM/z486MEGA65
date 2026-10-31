@@ -160,20 +160,22 @@ def line(s):
 def disks():
     poke(0xFFF4, 0x0101)                   # M2M$RAMROM_DEV = C_DEV_PC_DISK
     poke(0xFFF5, 0x0000)
-    for u, name in enumerate(["A:", "B:", "hard disk"]):
+    for u, name in enumerate(["A:", "B:", "hard disk", "CD-ROM"]):
         r = dump(0x8000 + 0x20 * u, 0x8008 + 0x20 * u)
         geo = "  geometry %d/%d/%d" % (r[6], r[8], r[7]) if u < 2 else ""
         print("%-9s mode %d (%s%s%s)  sectors %d  base %d  shift %d%s" %
               (name, r[0], "mounted" if r[0] & 1 else "empty", ", slot 1" if r[0] & 2 else "",
                ", write protected" if r[0] & 4 else "", r[2] << 16 | r[1], r[4] << 16 | r[3], r[5], geo))
-    st = dump(0x8010, 0x801E)
+    st = dump(0x8010, 0x801F)
     print("sectors read %d  written %d  failed %d  last request: %s %s LBA %d, %d us" %
           (st[0], st[1], st[2], "write" if st[3] & 0x8000 else "read",
-           ["A:", "B:", "hard disk", "?"][st[3] >> 13 & 3], st[5] << 16 | st[4], st[12]))
+           ["A:", "B:", "hard disk", "CD-ROM"][st[3] >> 13 & 3], st[5] << 16 | st[4], st[12]))
     rd_t, wr_t = st[7] << 16 | st[6], st[10] << 16 | st[9]
     print("read  average %s us, slowest %d us" % ("%d" % (rd_t // st[0]) if st[0] else "-", st[8]))
     print("write average %s us, slowest %d us" % ("%d" % (wr_t // st[1]) if st[1] else "-", st[11]))
     print("tried again after an error %d, after QNICE's own SD access %d" % (st[13], st[14]))
+    print("SD transfers started %d (runs of sectors read ahead, and writes): %s sectors per transfer"
+          % (st[15], "%.1f" % ((st[0] + st[1]) / st[15]) if st[15] else "-"))
 
 
 def l2(arg):

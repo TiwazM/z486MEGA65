@@ -2,27 +2,36 @@
 -- z486 for MEGA65
 --
 -- The PC's disks straight from image files on the SD card: floppy drives A: and B: (units 0
--- and 1) and the hard disk (unit 2), one 512-byte sector at a time through the SD host
--- controller's engine port, for pc_mgmt.vhd, which serves floppy.v and ide.v. After Megamiga's
--- adf_sd.vhd and Megamac's ide_engine.vhd (the same extent map and lookup), without their track
--- buffer: the PC's controllers ask for one sector and wait for it anyway.
+-- and 1), the hard disk (unit 2) and the CD-ROM's disc (unit 3, an ISO image: its 2048-byte
+-- sectors are four of these), through the SD host controller's engine port, for pc_mgmt.vhd,
+-- which serves floppy.v and ide.v (and passes pc_cdrom.vhd's requests on). After Megamiga's
+-- adf_sd.vhd and Megamac's ide_engine.vhd (the same extent map and lookup).
 --
 --   * The firmware (m2m-rom.asm, DISK_PREP) writes a file's extent map (FAT32$FILE_MAP format:
 --     word 0 = extents, then per extent first cluster lo/hi, clusters lo/hi; up to 511) into
 --     window 1, then the drive's registers below, MODE last.
---   * A request from pc_mgmt (a toggle; unit, wr and lba stable while it crosses) is looked up
---     in the unit's map: cluster index = lba >> SHIFT, SD block = BASE + (cluster << SHIFT) +
+--   * A request from pc_mgmt (a toggle; unit, wr, lba and cnt stable while it crosses) is looked
+--     up in the unit's map: cluster index = lba >> SHIFT, SD block = BASE + (cluster << SHIFT) +
 --     the rest.
---     The block moves between the card and the sector buffer (a true dual-port block RAM, one
---     port per clock domain), then the answer goes back (a toggle, err stable with it).
---   * A failed transfer is tried again twice, 1 ms apart; a controller that is not ready
---     counts as a failure. A transfer that QNICE's own SD access ended early (no block moved)
---     starts again. A sector that cannot be read (no image, outside the file, SD error) comes
---     back with err set: pc_mgmt then gives the PC zeros. A write to a write-protected image
---     is dropped (floppy.v already refused it: the write protect is in its register 1).
+--   * A read starts a run: one multi-block SD read (CMD18) of the sectors the PC will read next
+--     (cnt, which pc_mgmt has from an IDE command; a floppy: 18, a track), within the extent and
+--     the file, into a ring of 32 sectors (block RAM; run block k in slot k mod 32). The answer
+--     comes as soon as the sector is in; the run goes on, and the next requests are answered out
+--     of the ring. The engine moves a block only while it is at most 31 ahead of the one the PC
+--     reads (its LIMIT; the card waits with its clock stopped), so a run can be longer than the
+--     ring: one SD command per IDE command. A request outside the run ends it (ABORT, at the
+--     next block boundary) and starts the next. Before: one SD command (~440 us) per sector.
+--     pc_mgmt reads the answer's slot (port B of the ring, read only).
+--   * A write moves one block out of the write buffer (CMD24) and drops the drive's run.
+--   * A failed transfer is tried again twice, 1 ms apart, from the first block missing; a
+--     controller that is not ready counts as a failure. A transfer that QNICE's own SD access
+--     ended early goes on from the first block missing. A sector that cannot be read (no
+--     image, outside the file, SD error) comes back with err set: pc_mgmt then gives the PC
+--     zeros. A write to a write-protected image is dropped (floppy.v already refused it: the
+--     write protect is in its register 1).
 --
 -- QNICE registers (device C_DEV_PC_DISK, window 0; written on the falling edge), unit u at
--- 0x20 * u (A: 0x00, B: 0x20, the hard disk 0x40):
+-- 0x20 * u (A: 0x00, B: 0x20, the hard disk 0x40, the CD-ROM 0x60):
 --   0x00 MODE    bit 0 = an image is mounted, bit 1 = it is on the card in slot 1, bit 2 =
 --                write protected. Every write counts the drive's mount generation, which
 --                pc_mgmt watches.
@@ -32,13 +41,14 @@
 --   0x06 CYL     cylinders, 0x07 SPT sectors per track, 0x08 HEADS (floppies only, for floppy.v)
 --   0x10..0x15   (read, all units) sectors read, sectors written, failed requests, the last
 --                request (bit 15 = write, 14..13 = unit), its LBA (lo, hi)
---   0x16..0x1E   (read) the requests' times in microseconds, from the request's arrival to its
+--   0x16..0x1F   (read) the requests' times in microseconds, from the request's arrival to its
 --                answer: reads' sum (lo, hi), the slowest read, writes' sum (lo, hi), the
 --                slowest write, the last request's; then the transfers tried again after an
---                error and the ones that QNICE's own SD access interrupted
---   0x10         (write) clears 0x10..0x1E (any value)
+--                error, the ones that QNICE's own SD access interrupted, and the SD transfers
+--                started (runs and writes)
+--   0x10         (write) clears 0x10..0x1F (any value)
 -- Windows 1 and 2: the extent maps, unit u at map word 2048 * u (A: window 1 from 0, B: window
--- 1 from 2048, the hard disk: window 2 from 0). Window 0xFFFF: M2M's CSR (qnice_csr.vhd), one per
+-- 1 from 2048, the hard disk: window 2 from 0, the CD-ROM: window 2 from 2048). Window 0xFFFF: M2M's CSR (qnice_csr.vhd), one per
 -- unit (qnice_unit_i: the device the Shell selected), which the Shell's manual load talks to and
 -- reads back to tell whether the unit's menu line is loaded: it answers READY at once (the Shell
 -- streams nothing: DISK_PREP moved the file handle to its end). The other windows are the same
@@ -76,19 +86,21 @@ entity disk_sd is
 
       -- the units for pc_mgmt (QNICE clock), unit u at bits 40 * u + 39 .. 40 * u: floppies:
       -- mounted, write protected, cylinders (8), sectors per track (8), sectors (16), heads (2),
-      -- the mount generation (4), which moves last; the hard disk: mounted, write protected,
-      -- sectors (32), 00, the mount generation (4)
-      mnt_o         : out std_logic_vector(119 downto 0);
+      -- the mount generation (4), which moves last; the hard disk and the CD-ROM: mounted,
+      -- write protected, sectors (32), 00, the mount generation (4)
+      mnt_o         : out std_logic_vector(159 downto 0);
 
       -- sector requests from pc_mgmt (main clock) and the answers (QNICE clock)
       req_i        : in  std_logic;                -- a toggle
       req_wr_i     : in  std_logic;
       req_unit_i   : in  std_logic_vector(1 downto 0);
       req_lba_i    : in  std_logic_vector(31 downto 0);
+      req_cnt_i    : in  std_logic_vector(8 downto 0);   -- the sectors to come (0: not known)
       done_o       : out std_logic;                -- a toggle
       done_err_o   : out std_logic;
 
-      -- the sector buffer's other port (pc_mgmt's clock; read data one clock later)
+      -- the buffers' other ports (pc_mgmt's clock; read data one clock later): reads come
+      -- out of the answer's ring slot, writes go into the write buffer
       main_clk_i   : in  std_logic;
       buf_addr_i   : in  std_logic_vector(8 downto 0);
       buf_we_i     : in  std_logic;
@@ -104,7 +116,7 @@ architecture synthesis of disk_sd is
    constant C_TRIES         : natural := 3;
 
    -- registers, one set per unit
-   constant C_UNITS : natural := 3;
+   constant C_UNITS : natural := 4;
    type t_mode  is array (0 to C_UNITS - 1) of std_logic_vector(2 downto 0);
    type t_u32   is array (0 to C_UNITS - 1) of unsigned(31 downto 0);
    type t_shift is array (0 to C_UNITS - 1) of natural range 0 to 15;
@@ -162,8 +174,8 @@ architecture synthesis of disk_sd is
    signal q_map      : std_logic;
 
    -- the request
-   type t_state is (F_IDLE, F_CHECK, F_LOOK_N, F_LOOK_EXT, F_LOOK_CMP, F_CALC, F_START, F_RUN,
-                    F_RETRY, F_FAIL, F_DONE);
+   type t_state is (F_IDLE, F_CHECK, F_STOP, F_LOOK_N, F_LOOK_EXT, F_LOOK_CMP, F_CALC, F_GO,
+                    F_WAIT_BLK, F_WAIT_WR, F_FAIL, F_DONE);
    signal st        : t_state := F_IDLE;
    signal req_s     : std_logic_vector(2 downto 0) := (others => '0');
    attribute async_reg : string;
@@ -172,6 +184,9 @@ architecture synthesis of disk_sd is
    signal x_drv     : natural range 0 to C_UNITS - 1 := 0;
    signal x_shift   : natural range 0 to 15 := 0;
    signal x_lba     : unsigned(31 downto 0) := (others => '0');
+   signal x_cnt     : unsigned(8 downto 0) := (others => '0');
+   signal x_blk     : unsigned(31 downto 0) := (others => '0');   -- its SD block
+   signal x_n       : unsigned(31 downto 0) := (others => '0');   -- the run's length
    signal ph        : natural range 0 to 7 := 0;
    signal ci        : unsigned(31 downto 0) := (others => '0');
    signal cum       : unsigned(31 downto 0) := (others => '0');
@@ -180,12 +195,40 @@ architecture synthesis of disk_sd is
    signal e_first   : unsigned(31 downto 0) := (others => '0');
    signal e_len     : unsigned(31 downto 0) := (others => '0');
    signal p_clus    : unsigned(31 downto 0) := (others => '0');
-   signal run_blk   : unsigned(31 downto 0) := (others => '0');
-   signal moved     : std_logic := '0';
-   signal tries     : natural range 0 to C_TRIES := 0;
-   signal wait_cnt  : natural range 0 to C_RETRY_WAIT := 0;
    signal done      : std_logic := '0';
    signal done_err  : std_logic := '0';
+
+   -- the run in the ring: sectors c_lba .. c_lba + c_n - 1 of drive c_drv (its mount
+   -- generation c_gen) from SD block c_blk on; the run's block k goes into ring slot k mod 32
+   constant C_RING   : natural := 32;
+   constant C_FDD_RUN : natural := 18;                            -- a floppy's track
+   signal c_valid   : std_logic := '0';
+   signal c_drv     : natural range 0 to C_UNITS - 1 := 0;
+   signal c_gen     : unsigned(3 downto 0) := (others => '0');
+   signal c_lba     : unsigned(31 downto 0) := (others => '0');
+   signal c_blk     : unsigned(31 downto 0) := (others => '0');
+   signal c_n       : unsigned(15 downto 0) := (others => '0');
+   signal c_got     : unsigned(15 downto 0) := (others => '0');   -- blocks arrived
+   signal c_cons    : unsigned(15 downto 0) := (others => '0');   -- the block the PC has now
+   signal c_j       : unsigned(15 downto 0) := (others => '0');   -- the block it waits for
+   signal a_slot    : std_logic_vector(4 downto 0) := (others => '0');  -- for pc_mgmt
+
+   -- the runner: a run through the engine (or one block out of the write buffer)
+   type t_rstate is (R_IDLE, R_START, R_RUN, R_RETRY);
+   signal rs        : t_rstate := R_IDLE;
+   signal r_go      : std_logic := '0';                           -- a pulse
+   signal r_wr      : std_logic := '0';
+   signal r_abort   : std_logic := '0';
+   signal r_fail    : std_logic := '0';
+   signal r_moved   : std_logic := '0';
+   signal r_slot    : std_logic := '0';                           -- the card's slot
+   signal t_start   : unsigned(15 downto 0) := (others => '0');   -- the transfer's first block
+   signal e_addr    : unsigned(31 downto 0) := (others => '0');
+   signal e_count   : unsigned(15 downto 0) := (others => '0');
+   signal e_limit   : unsigned(15 downto 0);
+   signal tries     : natural range 0 to C_TRIES := 0;
+   signal wait_cnt  : natural range 0 to C_RETRY_WAIT := 0;
+   signal st_cmd    : unsigned(15 downto 0) := (others => '0');   -- SD transfers started
 
    -- the engine port
    signal sd_start  : std_logic := '0';
@@ -196,9 +239,11 @@ architecture synthesis of disk_sd is
    signal sd_blk    : std_logic;
    signal sd_rdwe   : std_logic;
 
-   -- the sector buffer, QNICE side
-   signal buf_a_addr : std_logic_vector(8 downto 0);
-   signal buf_a_we   : std_logic;
+   -- the ring (QNICE side: the engine's read bytes) and the write buffer (the engine takes
+   -- its write bytes out of it)
+   signal ring_a_addr : std_logic_vector(13 downto 0);
+   signal ring_a_we   : std_logic;
+   signal ring_b_addr : std_logic_vector(13 downto 0);
    signal buf_a_q    : std_logic_vector(7 downto 0);
 
 begin
@@ -274,6 +319,7 @@ begin
                when 12     => qnice_data_o <= std_logic_vector(st_t);
                when 13     => qnice_data_o <= std_logic_vector(st_retry);
                when 14     => qnice_data_o <= std_logic_vector(st_again);
+               when 15     => qnice_data_o <= std_logic_vector(st_cmd);
                when others => null;
             end case;
          elsif v_d < C_UNITS then
@@ -331,8 +377,10 @@ begin
                                           std_logic_vector(sects(d)(15 downto 0)) & heads(d) &
                                           std_logic_vector(gen(d));
    end generate g_mnt;
-   mnt_o(119 downto 80) <= mode(2)(0) & mode(2)(2) & std_logic_vector(sects(2)) & "00" &
-                           std_logic_vector(gen(2));
+   g_mnt_big : for d in 2 to 3 generate
+      mnt_o(40 * d + 39 downto 40 * d) <= mode(d)(0) & mode(d)(2) & std_logic_vector(sects(d)) &
+                                          "00" & std_logic_vector(gen(d));
+   end generate g_mnt_big;
 
    p_map : process (qnice_clk_i)
    begin
@@ -343,6 +391,7 @@ begin
          map_q <= map_ram(x_drv * 2048 + to_integer(maddr));
       end if;
    end process p_map;
+
 
    ---------------------------------------------------------------------------------------------
    -- The engine port
@@ -355,26 +404,53 @@ begin
    sd_blk   <= sd_q2c_i(Q2C_BLK);
    sd_rdwe  <= sd_q2c_i(Q2C_RDWE);
 
+   -- a read moves the run's block k only while k < the PC's block + 32: the slots ahead of the
+   -- one it reads (counted from the transfer's first block, as the engine counts)
+   e_limit <= c_cons + C_RING - t_start when r_wr = '0' else x"FFFF";
+
    p_c2q : process (all)
    begin
       sd_c2q_o              <= (others => '0');
       sd_c2q_o(C2Q_START)   <= sd_start;
-      sd_c2q_o(C2Q_WRITE)   <= x_wr;
-      sd_c2q_o(C2Q_ADDR)    <= std_logic_vector(run_blk);
-      sd_c2q_o(C2Q_COUNT)   <= x"0001";
-      sd_c2q_o(C2Q_LIMIT)   <= x"FFFF";
+      sd_c2q_o(C2Q_WRITE)   <= r_wr;
+      sd_c2q_o(C2Q_ABORT)   <= r_abort;
+      sd_c2q_o(C2Q_ADDR)    <= std_logic_vector(e_addr);
+      sd_c2q_o(C2Q_COUNT)   <= std_logic_vector(e_count);
+      sd_c2q_o(C2Q_LIMIT)   <= std_logic_vector(e_limit);
       sd_c2q_o(C2Q_WRDATA)  <= buf_a_q;
-      sd_c2q_o(C2Q_SLOT)    <= mode(x_drv)(1);
+      sd_c2q_o(C2Q_SLOT)    <= r_slot;
    end process p_c2q;
 
-   -- the buffer's QNICE port: the controller's read bytes in, its write bytes out (the byte
-   -- one clock after it named it)
-   buf_a_we   <= sd_rdwe when st = F_RUN and x_wr = '0' and sd_q2c_i(Q2C_RDBLK) = x"0000" else '0';
-   buf_a_addr <= sd_q2c_i(Q2C_RDIDX) when x_wr = '0' else sd_q2c_i(Q2C_WRIDX);
+   -- the ring: the engine's read bytes into the run block's slot; pc_mgmt reads the answer's
+   -- slot (a_slot is stable from before the answer until the next request)
+   ring_a_we   <= sd_rdwe when rs = R_RUN and r_wr = '0' else '0';
+   ring_a_addr <= std_logic_vector(t_start(4 downto 0) + unsigned(sd_q2c_i(Q2C_RDBLK'low + 4 downto Q2C_RDBLK'low))) &
+                  sd_q2c_i(Q2C_RDIDX);
+   ring_b_addr <= a_slot & buf_addr_i;
 
    -- (tdp_ram itself, not M2M's dualport_2clk_ram wrapper: that one passes the clock through an
    -- expression and the address through a process, a delta cycle each, which in simulation makes
    -- the RAM see a new write enable with the previous address)
+   i_ring : entity work.tdp_ram
+      generic map (
+         ADDR_WIDTH => 14,
+         DATA_WIDTH => 8
+      )
+      port map (
+         clock_a   => qnice_clk_i,
+         address_a => ring_a_addr,
+         data_a    => sd_q2c_i(Q2C_RDDATA),
+         wren_a    => ring_a_we,
+         q_a       => open,
+         clock_b   => main_clk_i,
+         address_b => ring_b_addr,
+         data_b    => x"00",
+         wren_b    => '0',
+         q_b       => buf_rd_o
+      ); -- i_ring
+
+   -- the write buffer: pc_mgmt's bytes in, the engine's write bytes out (the byte one clock
+   -- after it named it)
    i_buf : entity work.tdp_ram
       generic map (
          ADDR_WIDTH => 9,
@@ -382,30 +458,36 @@ begin
       )
       port map (
          clock_a   => qnice_clk_i,
-         address_a => buf_a_addr,
-         data_a    => sd_q2c_i(Q2C_RDDATA),
-         wren_a    => buf_a_we,
+         address_a => sd_q2c_i(Q2C_WRIDX),
+         data_a    => x"00",
+         wren_a    => '0',
          q_a       => buf_a_q,
          clock_b   => main_clk_i,
          address_b => buf_addr_i,
          data_b    => buf_wd_i,
          wren_b    => buf_we_i,
-         q_b       => buf_rd_o
+         q_b       => open
       ); -- i_buf
 
    ---------------------------------------------------------------------------------------------
-   -- A request: look up, move one block, answer
+   -- A request: answered from the run in the ring, or the run ends, the map is looked up and a
+   -- new run starts (a write: one block out of the write buffer)
    ---------------------------------------------------------------------------------------------
 
    done_o     <= done;
    done_err_o <= done_err;
 
    p_engine : process (qnice_clk_i)
-      variable v_end : unsigned(31 downto 0);
-      variable v_w   : unsigned(10 downto 0);
+      variable v_end  : unsigned(31 downto 0);
+      variable v_w    : unsigned(10 downto 0);
+      variable v_j    : unsigned(31 downto 0);
+      variable v_off  : unsigned(31 downto 0);
+      variable v_n    : unsigned(31 downto 0);
+      variable v_lim  : unsigned(31 downto 0);
    begin
       if rising_edge(qnice_clk_i) then
          sd_start <= '0';
+         r_go     <= '0';
          req_s    <= req_s(1 downto 0) & req_i;
 
          -- the request's time: microseconds since it arrived
@@ -418,6 +500,9 @@ begin
             us_div <= us_div + 1;
          end if;
 
+         ------------------------------------------------------------------------------------
+         -- the request
+         ------------------------------------------------------------------------------------
          case st is
             when F_IDLE =>
                if req_s(2) /= req_s(1) then
@@ -428,26 +513,47 @@ begin
                      x_drv <= 0;
                   end if;
                   x_lba   <= unsigned(req_lba_i);
+                  x_cnt   <= unsigned(req_cnt_i);
                   st_last <= req_wr_i & req_unit_i & req_lba_i(12 downto 0);
                   st_lba  <= req_lba_i;
                   us_div  <= 0;
                   x_t     <= (others => '0');
-                  tries   <= 0;
                   st      <= F_CHECK;
                end if;
 
+            -- in the run (and not overwritten: the slot's next block has not arrived): wait
+            -- for the block; else the run ends. A write drops the drive's run.
             when F_CHECK =>
                x_shift <= shift(x_drv);
+               v_j := x_lba - c_lba;
                if mode(x_drv)(0) = '0' or x_lba >= sects(x_drv) or
                   (x_wr = '1' and mode(x_drv)(2) = '1') then
                   st <= F_FAIL;
+               elsif x_wr = '0' and c_valid = '1' and c_drv = x_drv and c_gen = gen(x_drv) and
+                     x_lba >= c_lba and v_j < resize(c_n, 32) and
+                     resize(c_got, 32) <= v_j + (C_RING - 1) and
+                     (rs /= R_IDLE or r_go = '1' or v_j < resize(c_got, 32)) then
+                  c_j    <= v_j(15 downto 0);
+                  c_cons <= v_j(15 downto 0);
+                  st     <= F_WAIT_BLK;
                else
-                  ci    <= shift_right(x_lba, shift(x_drv));
-                  cum   <= (others => '0');
-                  ext_i <= (others => '0');
-                  maddr <= (others => '0');
-                  ph    <= 0;
-                  st    <= F_LOOK_N;
+                  if x_wr = '1' and c_drv = x_drv then
+                     c_valid <= '0';
+                  end if;
+                  st <= F_STOP;
+               end if;
+
+            when F_STOP =>
+               if rs = R_IDLE and r_go = '0' then
+                  r_abort <= '0';
+                  ci      <= shift_right(x_lba, x_shift);
+                  cum     <= (others => '0');
+                  ext_i   <= (others => '0');
+                  maddr   <= (others => '0');
+                  ph      <= 0;
+                  st      <= F_LOOK_N;
+               else
+                  r_abort <= '1';                    -- at the next block boundary
                end if;
 
             -- word 0: the number of extents (the RAM answers two clocks after the address)
@@ -493,44 +599,61 @@ begin
                   st    <= F_LOOK_EXT;
                end if;
 
+            -- the SD block, and a read's run: what the PC will read (pc_mgmt says it for the hard
+            -- disk; a floppy: a track), within the extent and the file
             when F_CALC =>
-               run_blk <= base(x_drv) + shift_left(p_clus, x_shift) + (x_lba - shift_left(ci, x_shift));
-               st      <= F_START;
+               v_off := x_lba - shift_left(ci, x_shift);
+               x_blk <= base(x_drv) + shift_left(p_clus, x_shift) + v_off;
+               if x_cnt = 0 then
+                  v_n := to_unsigned(C_FDD_RUN, 32);
+               else
+                  v_n := resize(x_cnt, 32);
+               end if;
+               v_lim := shift_left(cum + e_len - ci, x_shift) - v_off;
+               if v_lim < v_n then
+                  v_n := v_lim;
+               end if;
+               v_lim := sects(x_drv) - x_lba;
+               if v_lim < v_n then
+                  v_n := v_lim;
+               end if;
+               x_n <= v_n;
+               st  <= F_GO;
 
-            when F_START =>
-               if sd_ready = '0' then
-                  st <= F_RETRY;                     -- no card, or not initialised (yet)
-               elsif sd_busy = '0' then
-                  moved    <= '0';
-                  sd_start <= '1';
-                  st       <= F_RUN;
+            when F_GO =>
+               r_go <= '1';
+               r_wr <= x_wr;
+               if x_wr = '1' then
+                  st <= F_WAIT_WR;
+               else
+                  c_valid <= '1';
+                  c_drv   <= x_drv;
+                  c_gen   <= gen(x_drv);
+                  c_lba   <= x_lba;
+                  c_blk   <= x_blk;
+                  c_n     <= x_n(15 downto 0);
+                  c_got   <= (others => '0');
+                  c_cons  <= (others => '0');
+                  c_j     <= (others => '0');
+                  st      <= F_WAIT_BLK;
                end if;
 
-            when F_RUN =>
-               if sd_blk = '1' then
-                  moved <= '1';
+            when F_WAIT_BLK =>
+               if c_got > c_j then
+                  a_slot <= std_logic_vector(c_j(4 downto 0));
+                  st     <= F_DONE;
+               elsif rs = R_IDLE and r_go = '0' then
+                  c_valid <= '0';                    -- the run ended without it: failed
+                  st      <= F_FAIL;
                end if;
-               if sd_done = '1' then
-                  if sd_error = '1' then
-                     st_retry <= st_retry + 1;
-                     st <= F_RETRY;
-                  elsif moved = '0' and sd_blk = '0' then
-                     st_again <= st_again + 1;
-                     st <= F_START;                  -- QNICE came first: once more
+
+            when F_WAIT_WR =>
+               if rs = R_IDLE and r_go = '0' then
+                  if r_fail = '1' then
+                     st <= F_FAIL;
                   else
                      st <= F_DONE;
                   end if;
-               end if;
-
-            when F_RETRY =>
-               if tries = C_TRIES - 1 then
-                  st <= F_FAIL;
-               elsif wait_cnt = C_RETRY_WAIT then
-                  wait_cnt <= 0;
-                  tries    <= tries + 1;
-                  st       <= F_START;
-               else
-                  wait_cnt <= wait_cnt + 1;
                end if;
 
             when F_FAIL =>
@@ -560,6 +683,81 @@ begin
                st       <= F_IDLE;
          end case;
 
+         ------------------------------------------------------------------------------------
+         -- the runner
+         ------------------------------------------------------------------------------------
+         case rs is
+            when R_IDLE =>
+               if r_go = '1' then
+                  r_fail  <= '0';
+                  tries   <= 0;
+                  t_start <= (others => '0');
+                  rs      <= R_START;
+               end if;
+
+            when R_START =>
+               if r_abort = '1' then
+                  rs <= R_IDLE;
+               elsif sd_ready = '0' then
+                  rs <= R_RETRY;                     -- no card, or not initialised (yet)
+               elsif sd_busy = '0' then
+                  if r_wr = '1' then
+                     e_addr  <= x_blk;
+                     e_count <= x"0001";
+                     r_slot  <= mode(x_drv)(1);
+                  else
+                     e_addr  <= c_blk + t_start;
+                     e_count <= c_n - t_start;
+                     r_slot  <= mode(c_drv)(1);
+                  end if;
+                  r_moved  <= '0';
+                  sd_start <= '1';
+                  st_cmd   <= st_cmd + 1;
+                  rs       <= R_RUN;
+               end if;
+
+            -- the engine never ends a transfer in the clock of a block's e_blk_o
+            when R_RUN =>
+               if sd_blk = '1' then
+                  r_moved <= '1';
+                  if r_wr = '0' then
+                     c_got <= c_got + 1;
+                  end if;
+               end if;
+               if sd_done = '1' then
+                  if sd_error = '1' then
+                     st_retry <= st_retry + 1;
+                     rs <= R_RETRY;
+                  elsif r_abort = '1' then
+                     rs <= R_IDLE;
+                  elsif (r_wr = '0' and c_got < c_n) or (r_wr = '1' and r_moved = '0') then
+                     st_again <= st_again + 1;       -- QNICE came first: the rest
+                     t_start  <= c_got;
+                     rs <= R_START;
+                  else
+                     rs <= R_IDLE;
+                  end if;
+               end if;
+
+            -- 1 ms, then from the first block missing (a write: once more)
+            when R_RETRY =>
+               if r_abort = '1' then
+                  wait_cnt <= 0;
+                  rs <= R_IDLE;
+               elsif tries = C_TRIES - 1 then
+                  wait_cnt <= 0;
+                  r_fail <= '1';
+                  rs <= R_IDLE;
+               elsif wait_cnt = C_RETRY_WAIT then
+                  wait_cnt <= 0;
+                  tries    <= tries + 1;
+                  t_start  <= c_got;
+                  rs       <= R_START;
+               else
+                  wait_cnt <= wait_cnt + 1;
+               end if;
+         end case;
+
          -- QNICE cleared the statistics
          st_clr_r <= st_clr_f;
          if st_clr_r /= st_clr_f then
@@ -572,6 +770,7 @@ begin
             st_wr_max <= (others => '0');
             st_retry  <= (others => '0');
             st_again  <= (others => '0');
+            st_cmd    <= (others => '0');
          end if;
       end if;
    end process p_engine;

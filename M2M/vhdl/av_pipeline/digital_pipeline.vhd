@@ -95,6 +95,9 @@ entity digital_pipeline is
 
       -- QNICE connection to ascal's mode register
       qnice_ascal_mode_i       : in  unsigned(4 downto 0);
+      -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second line of the HDMI
+      -- picture darker by 25 % (01) or 50 % (10), 00 off (hdmi_clk_i domain)
+      hdmi_scanlines_i         : in  std_logic_vector(1 downto 0) := "00";
 
       -- M2M-UPSTREAM screen-center (AExp 2026-07-08): signed input-crop edge
       -- offsets (MiSTer-style "choose the source rectangle") from the CFD
@@ -193,6 +196,15 @@ architecture synthesis of digital_pipeline is
    signal hdmi_hs                : std_logic;
    signal hdmi_vs                : std_logic;
    signal hdmi_de                : std_logic;
+   -- M2M-UPSTREAM scanlines: ascal's output one clock later, every second line darker
+   signal hdmi_sl_red            : unsigned(7 downto 0);
+   signal hdmi_sl_green          : unsigned(7 downto 0);
+   signal hdmi_sl_blue           : unsigned(7 downto 0);
+   signal hdmi_sl_hs             : std_logic;
+   signal hdmi_sl_vs             : std_logic;
+   signal hdmi_sl_de             : std_logic;
+   signal hdmi_sl_de_d           : std_logic := '0';
+   signal hdmi_sl_y              : unsigned(11 downto 0) := (others => '0');
 
    -- After OSM
    signal hdmi_osm_red           : std_logic_vector(7 downto 0);
@@ -593,6 +605,43 @@ begin
          m_avm_waitrequest_i   => hr_waitrequest_i
       ); -- i_avm_decrease
 
+   -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second line of the picture
+   -- (counted from the window's first line, vmin) darker by 25 % or 50 %, lined up with the
+   -- core's lines where it shows its picture at exactly 2x (z486: 640x480 as 1280x960 in
+   -- 1280x1024; in its other modes the dark lines beat). The output's
+   -- lines are counted from its vertical sync. One register stage for all of ascal's outputs:
+   -- the overlay's blending behind it is this domain's slowest path.
+   p_scanlines : process (hdmi_clk_i)
+      variable v_dark : boolean;
+   begin
+      if rising_edge(hdmi_clk_i) then
+         hdmi_sl_de_d <= hdmi_de;
+         if hdmi_vs = '1' then
+            hdmi_sl_y <= (others => '0');
+         elsif hdmi_de = '0' and hdmi_sl_de_d = '1' then
+            hdmi_sl_y <= hdmi_sl_y + 1;
+         end if;
+         v_dark := hdmi_scanlines_i /= "00" and
+                   ((hdmi_sl_y(0) = '1') xor (hdmi_vmin_base mod 2 = 1));
+         if v_dark and hdmi_scanlines_i(1) = '1' then
+            hdmi_sl_red   <= '0' & hdmi_red(7 downto 1);
+            hdmi_sl_green <= '0' & hdmi_green(7 downto 1);
+            hdmi_sl_blue  <= '0' & hdmi_blue(7 downto 1);
+         elsif v_dark then
+            hdmi_sl_red   <= hdmi_red   - ("00" & hdmi_red(7 downto 2));
+            hdmi_sl_green <= hdmi_green - ("00" & hdmi_green(7 downto 2));
+            hdmi_sl_blue  <= hdmi_blue  - ("00" & hdmi_blue(7 downto 2));
+         else
+            hdmi_sl_red   <= hdmi_red;
+            hdmi_sl_green <= hdmi_green;
+            hdmi_sl_blue  <= hdmi_blue;
+         end if;
+         hdmi_sl_hs <= hdmi_hs;
+         hdmi_sl_vs <= hdmi_vs;
+         hdmi_sl_de <= hdmi_de;
+      end if;
+   end process p_scanlines;
+
    i_video_overlay : entity work.video_overlay
       generic  map (
          G_VGA_DX          => G_VGA_DX,  -- TBD
@@ -604,12 +653,12 @@ begin
       port map (
          vga_clk_i         => hdmi_clk_i,
          vga_ce_i          => '1',
-         vga_red_i         => std_logic_vector(hdmi_red),
-         vga_green_i       => std_logic_vector(hdmi_green),
-         vga_blue_i        => std_logic_vector(hdmi_blue),
-         vga_hs_i          => hdmi_hs,
-         vga_vs_i          => hdmi_vs,
-         vga_de_i          => hdmi_de,
+         vga_red_i         => std_logic_vector(hdmi_sl_red),    -- M2M-UPSTREAM scanlines,
+         vga_green_i       => std_logic_vector(hdmi_sl_green),  -- original: ascal's hdmi_*
+         vga_blue_i        => std_logic_vector(hdmi_sl_blue),
+         vga_hs_i          => hdmi_sl_hs,
+         vga_vs_i          => hdmi_sl_vs,
+         vga_de_i          => hdmi_sl_de,
          vga_cfg_scaling_i => hdmi_osm_cfg_scaling_i,
          vga_cfg_shift_i   => hdmi_shift,
          vga_cfg_enable_i  => hdmi_osm_cfg_enable_i,

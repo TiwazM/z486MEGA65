@@ -180,29 +180,46 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --     2  Floppy A: %s            manual load 0: the file browser, DISK_PREP mounts it
 --     3  Floppy B: %s            manual load 1
 --     4  Hard disk: %s           manual load 2 (the PC sees it after a reset)
---     5  ----
---     6  HDMI: %s                submenu
---     7    HDMI mode             headline
---     8    ----
---     9    720p 60 Hz 16:9       C_MENU_HDMI_720P (default; the 4:3 picture between bars)
---    10    480p 59.94 Hz 4:3     C_MENU_HDMI_480P
---    11    800x600 60 Hz         C_MENU_HDMI_800
---    12    1024x768 60 Hz        C_MENU_HDMI_1024
---    13    1280x1024 60 Hz 5:4   C_MENU_HDMI_1280 (a 5:4 monitor's own resolution, reduced
+--     5  CD-ROM: %s              manual load 3: an ISO image (pc_cdrom.vhd), any time
+--     6  ----
+--     7  HDMI: %s                submenu
+--     8    HDMI mode             headline
+--     9    ----
+--    10    720p 60 Hz 16:9       C_MENU_HDMI_720P (default; the 4:3 picture between bars)
+--    11    480p 59.94 Hz 4:3     C_MENU_HDMI_480P
+--    12    800x600 60 Hz         C_MENU_HDMI_800
+--    13    1024x768 60 Hz        C_MENU_HDMI_1024
+--    14    1280x1024 60 Hz 5:4   C_MENU_HDMI_1280 (a 5:4 monitor's own resolution, reduced
 --                                blanking: 1280x960 between bars, the monitor scales nothing)
---    14    ----
---    15    Back to main menu
---    16  ----
---    17  Help
---    18  Reset the PC            C_MENU_RESET
---    19  ----
---    20  Close Menu
+--    15    ----
+--    16    Back to main menu
+--    17  Filter: %s              submenu: ascal's interpolation
+--    18    Scaling filter        headline
+--    19    ----
+--    20    Sharp                 C_MENU_FLT_SHARP (default): sharp bilinear
+--    21    Smooth                C_MENU_FLT_SMOOTH: bilinear
+--    22    Pixels                C_MENU_FLT_PIXELS: nearest neighbour
+--    23    ----
+--    24    Back to main menu
+--    25  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only)
+--    26    Scanlines             headline
+--    27    ----
+--    28    Off                   C_MENU_SL_OFF (default)
+--    29    25%                   C_MENU_SL_25
+--    30    50%                   C_MENU_SL_50
+--    31    ----
+--    32    Back to main menu
+--    33  ----
+--    34  Help
+--    35  Reset the PC            C_MENU_RESET
+--    36  ----
+--    37  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change.
-constant OPTM_SIZE         : natural := 21;
+constant OPTM_SIZE         : natural := 38;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 12;   -- the screen lines of the main menu (0-6, 16-20)
+constant OPTM_DY           : natural := 15;   -- the main menu's lines (0-7, 17, 25, 33-37)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -210,6 +227,7 @@ constant OPTM_ITEMS        : string :=
    " Floppy A: %s\n"          &
    " Floppy B: %s\n"          &
    " Hard disk: %s\n"         &
+   " CD-ROM: %s\n"            &
    "\n"                       &
    " HDMI: %s\n"              &
    " HDMI mode\n"             &
@@ -219,6 +237,22 @@ constant OPTM_ITEMS        : string :=
    " 800x600 60 Hz\n"         &
    " 1024x768 60 Hz\n"        &
    " 1280x1024 60 Hz 5:4\n"   &
+   "\n"                       &
+   " Back to main menu\n"     &
+   " Filter: %s\n"            &
+   " Scaling filter\n"        &
+   "\n"                       &
+   " Sharp\n"                 &
+   " Smooth\n"                &
+   " Pixels\n"                &
+   "\n"                       &
+   " Back to main menu\n"     &
+   " Scanlines: %s\n"         &
+   " Scanlines\n"             &
+   "\n"                       &
+   " Off\n"                   &
+   " 25%\n"                   &
+   " 50%\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
    "\n"                       &
@@ -233,6 +267,9 @@ constant OPTM_G_RESET      : integer := 2;
 constant OPTM_G_FDD_A      : integer := 3;
 constant OPTM_G_FDD_B      : integer := 4;
 constant OPTM_G_HDD        : integer := 5;
+constant OPTM_G_FILTER     : integer := 6;
+constant OPTM_G_SCAN       : integer := 7;
+constant OPTM_G_CD         : integer := 8;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -241,22 +278,39 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_FDD_A + OPTM_G_LOAD_ROM + OPTM_G_START,  --  2 Floppy A: %s
                                              OPTM_G_FDD_B + OPTM_G_LOAD_ROM,           --  3 Floppy B: %s
                                              OPTM_G_HDD + OPTM_G_LOAD_ROM,             --  4 Hard disk: %s
-                                             OPTM_G_LINE,                              --  5
-                                             OPTM_G_SUBMENU,                           --  6 HDMI: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            --  7 HDMI mode
-                                             OPTM_G_LINE,                              --  8
-                                             OPTM_G_HDMI + OPTM_G_STDSEL,              --  9 720p 60 Hz
-                                             OPTM_G_HDMI,                              -- 10 480p 59.94 Hz
-                                             OPTM_G_HDMI,                              -- 11 800x600 60 Hz
-                                             OPTM_G_HDMI,                              -- 12 1024x768 60 Hz
-                                             OPTM_G_HDMI,                              -- 13 1280x1024 60 Hz
-                                             OPTM_G_LINE,                              -- 14
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 15 Back
-                                             OPTM_G_LINE,                              -- 16
-                                             OPTM_G_HELP,                              -- 17 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 18 Reset the PC
+                                             OPTM_G_CD + OPTM_G_LOAD_ROM,              --  5 CD-ROM: %s
+                                             OPTM_G_LINE,                              --  6
+                                             OPTM_G_SUBMENU,                           --  7 HDMI: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            --  8 HDMI mode
+                                             OPTM_G_LINE,                              --  9
+                                             OPTM_G_HDMI + OPTM_G_STDSEL,              -- 10 720p 60 Hz
+                                             OPTM_G_HDMI,                              -- 11 480p 59.94 Hz
+                                             OPTM_G_HDMI,                              -- 12 800x600 60 Hz
+                                             OPTM_G_HDMI,                              -- 13 1024x768 60 Hz
+                                             OPTM_G_HDMI,                              -- 14 1280x1024 60 Hz
+                                             OPTM_G_LINE,                              -- 15
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 16 Back
+                                             OPTM_G_SUBMENU,                           -- 17 Filter: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 18 Scaling filter
                                              OPTM_G_LINE,                              -- 19
-                                             OPTM_G_CLOSE                              -- 20 Close Menu
+                                             OPTM_G_FILTER + OPTM_G_STDSEL,            -- 20 Sharp
+                                             OPTM_G_FILTER,                            -- 21 Smooth
+                                             OPTM_G_FILTER,                            -- 22 Pixels
+                                             OPTM_G_LINE,                              -- 23
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 24 Back
+                                             OPTM_G_SUBMENU,                           -- 25 Scanlines: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 26 Scanlines
+                                             OPTM_G_LINE,                              -- 27
+                                             OPTM_G_SCAN + OPTM_G_STDSEL,              -- 28 Off
+                                             OPTM_G_SCAN,                              -- 29 25%
+                                             OPTM_G_SCAN,                              -- 30 50%
+                                             OPTM_G_LINE,                              -- 31
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 32 Back
+                                             OPTM_G_LINE,                              -- 33
+                                             OPTM_G_HELP,                              -- 34 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 35 Reset the PC
+                                             OPTM_G_LINE,                              -- 36
+                                             OPTM_G_CLOSE                              -- 37 Close Menu
                                            );
 
 begin

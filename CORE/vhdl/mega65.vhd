@@ -12,11 +12,12 @@
 -- * the MEGA65 keyboard as a PS/2 keyboard (pc_keyboard.vhd, ps2_device.vhd)
 -- * a mouse on joystick port 1 (an Amiga mouse, or a mouSTer in Amiga mode; F13 is the right
 --   button) as a PS/2 mouse (pc_mouse.vhd, ps2_device.vhd)
--- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy, hard disk) and the disks from
---   image files on the SD card (disk_sd.vhd, through the SD host controller's engine port):
---   floppy drives A: and B:, the hard disk on the first IDE channel
+-- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy, hard disk; pc_cdrom.vhd: the
+--   CD-ROM drive) and the disks from image files on the SD card (disk_sd.vhd, through the SD
+--   host controller's engine port): floppy drives A: and B:, the hard disk on the first IDE
+--   channel, the CD-ROM drive (an ISO image) on the second
 --
--- Not wired yet: the second IDE channel (CD-ROM), joysticks.
+-- Not wired yet: joysticks.
 --
 -- The entity is the Megamiga fork's MEGA65_Core (M2M-UPSTREAM exceptions: floppy, SDRAM,
 -- PMOD, Ethernet pins and the SD engine port are routed into the core), as in pc10-iii.
@@ -58,6 +59,7 @@ port (
    qnice_ascal_mode_o      : out std_logic_vector(1 downto 0);
    qnice_ascal_polyphase_o : out std_logic;
    qnice_ascal_triplebuf_o : out std_logic;
+   qnice_scanlines_o       : out std_logic_vector(1 downto 0);  -- 00 off, 01 25 %, 10 50 %
    qnice_retro15kHz_o      : out std_logic;              -- 0 = normal frequency, 1 = retro 15 kHz frequency
    qnice_csync_o           : out std_logic;              -- 0 = normal HS/VS, 1 = Composite Sync
 
@@ -336,12 +338,17 @@ architecture synthesis of MEGA65_Core is
 constant C_MENU_FDD_A          : natural := 2;   -- manual load 0 (m2m-rom.asm DISK_PREP)
 constant C_MENU_FDD_B          : natural := 3;   -- manual load 1
 constant C_MENU_HDD            : natural := 4;   -- manual load 2
-constant C_MENU_HDMI_720P     : natural := 9;
-constant C_MENU_HDMI_480P     : natural := 10;
-constant C_MENU_HDMI_800      : natural := 11;
-constant C_MENU_HDMI_1024     : natural := 12;
-constant C_MENU_HDMI_1280     : natural := 13;  -- M2M-UPSTREAM sxga-mode
-constant C_MENU_RESET         : natural := 18;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_CD            : natural := 5;   -- manual load 3
+constant C_MENU_HDMI_720P     : natural := 10;
+constant C_MENU_HDMI_480P     : natural := 11;
+constant C_MENU_HDMI_800      : natural := 12;
+constant C_MENU_HDMI_1024     : natural := 13;
+constant C_MENU_HDMI_1280     : natural := 14;  -- M2M-UPSTREAM sxga-mode
+constant C_MENU_FLT_SMOOTH    : natural := 21;  -- (20: Sharp, the default)
+constant C_MENU_FLT_PIXELS    : natural := 22;
+constant C_MENU_SL_25         : natural := 29;  -- (28: Off, the default)
+constant C_MENU_SL_50         : natural := 30;
+constant C_MENU_RESET         : natural := 35;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -479,6 +486,7 @@ signal main_disk_req          : std_logic;
 signal main_disk_req_wr       : std_logic;
 signal main_disk_req_unit     : std_logic_vector(1 downto 0);
 signal main_disk_req_lba      : std_logic_vector(31 downto 0);
+signal main_disk_req_cnt      : std_logic_vector(8 downto 0);
 signal main_disk_buf_addr     : std_logic_vector(8 downto 0);
 signal main_disk_buf_we       : std_logic;
 signal main_disk_buf_wd       : std_logic_vector(7 downto 0);
@@ -486,7 +494,7 @@ signal main_disk_buf_rd       : std_logic_vector(7 downto 0);
 
 signal qnice_disk_done        : std_logic;
 signal qnice_disk_done_err    : std_logic;
-signal qnice_disk_mnt         : std_logic_vector(119 downto 0);
+signal qnice_disk_mnt         : std_logic_vector(159 downto 0);
 signal qnice_disk_ce          : std_logic;
 signal qnice_disk_data        : std_logic_vector(15 downto 0);
 signal qnice_disk_wait        : std_logic;
@@ -816,12 +824,14 @@ begin
          mgmt_readdata_i   => main_mgmt_readdata,
          fdd_request_i     => main_fdd_request,
          ide_request_i     => main_ide0_request,
+         ide1_request_i    => main_ide1_request,
          rtc_i             => main_rtc_i,
          mnt_i             => qnice_disk_mnt,
          sd_req_o          => main_disk_req,
          sd_req_wr_o       => main_disk_req_wr,
          sd_req_unit_o     => main_disk_req_unit,
          sd_req_lba_o      => main_disk_req_lba,
+         sd_req_cnt_o      => main_disk_req_cnt,
          sd_done_i         => qnice_disk_done,
          sd_err_i          => qnice_disk_done_err,
          buf_addr_o        => main_disk_buf_addr,
@@ -1122,8 +1132,16 @@ begin
    qnice_audio_filter_o       <= '0';
    qnice_zoom_crop_o          <= '0';
    qnice_osm_cfg_scaling_o    <= (others => '1');
-   qnice_ascal_mode_o         <= "10";        -- sharp bilinear: 720x400 text at x1.2 (480p) or
-                                              -- x1.8 (720p) without uneven strokes, still crisp
+   -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
+   -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
+   qnice_ascal_mode_o         <= "01" when qnice_osm_control_i(C_MENU_FLT_SMOOTH) = '1' else
+                                 "00" when qnice_osm_control_i(C_MENU_FLT_PIXELS) = '1' else
+                                 "10";
+   -- the Scanlines menu, in every HDMI mode: lined up in 1280x1024 only, where a 480-line mode
+   -- is exactly doubled (in the others a line is 1.25 to 1.92 output lines, the dark lines beat)
+   qnice_scanlines_o          <= "01" when qnice_osm_control_i(C_MENU_SL_25) = '1' else
+                                 "10" when qnice_osm_control_i(C_MENU_SL_50) = '1' else
+                                 "00";
    qnice_ascal_polyphase_o    <= '0';
    qnice_ascal_triplebuf_o    <= '1';         -- whole frames: the PC's 70 Hz text mode on 60 Hz
                                               -- HDMI tore while the screen changed
@@ -1189,12 +1207,14 @@ begin
    end process p_qnice_dev_data;
    qnice_dev_wait_o <= qnice_disk_wait when qnice_disk_sel = '1' else '0';
 
-   -- The disks from image files on the SD card: floppy drives A: and B:, the hard disk
-   -- (C_DEV_PC_DISK, _B, _HD: one CSR each; the firmware mounts them)
+   -- The disks from image files on the SD card: floppy drives A: and B:, the hard disk, the
+   -- CD-ROM (C_DEV_PC_DISK, _B, _HD, _CD: one CSR each; the firmware mounts them)
    qnice_disk_sel  <= '1' when qnice_dev_id_i = C_DEV_PC_DISK or qnice_dev_id_i = C_DEV_PC_DISK_B or
-                               qnice_dev_id_i = C_DEV_PC_DISK_HD else '0';
+                               qnice_dev_id_i = C_DEV_PC_DISK_HD or
+                               qnice_dev_id_i = C_DEV_PC_DISK_CD else '0';
    qnice_disk_unit <= "01" when qnice_dev_id_i = C_DEV_PC_DISK_B else
-                      "10" when qnice_dev_id_i = C_DEV_PC_DISK_HD else "00";
+                      "10" when qnice_dev_id_i = C_DEV_PC_DISK_HD else
+                      "11" when qnice_dev_id_i = C_DEV_PC_DISK_CD else "00";
    qnice_disk_ce   <= qnice_dev_ce_i and qnice_disk_sel;
 
    i_disk_sd : entity work.disk_sd
@@ -1218,6 +1238,7 @@ begin
          req_wr_i      => main_disk_req_wr,
          req_unit_i    => main_disk_req_unit,
          req_lba_i     => main_disk_req_lba,
+         req_cnt_i     => main_disk_req_cnt,
          done_o        => qnice_disk_done,
          done_err_o    => qnice_disk_done_err,
          main_clk_i    => main_clk,
