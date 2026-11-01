@@ -160,9 +160,11 @@ M2M$KEYBOARD        .EQU 0xFFE8
 ; Typematic delay (DLY) and typematic repeat (SPD)
 ; DLY: How long needs the key to be pressed, until the typematic repeat starts
 ; SPD: How fast will the pressed key be repeated
-; IMPORTANT: These values are empiric and relative to QNICE V1.61
-M2M$TYPEMATIC_DLY   .EQU 0x8000             ; ~0.5sec in QNICE V1.61
-M2M$TYPEMATIC_SPD   .EQU 0x1000             ; ~12 per sec
+; M2M-UPSTREAM typematic-time: in ticks of IO$CYC_MID (65536 QNICE clocks,
+; 1.31 ms at 50 MHz), not in KEYB$SCAN calls: a loop that does more around
+; them (HANDLE_IO, the core's hook) made the repeat late and slow
+M2M$TYPEMATIC_DLY   .EQU 305                ; 0.4 s
+M2M$TYPEMATIC_SPD   .EQU 38                 ; 20 per second
 
 ; Definition of the bits in M2M$KEYBOARD
 M2M$KEY_UP          .EQU 0x0001

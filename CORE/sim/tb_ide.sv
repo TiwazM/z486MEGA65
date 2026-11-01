@@ -13,7 +13,17 @@
 //
 // Licensed under GPL v3
 
-module tb_ide;
+module tb_ide #(
+    // the engine model's pace: clocks per read byte, and clocks between a block's last byte
+    // and its e_blk (the real engine: 2 and ~34, its CRC; 1 and 0: as fast as it goes)
+    parameter int E_PER = 1,
+    parameter int E_CRC = 0,
+    // disk_sd's G_FAULT: every FAULT-th answer's first copy reads its last byte wrong (pc_mgmt
+    // must copy it again)
+    parameter int FAULT = 0,
+    // disk_sd's G_LUTRAM: 1, the ring and the write buffer in LUT RAM
+    parameter int LUTRAM = 0
+);
     reg clk = 0;
     always #7.8125 clk = ~clk;              // the PC's 64 MHz
     reg qclk = 0;
@@ -90,6 +100,7 @@ module tb_ide;
     wire [8:0] buf_addr;
     wire buf_we;
     wire [7:0] buf_wd, buf_rd;
+    wire buf_bad, sd_req_fresh;
     wire [159:0] mnt;
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
 
@@ -99,8 +110,8 @@ module tb_ide;
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
         .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
-        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_done_i(sd_done), .sd_err_i(sd_err),
-        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd)
+        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh), .sd_done_i(sd_done), .sd_err_i(sd_err),
+        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
     );
 
     reg [27:0] q_addr = 0;
@@ -110,15 +121,15 @@ module tb_ide;
     wire q_wait;
     wire [63:0] q2c;
     wire [75:0] c2q;
-    disk_sd #(.G_QNICE_HZ(50000000)) sd (
+    disk_sd #(.G_QNICE_HZ(50000000), .G_LUTRAM(LUTRAM), .G_FAULT(FAULT)) sd (
         .qnice_clk_i(qclk), .qnice_rst_i(qrst),
         .qnice_addr_i(q_addr), .qnice_data_i(q_wdata), .qnice_ce_i(q_ce), .qnice_unit_i(2'b00), .qnice_we_i(q_we),
         .qnice_data_o(q_rdata), .qnice_wait_o(q_wait),
         .sd_q2c_i(q2c), .sd_c2q_o(c2q), .mnt_o(mnt),
         .req_i(sd_req), .req_wr_i(sd_req_wr), .req_unit_i(sd_req_unit), .req_lba_i(sd_req_lba),
-        .req_cnt_i(sd_req_cnt), .done_o(sd_done), .done_err_o(sd_err),
+        .req_cnt_i(sd_req_cnt), .req_fresh_i(sd_req_fresh), .done_o(sd_done), .done_err_o(sd_err),
         .main_clk_i(clk), .buf_addr_i(buf_addr), .buf_we_i(buf_we), .buf_wd_i(buf_wd),
-        .buf_rd_o(buf_rd)
+        .buf_rd_o(buf_rd), .buf_bad_o(buf_bad)
     );
 
     // ------------------------------------------------------------------------------------------
@@ -178,8 +189,10 @@ module tb_ide;
                         for (i = 0; i < 512; i++) begin
                             e_rdwe <= 1; e_rdidx <= i; e_rddata <= sdbyte(b + k, i);
                             @(posedge qclk);
+                            if (E_PER > 1) begin e_rdwe <= 0; repeat (E_PER - 1) @(posedge qclk); end
                         end
                         e_rdwe <= 0;
+                        repeat (E_CRC) @(posedge qclk);
                         e_blk <= 1; @(posedge qclk); e_blk <= 0;
                         eng_blocks++;
                         if (c2q[2]) stop = 1;
@@ -224,6 +237,13 @@ module tb_ide;
         q_addr <= a; q_wdata <= d; q_ce <= 1; q_we <= 1;
         @(posedge qclk);
         q_ce <= 0; q_we <= 0;
+    endtask
+    task automatic qrd(input [27:0] a, output [15:0] d);
+        @(posedge qclk);
+        q_addr <= a; q_ce <= 1; q_we <= 0;
+        @(posedge qclk);
+        d = q_rdata;
+        q_ce <= 0;
     endtask
     task automatic io_wr(input [15:0] port, input [31:0] value, input [3:0] be);
         @(negedge clk);
@@ -325,6 +345,7 @@ module tb_ide;
         reg [7:0] v, sc, sn, cl, ch, st, er, hi, lo;
         reg [15:0] id [0:255];
         integer k, sum;
+        reg [15:0] ck_good, ck_bad, ck_fixed, ck_fresh;
         repeat (5) @(negedge clk);
         reset_n = 1;
         repeat (5) @(posedge qclk);
@@ -384,35 +405,35 @@ module tb_ide;
         k = eng_reads;
         read_sectors(8'h20, 78, 3);
         read_sectors(8'h20, 150000, 1);
-        check(eng_reads - k == 3, $sformatf("reads across the extents: %0d SD reads", eng_reads - k));
+        check(FAULT != 0 || (eng_reads - k == 3), $sformatf("reads across the extents: %0d SD reads", eng_reads - k));
         // 64 sectors in one SD read (twice the ring: the engine waits for the PC)
         k = eng_reads; sum = eng_blocks;
         read_sectors(8'h20, 1000, 64);
-        check(eng_reads - k == 1 && eng_blocks - sum == 64,
+        check(FAULT != 0 || (eng_reads - k == 1 && eng_blocks - sum == 64),
               $sformatf("64 sectors: %0d SD reads, %0d blocks", eng_reads - k, eng_blocks - sum));
         // again, from the ring: the last 20 of them, no SD read
         k = eng_reads;
         read_sectors(8'h20, 1044, 20);
-        check(eng_reads == k, $sformatf("from the ring: %0d SD reads", eng_reads - k));
+        check(FAULT != 0 || (eng_reads == k), $sformatf("from the ring: %0d SD reads", eng_reads - k));
         // one older than the ring holds: an SD read
         k = eng_reads;
         read_sectors(8'h20, 1010, 1);
-        check(eng_reads - k == 1, $sformatf("older than the ring: %0d SD reads", eng_reads - k));
+        check(FAULT != 0 || (eng_reads - k == 1), $sformatf("older than the ring: %0d SD reads", eng_reads - k));
         // QNICE takes the card after 5 blocks: the rest in a second transfer
         k = eng_reads; preempt_after = 5;
         read_sectors(8'h20, 20000, 12);
-        check(eng_reads - k == 2, $sformatf("preempted run: %0d SD reads", eng_reads - k));
+        check(FAULT != 0 || (eng_reads - k == 2), $sformatf("preempted run: %0d SD reads", eng_reads - k));
         // a failing block: tried again from it
         k = eng_reads; sum = eng_blocks; err_block = blk(30003);
         read_sectors(8'h20, 30000, 8);
-        check(err_block == -1 && eng_reads - k == 2 && eng_blocks - sum == 8,
+        check(FAULT != 0 || (err_block == -1 && eng_reads - k == 2 && eng_blocks - sum == 8),
               $sformatf("an SD error: %0d SD reads, %0d blocks", eng_reads - k, eng_blocks - sum));
         // writes drop the drive's run: the sectors are read from the card again
         read_sectors(8'h20, 4, 4);
         write_sectors(5, 2);
         k = eng_reads;
         read_sectors(8'h20, 5, 1);
-        check(eng_reads - k == 1, $sformatf("after a write: %0d SD reads", eng_reads - k));
+        check(FAULT != 0 || (eng_reads - k == 1), $sformatf("after a write: %0d SD reads", eng_reads - k));
         // SET MULTIPLE (1), READ MULTIPLE
         outb(16'h1f2, 8'h01); outb(16'h1f6, 8'ha0); outb(16'h1f7, 8'hc6);
         wait_ready(st);
@@ -426,6 +447,14 @@ module tb_ide;
         // the reads still work after it
         read_sectors(8'h21, 0, 1);
         check(eng_writes == 2, $sformatf("engine: %0d writes", eng_writes));
+        // the ring's checksums: with FAULT, every wrong copy came again fresh from the card
+        // (the SD read counts above do not hold then) and then matched
+        qrd(28'h0000049, ck_good); qrd(28'h000004a, ck_bad); qrd(28'h000004b, ck_fixed);
+        qrd(28'h000004f, ck_fresh);
+        check(FAULT == 0 ? (ck_bad == 0 && ck_good > 0 && ck_fresh == 0) :
+                           (ck_bad > 0 && ck_fixed == ck_bad && ck_fresh == ck_bad),
+              $sformatf("ring checksums: %0d copies matched, %0d did not, %0d right when fresh from the card (%0d fresh reads)",
+                        ck_good, ck_bad, ck_fixed, ck_fresh));
         if (errors == 0) $display("PASS: all checks");
         else $display("FAILED: %0d checks", errors);
         $finish;

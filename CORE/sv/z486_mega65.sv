@@ -96,11 +96,13 @@ module z486_mega65 #(
     output wire        ps2_mouse_clk_out,
     output wire        ps2_mouse_data_out,
 
+    input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
     // The L2 cache (guest_l2.sv; clk_sys): on (a 0 -> 1 empties it first), and its line fills
     // from the cache and from the SDRAM
     input  wire        l2_enable,
+    input  wire        cache_off,          // z486's L1 caches off (every access uncached)
     output wire [31:0] l2_hits,
     output wire [31:0] l2_misses,
 
@@ -471,9 +473,9 @@ system #(
     .bootcfg             (6'd0),
     .ram_size            (ram_size),
     .uma_ram             (1'b0),
-    .cpu_speed_osd       (3'd0),           // full speed
+    .cpu_speed_osd       (cpu_slow ? 3'd1 : 3'd0), // OSD "56" = 33 (z486_sources.py), or full
     .fast_off            (1'b0),
-    .cache_off           (1'b0),
+    .cache_off           (cache_off),
     .x87_off             (1'b0),
     .syscfg              (),
 

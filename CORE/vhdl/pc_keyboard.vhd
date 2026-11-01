@@ -24,10 +24,11 @@
 --   = Insert and Shift+CLR/HOME = End. F13 (the mouse's right button, pc_mouse.vhd) and HELP
 --   (the menu) send nothing.
 --   MEGA is a Fn key: MEGA+cursor up/down = Page Up/Down, MEGA+cursor left/right = Home/End,
---   MEGA+INST/DEL = Delete.
---   CAPS LOCK latches on the MEGA65: each change taps the PC's Caps Lock.
+--   MEGA+INST/DEL = Delete, MEGA+TAB = Caps Lock.
+--   CAPS LOCK sends nothing: it is the turbo switch (mega65.vhd: down = the CPU at 33 MHz).
+--   SHIFT LOCK holds the left Shift, as on the MEGA65.
 -- A held key repeats (typematic, default 500 ms then 10.9 per second; command F3 sets it);
--- Shift, Ctrl, Alt, MEGA and Caps Lock do not.
+-- Shift, Ctrl, Alt, MEGA and CAPS LOCK do not.
 --
 -- The controller's commands: FF reset (FA AA), FE resend, F6 defaults, F5 disable, F4 enable,
 -- F3 typematic, F2 identify (FA AB 83), F0 scan code set (set 2 only), EE echo, ED LEDs (there
@@ -148,7 +149,7 @@ architecture synthesis of pc_keyboard is
       68 => M_AS & "0" & x"01",   -- F9
       69 => M_AS & "0" & x"78",   -- F11
       71 => M_AS & "0" & x"76",   -- ESC
-      72 => M_AS & "0" & x"58",   -- CAPS LOCK (latched: tapped)
+      72 => C_NONE,                -- CAPS LOCK: the turbo switch (mega65.vhd)
       73 => M_AS & "1" & x"75",   -- cursor up
       74 => M_AS & "1" & x"6B",   -- cursor left
       75 => M_AS & "1" & x"71",   -- RESTORE    -> Delete
@@ -190,6 +191,7 @@ architecture synthesis of pc_keyboard is
        2 => M_AS & "1" & x"69",   -- End
        7 => M_AS & "1" & x"7A",   -- Page Down
       73 => M_AS & "1" & x"7D",   -- Page Up
+      65 => M_AS & "0" & x"58",   -- Caps Lock (MEGA+TAB)
       74 => M_AS & "1" & x"6C",   -- Home
       others => C_NONE);
 
@@ -455,11 +457,7 @@ begin
             elsif v_num = K_MEGA then
                phys_mega <= v_ev(7);
             elsif v_num = K_CAPS then
-               rep_on <= '0';
-               if scan_en = '1' then             -- the latch moved: one tap
-                  send_make(C_BASE(v_num));
-                  send_break(C_BASE(v_num));
-               end if;
+               rep_on <= '0';                    -- the turbo switch: nothing to the PC
             elsif v_ev(7) = '1' then
                -- A press: Fn first, then the keycap's shifted meaning, else the key
                if phys_mega = '1' and C_FN(v_num) /= C_NONE then

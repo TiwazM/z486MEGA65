@@ -15,6 +15,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity tb_pc_mouse is
+   generic (
+      G_QUIET : natural := 50     -- pc_mouse's G_QUIET_MS here; 0: as before it (FAILs)
+   );
 end entity tb_pc_mouse;
 
 architecture sim of tb_pc_mouse is
@@ -99,7 +102,8 @@ begin
 
    i_mouse : entity work.pc_mouse
       generic map (
-         G_CLK_HZ        => 6_400_000    -- sample periods 10 times shorter
+         G_CLK_HZ        => 6_400_000,   -- sample periods 10 times shorter
+         G_QUIET_MS      => G_QUIET      -- 5 ms here: the motion checks wait 20 ms
       )
       port map (
          clk_i           => clk,
@@ -363,6 +367,13 @@ begin
       to_mouse(x"55");  expect("wrap: echo", x"55");
       to_mouse(x"EC");  expect("wrap off EC", x"FA");
       to_mouse(x"D0");  expect("unknown D0: resend", x"FE");
+      -- Motion in the middle of a command (F3, then its byte) is no packet in between: the
+      -- BIOS takes the byte after its command as the answer (G_QUIET_MS)
+      to_mouse(x"F3");  expect("sample rate F3 while enabled", x"FA");
+      steps(j_down, j_right, 4, true);
+      wait for 1 ms;
+      to_mouse(x"64");  expect("rate 100: FA, no packet first", x"FA");
+      expect_motion("4 right after the quiet time", 4, 0, "000");
       to_mouse(x"F5");  expect("disable F5", x"FA");
       steps(j_down, j_right, 4, true);
       nothing("motion after F5");

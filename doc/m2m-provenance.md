@@ -29,8 +29,16 @@ from pc10-iii (johansmolinski/pc10-iii at `0f363cb`), which uses the same fork
 Rules (Megamiga's):
 
 - Leave `M2M/` as it is. A framework change that cannot be avoided gets an
-  `M2M-UPSTREAM <name>` tag at every changed place and an entry here.
-  None so far.
+  `M2M-UPSTREAM <name>` tag at every changed place and an entry here:
+  - `reset-write` (`M2M/vhdl/av_pipeline/ascal.vhd`): ascal's write request
+    resets; a reset in one of its input write bursts left a burst half done,
+    and the HyperRAM side waited for its beats for good.
+  - `typematic-time` (`M2M/rom/sysdef.asm`, `keyboard.asm`,
+    `keyboard_vars.asm`): the cursor keys' repeat in the Shell's menus starts
+    after 0.4 s and steps 20 times a second, timed with QNICE's cycle counter.
+    M2M counted it in keyboard scans, which our menu loop (both SD slots, the
+    drives, the serial monitor in `HANDLE_CORE_IO`) makes much slower than the
+    0.5 s and 12 per second it was tuned for.
 - `.xpr` SFType values: only `VHDL2008`, `SVerilog` or none (anything else
   makes Vivado crash on project open).
 - To update: copy Megamiga's `M2M/` again (tracked files only), move the

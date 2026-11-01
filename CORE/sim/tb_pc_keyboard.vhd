@@ -274,8 +274,13 @@ begin
       key_up(61); nothing("MEGA released");
       key_up(73); expect("Page Up break", x"E0" & x"C9");
 
-      key_down(72);   expect("Caps Lock latched: a tap", x"3A" & x"BA");
-      key_up(72); expect("Caps Lock unlatched: a tap", x"3A" & x"BA");
+      key_down(61);   nothing("MEGA alone");
+      key_down(65);   expect("MEGA+TAB = Caps Lock", x"3A");
+      key_up(61); nothing("MEGA released");
+      key_up(65); expect("Caps Lock break", x"BA");
+
+      key_down(72);   nothing("CAPS LOCK down: the turbo switch, nothing");
+      key_up(72); nothing("CAPS LOCK up: nothing");
 
       -- The symbols by their keycaps: the PC's Shift pressed or released around the key
       key_down(45);   expect(": = Shift+;", x"2A" & x"27");

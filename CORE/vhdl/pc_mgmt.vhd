@@ -86,6 +86,9 @@ entity pc_mgmt is
       -- the sectors a hard disk read command still wants from this one on (1..256), which
       -- disk_sd reads ahead in one SD transfer; 0 = not known (the floppies)
       sd_req_cnt_o      : out std_logic_vector(8 downto 0) := (others => '0');
+      -- the sector again, fresh from the card (disk_sd starts a new run): its copy out of the
+      -- ring did not match (buf_bad_i)
+      sd_req_fresh_o    : out std_logic := '0';
       sd_done_i         : in  std_logic;
       sd_err_i          : in  std_logic;
 
@@ -94,6 +97,9 @@ entity pc_mgmt is
       buf_we_o          : out std_logic := '0';
       buf_wd_o          : out std_logic_vector(7 downto 0) := (others => '0');
       buf_rd_i          : in  std_logic_vector(7 downto 0);
+      -- disk_sd: the last copy out of the ring did not match its checksum (a hard disk, CD-ROM
+      -- or floppy read then asks for the sector again, fresh from the card, twice at most)
+      buf_bad_i         : in  std_logic := '0';
 
       -- the IDE trace (mega65.vhd keeps it): one event per clock at most, bits 63..60 the
       -- event, 59..56 0, then three bytes A, B, C and 32 bits of data (CD-ROM events from
@@ -228,7 +234,7 @@ architecture synthesis of pc_mgmt is
       S_IDE_RST1, S_IDE_RST2,
       S_IDE_CMD1, S_IDE_CMD2, S_IDE_CMD3, S_IDE_CMD,
       S_IDE_IDENT,
-      S_HR_SD, S_HR_STREAM, S_HR_REGS,
+      S_HR_SD, S_HR_STREAM, S_HR_CHK, S_HR_REGS, S_FD_CHK,
       S_HW_BLOCK, S_HW_POP, S_HW_SD, S_HW_DONE,
       S_IDE_BLK,
       S_WREGS,
@@ -260,6 +266,7 @@ architecture synthesis of pc_mgmt is
    signal pm_req_unit : std_logic_vector(1 downto 0) := (others => '0');
    signal pm_req_lba  : std_logic_vector(31 downto 0) := (others => '0');
    signal pm_req_cnt  : std_logic_vector(8 downto 0) := (others => '0');
+   signal pm_req_fresh : std_logic := '0';
    signal pm_buf_addr : std_logic_vector(8 downto 0) := (others => '0');
 
    -- the CD-ROM drive
@@ -272,6 +279,7 @@ architecture synthesis of pc_mgmt is
    signal cd_req      : std_logic;
    signal cd_req_lba  : std_logic_vector(31 downto 0);
    signal cd_req_cnt  : std_logic_vector(8 downto 0);
+   signal cd_req_fresh : std_logic;
    signal cd_buf_addr : std_logic_vector(8 downto 0);
    signal cd_tr_we    : std_logic;
    signal cd_tr       : std_logic_vector(63 downto 0);
@@ -289,6 +297,7 @@ architecture synthesis of pc_mgmt is
    signal a_total     : t_b16 := (others => (others => '0'));
    signal m_drv       : natural range 0 to 1 := 0;    -- the floppy being mounted
    signal m_cur       : std_logic_vector(39 downto 0);   -- its data
+   signal h_try       : natural range 0 to 2 := 0;  -- the sector's copies made again
    signal h_present   : std_logic := '0';
    signal h_gen       : std_logic_vector(3 downto 0) := (others => '0');
    signal h_total     : unsigned(31 downto 0) := (others => '0');
@@ -369,6 +378,7 @@ begin
    sd_req_unit_o    <= "11"       when cd_gnt = '1' else pm_req_unit;
    sd_req_lba_o     <= cd_req_lba when cd_gnt = '1' else pm_req_lba;
    sd_req_cnt_o     <= cd_req_cnt when cd_gnt = '1' else pm_req_cnt;
+   sd_req_fresh_o   <= cd_req_fresh when cd_gnt = '1' else pm_req_fresh;
    buf_addr_o       <= cd_buf_addr when cd_gnt = '1' else pm_buf_addr;
    trace_we_o       <= tr_we or cd_tr_we;
    trace_o          <= cd_tr when cd_tr_we = '1' else tr;
@@ -389,10 +399,12 @@ begin
          sd_req_o         => cd_req,
          sd_req_lba_o     => cd_req_lba,
          sd_req_cnt_o     => cd_req_cnt,
+         sd_req_fresh_o   => cd_req_fresh,
          sd_done_i        => sd_done_i,
          sd_err_i         => sd_err_i,
          buf_addr_o       => cd_buf_addr,
          buf_rd_i         => buf_rd_i,
+         buf_bad_i        => buf_bad_i,
          trace_we_o       => cd_tr_we,
          trace_o          => cd_tr
       ); -- i_cdrom
@@ -720,7 +732,8 @@ begin
                if r_wr = '1' then
                   state <= S_POP;                    -- the PC's bytes first
                elsif a_mounted(to_integer(unsigned(b_q(15 downto 15)))) = '1' then
-                  sd_next <= S_PUSH;
+                  h_try   <= 0;
+                  sd_next <= S_FD_CHK;
                   state   <= S_SD_ASK;
                else
                   state <= S_PUSH;                   -- zeros
@@ -736,9 +749,39 @@ begin
                   tr    <= x"60" & "000000" & pm_req_wr & sd_err_i & "000000" & pm_req_unit &
                            pm_req_cnt(7 downto 0) & pm_req_lba;
                   r_ok  <= not sd_err_i;
+                  pm_req_fresh <= '0';
                   idx   <= 0;
                   state <= sd_next;
                end if;
+
+            -- floppy.v's FIFO cannot take a sector back, so first a copy of the slot only for
+            -- disk_sd's checksum (a byte a clock, its verdict two clocks after the last); one
+            -- that does not match comes again fresh from the card, twice at most (the ring's
+            -- wrong bits are stored ones: a fresh sector reads right), then S_PUSH
+            when S_FD_CHK =>
+               case b_ph is
+                  when 0 =>
+                     pm_buf_addr <= std_logic_vector(to_unsigned(idx, 9));
+                     if idx = 511 then
+                        idx  <= 0;
+                        b_ph <= 1;
+                     else
+                        idx <= idx + 1;
+                     end if;
+                  when 1 | 2 | 3 | 4 =>
+                     b_ph <= b_ph + 1;
+                  when others =>
+                     b_ph <= 0;
+                     if buf_bad_i = '1' and r_ok = '1' and h_try < 2 then
+                        h_try        <= h_try + 1;
+                        pm_req_fresh <= '1';
+                        sd_next      <= S_FD_CHK;
+                        state        <= S_SD_ASK;
+                     else
+                        h_try <= 0;
+                        state <= S_PUSH;
+                     end if;
+               end case;
 
             -- 512 bytes into the FIFO: buffer address, a clock for the RAM, then the write
             when S_PUSH =>
@@ -992,10 +1035,38 @@ begin
                      b_ph <= 0;
                      if idx = 255 then
                         idx   <= 0;
-                        state <= S_HR_REGS;
+                        state <= S_HR_CHK;
                      else
                         idx <= idx + 1;
                      end if;
+               end case;
+
+            -- disk_sd's verdict on the copy (two clocks after its last byte): for one that did
+            -- not match the ring's checksum the sector comes again, fresh from the card (the
+            -- ring's copy of it stays wrong), twice at most; a read pulse at register 0 rewinds
+            -- ide.v's buffer pointer for the new copy (the address stays two clocks after it)
+            when S_HR_CHK =>
+               pm_address <= C_IDE & x"00";
+               case b_ph is
+                  when 0 | 1 =>
+                     b_ph <= b_ph + 1;
+                  when 2 =>
+                     if buf_bad_i = '1' and r_ok = '1' and h_try < 2 then
+                        h_try        <= h_try + 1;
+                        pm_req_fresh <= '1';
+                        pm_read      <= '1';
+                        b_ph         <= 3;
+                     else
+                        h_try <= 0;
+                        b_ph  <= 0;
+                        state <= S_HR_REGS;
+                     end if;
+                  when 3 =>
+                     b_ph <= 4;
+                  when others =>
+                     b_ph    <= 0;
+                     sd_next <= S_HR_STREAM;
+                     state   <= S_SD_ASK;
                end case;
 
             -- the registers: the sector just moved, the count left; DRQ + interrupt (+ END)

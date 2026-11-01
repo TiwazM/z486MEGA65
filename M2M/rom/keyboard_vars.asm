@@ -13,7 +13,9 @@ KEYB_NEWKEYS    .BLOCK 1                        ; newly pressed since last..
                                                 ; ..call of KEYB_GETKEY
 
 ; typematic delay variables (expected to be a consecutive block of for words
-; overall starting with KEYB_CDN_DELAY)
+; overall starting with KEYB_CDN_DELAY); M2M-UPSTREAM typematic-time: *_DELAY
+; is the IO$CYC_MID time of the press or the last repeat, *_TRIG the state
+; (0 not pressed, 2 pressed, 1 repeating)
 KEYB_CDN_DELAY  .BLOCK 1
 KEYB_CDN_TRIG   .BLOCK 1
 KEYB_CUP_DELAY  .BLOCK 1

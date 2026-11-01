@@ -40,6 +40,12 @@ PATCHES = {
         ("localparam integer FREQ66 = 75_000_000;   // pushing the edge",
          "localparam integer FREQ66 = 0;            // MEGA65: timing from FAST_GRADE's ns"),
     ],
+    # cpu_throttle.sv: speed 3 (the OSD's "56") is 33: 56 of the R6's 64 MHz is no slow-down;
+    # CAPS LOCK down selects it (mega65.vhd, z486_mega65.sv)
+    "z486/cpu_throttle.sv": [
+        ("        3'd3: target_mhz = 7'd56;",
+         "        3'd3: target_mhz = 7'd33;     // MEGA65: CAPS LOCK's speed (was 56)"),
+    ],
     "z486_MiSTer/src/soc/pic.v": [
         ("wire [7:0] edge_detect = interrupt_input & ~interrupt_last;",
          "// MEGA65: an input that is high when ICW1 ends counts as a new edge (z486_sources.py)\n"

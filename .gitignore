@@ -65,3 +65,4 @@ M2M/QNICE/dist_kit/sysdef.asm
 *~
 __pycache__/
 *.pyc
+tools/dos/build/

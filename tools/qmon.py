@@ -15,8 +15,12 @@
 #   qmon.py disks             the disks (disk_sd.vhd, C_DEV_PC_DISK): mounts, statistics, times
 #   qmon.py l2 [on|off]       the L2 cache: line fills from it and from the SDRAM (rates over
 #                             2 s); on/off switches it (on empties it first)
+#   qmon.py l1 on|off         z486's L1 caches (every access uncached while off; after on,
+#                             reset the PC: their lines may be stale)
 #   qmon.py disks clear       zero the disks' statistics
 #   qmon.py disks watch [s]   sectors per second over s seconds (default 10)
+#   qmon.py xadc              the FPGA's temperature, VCCINT, VCCAUX, VCCBRAM: now, and the
+#                             lowest and highest since the core was loaded (xadc_mon.vhd)
 #   qmon.py ide [N]           the IDE trace (mega65.vhd, pc_mgmt.vhd): the last N events
 #                             (default 40, at most 512) of both IDE channels and the floppies,
 #                             with milliseconds before the newest
@@ -130,12 +134,13 @@ def log(n):
         if e is None:
             continue
         kind, c = e >> 8 & 3, e & 0xFF
+        dev = "mou" if e & 0x400 else "kbd"   # bit 10: the mouse
         if kind == 1:
             out += "[POST %02X]" % c
         elif kind == 2:
-            out += "[>kbd %02X]" % c          # the 8042 to the keyboard
+            out += "[>%s %02X]" % (dev, c)    # the 8042 to the device
         elif kind == 3:
-            out += "[<kbd %02X]" % c          # the keyboard to the 8042
+            out += "[<%s %02X]" % (dev, c)    # the device to the 8042
         else:
             out += chr(c) if (c >= 32 and c < 127) or c == 10 else "\\x%02X" % c
     return out
@@ -179,13 +184,36 @@ def disks():
     print("tried again after an error %d, after QNICE's own SD access %d" % (st[13], st[14]))
     print("SD transfers started %d (runs of sectors read ahead, and writes): %s sectors per transfer"
           % (st[15], "%.1f" % ((st[0] + st[1]) / st[15]) if st[15] else "-"))
+    ck = dump(0x8009, 0x800F)
+    print("ring checksums (since the core started, 16 bits): %d copies matched, %d did not, "
+          "%d sectors read fresh from the card, %d of them right then" % (ck[0], ck[1], ck[6], ck[2]))
+    if ck[1]:
+        print("  the last that did not: slot %d, checksum %04X wanted, %04X read" % (ck[3], ck[4], ck[5]))
+
+
+def xadc():
+    pc_dev()
+    v = dump(0x8020, 0x802B)
+    deg = lambda c: (c >> 4) * 503.975 / 4096 - 273.15
+    volt = lambda c: (c >> 4) * 3.0 / 4096
+    print("              now      lowest   highest")
+    print("temperature  %5.1f C  %5.1f C  %5.1f C" % (deg(v[0]), deg(v[8]), deg(v[4])))
+    for i, name in ((1, "VCCINT "), (2, "VCCAUX "), (3, "VCCBRAM")):
+        print("%s      %5.3f V  %5.3f V  %5.3f V" % (name, volt(v[i]), volt(v[i + 8]), volt(v[i + 4])))
+
+
+def caches_set(bit, on):
+    pc_dev()
+    v = dump(0x8003, 0x8003)[0] & 3                 # bit 0 the L2, bit 1 the L1
+    poke(0x8003, (v | bit) if on else (v & ~bit & 3))
+    time.sleep(0.1)
+    return dump(0x8003, 0x8003)[0] & 3
 
 
 def l2(arg):
     pc_dev()
     if arg in ("on", "off"):
-        poke(0x8003, 1 if arg == "on" else 0)
-        time.sleep(0.1)
+        caches_set(1, arg == "on")
     a, t0 = dump(0x8018, 0x801C), time.time()
     time.sleep(2)
     b, t1 = dump(0x8018, 0x801C), time.time()
@@ -290,12 +318,17 @@ def ide(n):
 args = sys.argv[1:]
 if args and args[0] == "l2":
     l2(args[1] if len(args) > 1 else "")
+elif args and args[0] == "l1" and len(args) > 1 and args[1] in ("on", "off"):
+    v = caches_set(2, args[1] == "on")
+    print("L1 caches %s, L2 cache %s" % ("on" if v & 2 else "off", "on" if v & 1 else "off"))
 elif args[:2] == ["disks", "clear"]:
     disks_clear()
 elif args[:2] == ["disks", "watch"]:
     disks_watch(float(args[2]) if len(args) > 2 else 10)
 elif args and args[0] == "disks":
     disks()
+elif args and args[0] == "xadc":
+    xadc()
 elif args and args[0] == "ide":
     ide(int(args[1]) if len(args) > 1 else 40)
 elif args and args[0] == "status":

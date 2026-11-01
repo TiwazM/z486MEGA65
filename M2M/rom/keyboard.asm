@@ -93,30 +93,41 @@ _KEYBGK_RET     DECRB
 ; internal helper function for typematic repeat
 ; R8: key code of key that shall be handled
 ; R9: pointer to PRESSED flag-word
-; R10: pointer to speed/delay counter
-; R11: pointer to delay-is-over-flag (trigger)
+; R10: pointer to the time of the press or of the last repeat
+; R11: pointer to the state: 0 = not pressed, 2 = pressed (the delay runs),
+;      1 = repeating
+; M2M-UPSTREAM typematic-time: the delay and the repeat are timed with the
+; cycle counter (IO$CYC_MID), no longer counted in calls
 _KEYB_TYPEMATIC INCRB
 
                 MOVE    @R9, R0
                 AND     R8, R0                  ; to-be-handled key pressed?
                 RBRA    _KEYB_TYPEM_DTD, Z      ; no: delete trg./dly. vars
-                CMP     1, @R11                 ; typem, rep. alrdy triggered?
-                RBRA    _KEYB_TYPEM_T, Z        ; yes: choose rep. speed
-                MOVE    M2M$TYPEMATIC_DLY, R6   ; no: choose delay speed
-                RBRA    _KEYB_TYPEM_C, 1
-_KEYB_TYPEM_T   MOVE    M2M$TYPEMATIC_SPD, R6   ; repeat speed     
-_KEYB_TYPEM_C   ADD     1, @R10                 ; inc speed/delay counter
-                CMP     R6, @R10                ; speed/delay reached?      
-                RBRA    _KEYB_TYPEM_RET, !Z     ; no: return
+                MOVE    IO$CYC_MID, R1          ; R1: now
+                MOVE    @R1, R1
+                CMP     0, @R11                 ; just pressed?
+                RBRA    _KEYB_TYPEM_H, !Z
+                MOVE    R1, @R10                ; yes: the delay starts now
+                MOVE    2, @R11
+                RBRA    _KEYB_TYPEM_RET, 1
+_KEYB_TYPEM_H   MOVE    M2M$TYPEMATIC_DLY, R6   ; held: the delay first..
+                CMP     2, @R11
+                RBRA    _KEYB_TYPEM_C, Z
+                MOVE    M2M$TYPEMATIC_SPD, R6   ; ..then the repeat speed
+_KEYB_TYPEM_C   MOVE    R1, R2
+                SUB     @R10, R2                ; R2: ticks since then
+                CMP     R6, R2                  ; reached?
+                RBRA    _KEYB_TYPEM_RET, N      ; no (R6 > R2, unsigned)
 
                 MOVE    R8, R0                  ; yes: unpress key
                 NOT     R0, R0
                 AND     R0, @R9
-                MOVE    1, @R11                 ; set triggered flag
-                RBRA    _KEYB_TYPEM_DTO, 1      ; clear delay and return
+                MOVE    1, @R11                 ; repeating
+                MOVE    R1, @R10                ; the next one from now
+                RBRA    _KEYB_TYPEM_RET, 1
 
-_KEYB_TYPEM_DTD MOVE    0, @R11                 ; clear trigger flag
-_KEYB_TYPEM_DTO MOVE    0, @R10                 ; clear speed/delay counter
+_KEYB_TYPEM_DTD MOVE    0, @R11                 ; not pressed
+                MOVE    0, @R10
 
 _KEYB_TYPEM_RET DECRB
                 RET

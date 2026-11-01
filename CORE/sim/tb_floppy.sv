@@ -14,7 +14,13 @@
 //
 // Licensed under GPL v3
 
-module tb_floppy;
+module tb_floppy #(
+    // disk_sd's G_LUTRAM: 1, the ring and the write buffer in LUT RAM
+    parameter int LUTRAM = 0,
+    // disk_sd's G_FAULT: every FAULT-th answer's first copy reads its last byte wrong
+    // (pc_mgmt must read the sector again, fresh from the card; the SD read counts then differ)
+    parameter int FAULT = 0
+);
     // the PC's clock (64 MHz) and QNICE's (50 MHz)
     reg clk = 0;
     always #7.8125 clk = ~clk;
@@ -88,6 +94,7 @@ module tb_floppy;
     wire [8:0] buf_addr;
     wire buf_we;
     wire [7:0] buf_wd, buf_rd;
+    wire buf_bad, sd_req_fresh;
     wire [159:0] mnt;
     // RTC: 12:34:56, 30.10.26, a Friday (MEGA65: 0 = Monday), the update toggle 0
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
@@ -98,9 +105,9 @@ module tb_floppy;
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
         .fdd_request_i(request), .ide_request_i(3'b000), .ide1_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
-        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt),
+        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh),
         .sd_done_i(sd_done), .sd_err_i(sd_err),
-        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd)
+        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
     );
 
     reg [27:0] q_addr = 0;
@@ -110,16 +117,16 @@ module tb_floppy;
     wire q_wait;
     wire [63:0] q2c;
     wire [75:0] c2q;
-    disk_sd #(.G_QNICE_HZ(50000000)) sd (
+    disk_sd #(.G_QNICE_HZ(50000000), .G_LUTRAM(LUTRAM), .G_FAULT(FAULT)) sd (
         .qnice_clk_i(qclk), .qnice_rst_i(qrst),
         .qnice_addr_i(q_addr), .qnice_data_i(q_wdata), .qnice_ce_i(q_ce), .qnice_unit_i(2'b00), .qnice_we_i(q_we),
         .qnice_data_o(q_rdata), .qnice_wait_o(q_wait),
         .sd_q2c_i(q2c), .sd_c2q_o(c2q),
         .mnt_o(mnt),
         .req_i(sd_req), .req_wr_i(sd_req_wr), .req_unit_i(sd_req_unit), .req_lba_i(sd_req_lba),
-        .req_cnt_i(sd_req_cnt), .done_o(sd_done), .done_err_o(sd_err),
+        .req_cnt_i(sd_req_cnt), .req_fresh_i(sd_req_fresh), .done_o(sd_done), .done_err_o(sd_err),
         .main_clk_i(clk), .buf_addr_i(buf_addr), .buf_we_i(buf_we), .buf_wd_i(buf_wd),
-        .buf_rd_o(buf_rd)
+        .buf_rd_o(buf_rd), .buf_bad_o(buf_bad)
     );
 
     // ------------------------------------------------------------------------------------------
@@ -368,17 +375,17 @@ module tb_floppy;
         transfer(0, 5, 1);                    // A: LBA 4-5: a run of 18, one failure
         k = eng_reads;
         transfer(0, 15, 1);                   // A: LBA 14-15: out of that run
-        if (eng_reads != k) begin $error("A: LBA 14-15: %0d SD reads", eng_reads - k); errors++; end
+        if (FAULT == 0 && eng_reads != k) begin $error("A: LBA 14-15: %0d SD reads", eng_reads - k); errors++; end
         transfer(1, 3, 1);                    // B: LBA 2-3: ends A:'s run
         blk_wait = 0;
         transfer(0, 1, 0);                    // A: write LBA 0-1, preempted once
         transfer(1, 3, 0);                    // B: write LBA 2-3
         k = eng_reads;
         transfer(1, 3, 1);                    // B: LBA 2-3 again: the write dropped the run
-        if (eng_reads != k + 1) begin $error("B: after the write: %0d SD reads", eng_reads - k); errors++; end
+        if (FAULT == 0 && eng_reads != k + 1) begin $error("B: after the write: %0d SD reads", eng_reads - k); errors++; end
         if (dma_errors != 0) begin $error("%0d DMA bytes wrong", dma_errors); errors++; end
         if (write_errors != 0) begin $error("%0d written bytes wrong", write_errors); errors++; end
-        if (eng_reads != 5 || eng_writes != 4 || eng_aborts != 1) begin
+        if (FAULT == 0 && (eng_reads != 5 || eng_writes != 4 || eng_aborts != 1)) begin
             $error("engine: %0d reads, %0d writes, %0d aborts", eng_reads, eng_writes, eng_aborts); errors++;
         end
         $display("      engine: %0d SD reads, %0d writes, %0d runs aborted", eng_reads, eng_writes, eng_aborts);

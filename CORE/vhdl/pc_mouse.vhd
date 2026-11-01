@@ -23,6 +23,14 @@
 -- sample rate (default 100 per second) whenever it moved or a button changed: buttons and
 -- signs, then x and y (y counts upwards), at most +/-255 per packet.
 --
+-- After any byte from the PC the mouse sends no packets for G_QUIET_MS (the motion adds up
+-- and goes out after). The Bochs BIOS's mouse functions (INT 15h C2xx) turn the mouse port
+-- off, send a command and take the next byte as its answer, and turn the port back on only
+-- when that was FA. A packet in between (CuteMouse sends F4, then F3 and its byte, each
+-- in its own call, tens of ms apart) made them give up with the port off: the mouse stayed
+-- dead (The 7th Guest at its start, seen in the debug log), or a packet was cut short and
+-- the rest read one byte off (the pointer jumping from edge to edge).
+--
 -- Licensed under GPL v3
 ----------------------------------------------------------------------------------
 
@@ -33,6 +41,7 @@ use ieee.numeric_std.all;
 entity pc_mouse is
    generic (
       G_CLK_HZ        : natural := 64_000_000;
+      G_QUIET_MS      : natural := 300;            -- no packets this long after a PC byte
       G_RMB_KEY       : natural := 70              -- F13 in M2M's key numbering
    );
    port (
@@ -91,6 +100,7 @@ architecture synthesis of pc_mouse is
    signal ms_cnt     : natural range 0 to C_MS - 1 := 0;
    signal period     : unsigned(6 downto 0) := to_unsigned(10, 7);
    signal since      : unsigned(6 downto 0) := (others => '0');
+   signal quiet      : natural range 0 to G_QUIET_MS := 0;           -- ms left without packets
 
    type t_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
 
@@ -198,6 +208,9 @@ begin
             if since /= 127 then
                since <= since + 1;
             end if;
+            if quiet /= 0 then
+               quiet <= quiet - 1;
+            end if;
          else
             ms_cnt <= ms_cnt + 1;
          end if;
@@ -210,8 +223,9 @@ begin
          end if;
 
          if rx_valid_i = '1' then
-            -- A command: it drops the queued bytes
+            -- A command: it drops the queued bytes, and the packets wait
             v_flush := true;
+            quiet   <= G_QUIET_MS;
             if wrap = '1' and rx_data_i /= x"EC" and rx_data_i /= x"FF" then
                add(rx_data_i);                   -- wrap mode: the echo
             elsif arg_cmd /= x"00" and unsigned(rx_data_i) < 16#E6# then
@@ -290,6 +304,7 @@ begin
             end if;
 
          elsif enabled = '1' and remote = '0' and wrap = '0' and q_cnt = 0 and since >= period and
+               quiet = 0 and
                (v_x /= 0 or v_y /= 0 or btn /= btn_sent) then
             -- A packet at the sample rate, when there is news
             packet;

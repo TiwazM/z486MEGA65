@@ -64,12 +64,14 @@ entity pc_cdrom is
       sd_req_o          : out std_logic := '0';
       sd_req_lba_o      : out std_logic_vector(31 downto 0) := (others => '0');
       sd_req_cnt_o      : out std_logic_vector(8 downto 0) := (others => '0');
+      sd_req_fresh_o    : out std_logic := '0';   -- the sector fresh from the card (a new run)
       sd_done_i         : in  std_logic;
       sd_err_i          : in  std_logic;
 
       -- the sector buffer (disk_sd's ring slot of the answer; read data one clock later)
       buf_addr_o        : out std_logic_vector(8 downto 0);
       buf_rd_i          : in  std_logic_vector(7 downto 0);
+      buf_bad_i         : in  std_logic := '0';   -- disk_sd: the last copy did not match
 
       -- the IDE trace (pc_mgmt.vhd's format): 6 an SD answer (B = 3, the unit), 8 a command
       -- (A command, B drive/head, C features, data the byte count limit & sector), 9 its
@@ -193,7 +195,7 @@ architecture synthesis of pc_cdrom is
       S_RST1, S_RST2,
       S_CMD0, S_CMD1, S_CMD2, S_CMD3, S_CMD,
       S_BLK, S_POP, S_SCSI,
-      S_CHUNK, S_STREAM, S_SD_ASK, S_SD_WAIT, S_REGS,
+      S_CHUNK, S_STREAM, S_CHK, S_SD_ASK, S_SD_WAIT, S_REGS,
       S_WREGS, S_BUS_W, S_BUS_R
    );
    signal state       : t_state := S_IDLE;
@@ -247,6 +249,10 @@ architecture synthesis of pc_cdrom is
    signal x_lba       : unsigned(31 downto 0) := (others => '0');   -- the image's 512-byte sector
    signal x_have      : std_logic := '0';       -- the sector at x_pos is in the buffer
    signal x_a         : unsigned(8 downto 0) := (others => '0');    -- the byte in the source
+   signal x_start     : unsigned(31 downto 0) := (others => '0');   -- the block's first byte
+   signal x_done      : std_logic := '0';       -- the block's last word is out
+   signal x_try       : natural range 0 to 2 := 0;   -- the block made again
+   signal x_fresh     : std_logic := '0';       -- the next request: fresh from the card
    signal g_lo        : std_logic_vector(7 downto 0) := (others => '0');
    signal g_hi        : std_logic_vector(7 downto 0) := (others => '0');
    signal d_lo        : std_logic_vector(7 downto 0) := (others => '0');
@@ -291,6 +297,7 @@ architecture synthesis of pc_cdrom is
 begin
 
    sd_req_o   <= req;
+   sd_req_fresh_o <= x_fresh;
    buf_addr_o <= std_logic_vector(x_a);
 
    ---------------------------------------------------------------------------------------------
@@ -1039,6 +1046,8 @@ begin
                   v_c := v_rem;
                end if;
                x_end   <= x_pos + v_c;
+               x_start <= x_pos;
+               x_try   <= 0;
                x_bytes <= v_c(15 downto 0);
                x_words <= v_c(16 downto 1) + ("000000000000000" & v_c(0));
                x_w     <= (others => '0');
@@ -1093,15 +1102,50 @@ begin
                   when others =>
                      b_ph  <= 0;
                      x_pos <= x_pos + 2;
-                     if x_pos(8 downto 1) = "11111111" then
-                        x_have <= '0';               -- the sector's last word
-                     end if;
                      if x_w + 1 = x_words then
-                        state <= S_REGS;
+                        x_done <= '1';
                      else
-                        x_w <= x_w + 1;
+                        x_done <= '0';
+                        x_w    <= x_w + 1;
+                     end if;
+                     if x_pos(8 downto 1) = "11111111" and x_src = G_DISK then
+                        x_have <= '0';               -- the sector's last word: its copy
+                        state  <= S_CHK;             -- against the ring's checksum
+                     elsif x_pos(8 downto 1) = "11111111" then
+                        x_have <= '0';
+                        if x_w + 1 = x_words then
+                           state <= S_REGS;
+                        end if;
+                     elsif x_w + 1 = x_words then
+                        state <= S_REGS;
                      end if;
                end case;
+
+            -- disk_sd's verdict on the image sector just copied (two clocks after its last
+            -- byte): for one that did not match the ring's checksum the whole block is made
+            -- again, its first sector fresh from the card (a new run, so the others come
+            -- fresh too), twice at most: ide.v's buffer pointer only goes back to 0
+            when S_CHK =>
+               if b_ph < 2 then
+                  b_ph <= b_ph + 1;
+               else
+                  b_ph <= 0;
+                  if buf_bad_i = '1' and x_try < 2 and x_start(8 downto 0) = "000000000" then
+                     x_try   <= x_try + 1;
+                     x_fresh <= '1';
+                     x_pos   <= x_start;
+                     x_w     <= (others => '0');
+                     x_have  <= '0';
+                     b_addr  <= C_IDE & x"06";        -- the buffer pointer back to 0
+                     b_data  <= x"0000";
+                     ret     <= S_STREAM;
+                     state   <= S_BUS_W;
+                  elsif x_done = '1' then
+                     state <= S_REGS;
+                  else
+                     state <= S_STREAM;
+                  end if;
+               end if;
 
             when S_SD_ASK =>
                req   <= not req;                     -- lba and cnt were set a clock ago
@@ -1112,6 +1156,7 @@ begin
                   trace_we_o <= '1';
                   trace_o    <= x"60" & "0000000" & sd_err_i & x"03" & sd_req_cnt_o(7 downto 0) &
                                 sd_req_lba_o;
+                  x_fresh <= '0';
                   if sd_err_i = '1' then
                      fail(x"3", x"11", x"00");       -- MEDIUM ERROR, unrecovered read error
                   else

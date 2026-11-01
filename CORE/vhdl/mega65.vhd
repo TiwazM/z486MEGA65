@@ -370,6 +370,7 @@ signal video_rst              : std_logic;
 signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
 signal main_hr_rst            : std_logic;
+signal main_cpu_slow          : std_logic := '0';
 signal main_ddram_rst         : std_logic;
 signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
 signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
@@ -377,12 +378,13 @@ signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
 -- The SDRAM clock (clk.vhd) and its phase, set from QNICE (C_DEV_PC_CTL, address 1)
 signal main_sdram_clk         : std_logic;
 signal qnice_sdram_ps_target  : std_logic_vector(15 downto 0) := (others => '0');
-signal qnice_l2_on            : std_logic_vector(0 downto 0) := "1";   -- the L2 cache (guest_l2.sv)
-signal main_l2_on             : std_logic_vector(0 downto 0);
+signal qnice_l2_on            : std_logic_vector(1 downto 0) := "11";  -- 0: the L2 (guest_l2.sv), 1: z486's L1
+signal main_l2_on             : std_logic_vector(1 downto 0);
 signal main_l2_hits           : std_logic_vector(31 downto 0);
 signal main_l2_misses         : std_logic_vector(31 downto 0);
 signal sdram_ps_pos           : std_logic_vector(15 downto 0);  -- clk_i
 signal qnice_sdram_ps_pos     : std_logic_vector(15 downto 0);
+signal qnice_xadc             : std_logic_vector(15 downto 0);   -- xadc_mon.vhd's value
 
 ---------------------------------------------------------------------------------------------
 -- Debug (C_DEV_PC_CTL): the PC's boot and POST state, CS:EIP, and a log of its debug port
@@ -413,8 +415,8 @@ signal main_dbg_post_new      : std_logic;
 signal main_dbg_snap          : std_logic_vector(255 downto 0) := (others => '0');
 signal qnice_dbg_snap         : std_logic_vector(255 downto 0);
 signal main_dbg_log_wr        : std_logic;
-signal main_dbg_log_entry     : std_logic_vector(9 downto 0);
-signal qnice_dbg_log_q        : std_logic_vector(9 downto 0);
+signal main_dbg_log_entry     : std_logic_vector(11 downto 0);
+signal qnice_dbg_log_q        : std_logic_vector(11 downto 0);
 -- the IDE trace (pc_mgmt.vhd, pc_cdrom.vhd): sequence number, milliseconds, the event
 signal main_tr_we             : std_logic;
 signal main_tr_d              : std_logic_vector(63 downto 0);
@@ -519,10 +521,12 @@ signal main_disk_req_wr       : std_logic;
 signal main_disk_req_unit     : std_logic_vector(1 downto 0);
 signal main_disk_req_lba      : std_logic_vector(31 downto 0);
 signal main_disk_req_cnt      : std_logic_vector(8 downto 0);
+signal main_disk_req_fresh    : std_logic;
 signal main_disk_buf_addr     : std_logic_vector(8 downto 0);
 signal main_disk_buf_we       : std_logic;
 signal main_disk_buf_wd       : std_logic_vector(7 downto 0);
 signal main_disk_buf_rd       : std_logic_vector(7 downto 0);
+signal main_disk_buf_bad      : std_logic;
 
 signal qnice_disk_done        : std_logic;
 signal qnice_disk_done_err    : std_logic;
@@ -597,8 +601,10 @@ component z486_mega65 is
       ps2_mouse_data_in  : in    std_logic;
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
+      cpu_slow           : in    std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
       l2_enable          : in    std_logic;
+      cache_off          : in    std_logic;
       l2_hits            : out   std_logic_vector(31 downto 0);
       l2_misses          : out   std_logic_vector(31 downto 0);
       dbg_boot_stage     : out   std_logic_vector(2 downto 0);
@@ -820,11 +826,13 @@ begin
          ps2_kbd_data_out   => main_kbd_host_dat,
          ps2_mouse_clk_in   => main_mouse_dev_clk,
          ps2_mouse_data_in  => main_mouse_dev_dat,
+         cpu_slow           => main_cpu_slow,
          ps2_mouse_clk_out  => main_mouse_host_clk,
          ps2_mouse_data_out => main_mouse_host_dat,
 
          ram_size           => C_RAM_SIZE,
          l2_enable          => main_l2_on(0),
+         cache_off          => not main_l2_on(1),
          l2_hits            => main_l2_hits,
          l2_misses          => main_l2_misses,
 
@@ -867,12 +875,14 @@ begin
          sd_req_unit_o     => main_disk_req_unit,
          sd_req_lba_o      => main_disk_req_lba,
          sd_req_cnt_o      => main_disk_req_cnt,
+         sd_req_fresh_o    => main_disk_req_fresh,
          sd_done_i         => qnice_disk_done,
          sd_err_i          => qnice_disk_done_err,
          buf_addr_o        => main_disk_buf_addr,
          buf_we_o          => main_disk_buf_we,
          buf_wd_o          => main_disk_buf_wd,
          buf_rd_i          => main_disk_buf_rd,
+         buf_bad_i         => main_disk_buf_bad,
          trace_we_o        => main_tr_we,
          trace_o           => main_tr_d
       ); -- i_pc_mgmt
@@ -915,6 +925,17 @@ begin
 
    -- A mouse on joystick port 1 as the PC's PS/2 mouse, always there (the BIOS waits for good
    -- for a mouse that does not answer). Not reset with the PC either.
+   -- The turbo switch: CAPS LOCK (it latches) down = the CPU at 33 MHz, up = full speed
+   -- (z486's throttle, cpu_slow; the keyboard sends the PC nothing for it)
+   p_main_turbo : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         if main_kb_key_num_i = 72 then             -- CAPS LOCK
+            main_cpu_slow <= not main_kb_key_pressed_n_i;
+         end if;
+      end if;
+   end process p_main_turbo;
+
    i_pc_mouse : entity work.pc_mouse
       generic map (
          G_CLK_HZ        => CORE_CLK_SPEED
@@ -976,7 +997,7 @@ begin
          end if;
          if main_dbg_tick = 0 then
             main_dbg_snap_cnt <= main_dbg_snap_cnt + 1;
-            main_dbg_snap <= x"000000000000000" & "000" & main_l2_on &
+            main_dbg_snap <= x"000000000000000" & "00" & main_l2_on &
                              main_l2_misses & main_l2_hits &
                              std_logic_vector(main_dbg_snap_cnt) &
                              std_logic_vector(main_dbg_vs_cnt) &
@@ -1002,17 +1023,22 @@ begin
 
    main_dbg_post_new  <= '1' when main_dbg_post_write = '1' and main_dbg_post_code /= main_dbg_post_last
                     else '0';
+   -- the log: bits 9..8 the kind (00 a character, 01 a POST code, 10 to the device, 11 from it),
+   -- bit 10 the mouse (else the keyboard)
    main_dbg_log_wr    <= main_dbg_post_new or main_dbg_log_we or main_kbd_rx_valid or
-                         (main_kbd_tx_valid and main_kbd_tx_ready);
-   main_dbg_log_entry <= "01" & main_dbg_post_code when main_dbg_post_new = '1' else
-                         "00" & main_dbg_log_byte  when main_dbg_log_we = '1' else
-                         "10" & main_kbd_rx_data   when main_kbd_rx_valid = '1' else
-                         "11" & main_kbd_tx_data;
+                         (main_kbd_tx_valid and main_kbd_tx_ready) or main_mouse_rx_valid or
+                         (main_mouse_tx_valid and main_mouse_tx_ready);
+   main_dbg_log_entry <= "0001" & main_dbg_post_code when main_dbg_post_new = '1' else
+                         "0000" & main_dbg_log_byte  when main_dbg_log_we = '1' else
+                         "0010" & main_kbd_rx_data   when main_kbd_rx_valid = '1' else
+                         "0011" & main_kbd_tx_data   when (main_kbd_tx_valid and main_kbd_tx_ready) = '1' else
+                         "0110" & main_mouse_rx_data when main_mouse_rx_valid = '1' else
+                         "0111" & main_mouse_tx_data;
 
    i_dbg_log : entity work.dualport_2clk_ram
       generic map (
          ADDR_WIDTH => 12,
-         DATA_WIDTH => 10,
+         DATA_WIDTH => 12,
          FALLING_B  => true                    -- QNICE's device convention
       )
       port map (
@@ -1119,10 +1145,10 @@ begin
          dst_data_o => qnice_nat_size
       ); -- i_cdc_native
 
-   -- The L2 cache's switch into the PC's clock
+   -- The caches' switches into the PC's clock: the L2, z486's L1 (off: every access uncached)
    i_cdc_l2_on : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE => 1
+         G_DATA_SIZE => 2
       )
       port map (
          src_data_i => qnice_l2_on,
@@ -1356,12 +1382,15 @@ begin
    --    0x0001      the SDRAM clock's phase, signed fine steps from 292.5 degrees (clk.vhd)
    --    0x0002      read: where the phase shift is
    --    0x0003      bit 0 = the L2 cache is on (guest_l2.sv; default on, switching it on
-   --                empties it first)
+   --                empties it first), bit 1 = z486's L1 caches are on (default on; off, every
+   --                access goes uncached; back on, reset the PC: lines may be stale)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
    --                log count, VGA vsync count, snapshot count; 0x0018..1C the L2's line
    --                fills from the cache (lo, hi) and from the SDRAM (lo, hi), whether it is on
+   --    0x0020..2B  read: the FPGA's temperature, VCCINT, VCCAUX and VCCBRAM now, their maxima,
+   --                their minima since the configuration (xadc_mon.vhd)
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    --    0x2000..2FFF read: the IDE trace (p_main_trace), event n at 0x2000 + 8 * (n mod 512):
    --                its sequence number, milliseconds, then the event (pc_mgmt.vhd) in four
@@ -1375,12 +1404,12 @@ begin
             elsif qnice_dev_addr_i = x"0000001" then
                qnice_sdram_ps_target <= qnice_dev_data_i;
             elsif qnice_dev_addr_i = x"0000003" then
-               qnice_l2_on(0) <= qnice_dev_data_i(0);
+               qnice_l2_on <= qnice_dev_data_i(1 downto 0);
             end if;
          end if;
          if qnice_rst_i = '1' then
             qnice_pc_roms_ok(0) <= '0';
-            qnice_l2_on(0)      <= '1';
+            qnice_l2_on         <= "11";
          end if;
       end if;
    end process p_qnice_pc_ctl;
@@ -1400,13 +1429,15 @@ begin
          elsif qnice_dev_addr_i = x"0000002" then
             qnice_dev_data_o <= qnice_sdram_ps_pos;
          elsif qnice_dev_addr_i = x"0000003" then
-            qnice_dev_data_o <= x"000" & "000" & qnice_l2_on(0);
+            qnice_dev_data_o <= x"000" & "00" & qnice_l2_on;
          elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000010" then
             qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 15 downto 16 * v_word);
          elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000011" then
             qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 143 downto 16 * v_word + 128);
+         elsif qnice_dev_addr_i(27 downto 4) = x"000002" then
+            qnice_dev_data_o <= qnice_xadc;
          elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
-            qnice_dev_data_o <= "000000" & qnice_dbg_log_q;
+            qnice_dev_data_o <= "0000" & qnice_dbg_log_q;
          elsif qnice_dev_addr_i(27 downto 12) = x"0002" then
             case v_word is
                when 0      => qnice_dev_data_o <= qnice_tr_q(95 downto 80);
@@ -1422,6 +1453,13 @@ begin
    end process p_qnice_dev_data;
    qnice_dev_wait_o <= qnice_disk_wait when qnice_disk_sel = '1' else '0';
 
+   i_xadc_mon : entity work.xadc_mon
+      port map (
+         clk_i  => qnice_clk_i,
+         idx_i  => qnice_dev_addr_i(3 downto 0),
+         data_o => qnice_xadc
+      ); -- i_xadc_mon
+
    -- The disks from image files on the SD card: floppy drives A: and B:, the hard disk, the
    -- CD-ROM (C_DEV_PC_DISK, _B, _HD, _CD: one CSR each; the firmware mounts them)
    qnice_disk_sel  <= '1' when qnice_dev_id_i = C_DEV_PC_DISK or qnice_dev_id_i = C_DEV_PC_DISK_B or
@@ -1434,7 +1472,8 @@ begin
 
    i_disk_sd : entity work.disk_sd
       generic map (
-         G_QNICE_HZ    => QNICE_CLK_SPEED
+         G_QNICE_HZ    => QNICE_CLK_SPEED,
+         G_LUTRAM      => 1               -- the ring and the write buffer in LUT RAM (disk_sd.vhd)
       )
       port map (
          qnice_clk_i   => qnice_clk_i,
@@ -1454,13 +1493,15 @@ begin
          req_unit_i    => main_disk_req_unit,
          req_lba_i     => main_disk_req_lba,
          req_cnt_i     => main_disk_req_cnt,
+         req_fresh_i   => main_disk_req_fresh,
          done_o        => qnice_disk_done,
          done_err_o    => qnice_disk_done_err,
          main_clk_i    => main_clk,
          buf_addr_i    => main_disk_buf_addr,
          buf_we_i      => main_disk_buf_we,
          buf_wd_i      => main_disk_buf_wd,
-         buf_rd_o      => main_disk_buf_rd
+         buf_rd_o      => main_disk_buf_rd,
+         buf_bad_o     => main_disk_buf_bad
       ); -- i_disk_sd
 
    i_cdc_sdram_ps_pos : entity work.cdc_stable

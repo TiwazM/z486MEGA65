@@ -39,6 +39,11 @@
 --   0x03/0x04    BASE   SD block of cluster 0 = DEV_CLUSTER - (2 << SHIFT) (lo, hi)
 --   0x05 SHIFT   log2(sectors per cluster)
 --   0x06 CYL     cylinders, 0x07 SPT sectors per track, 0x08 HEADS (floppies only, for floppy.v)
+--   0x09..0x0F   (read, the same in every unit; main clock counts, free running) the ring's
+--                checksums: copies that matched, copies that did not, sectors whose copy
+--                matched after one that did not, the last one that did not: its slot, the
+--                checksum wanted, the one read; then the sectors read again fresh from the
+--                card for a copy that did not match (req_fresh_i)
 --   0x10..0x15   (read, all units) sectors read, sectors written, failed requests, the last
 --                request (bit 15 = write, 14..13 = unit), its LBA (lo, hi)
 --   0x16..0x1F   (read) the requests' times in microseconds, from the request's arrival to its
@@ -65,9 +70,15 @@ library work;
 use work.sdhost_pkg.all;
 use work.qnice_csr_pkg.all;
 
+library xpm;
+use xpm.vcomponents.all;
+
 entity disk_sd is
    generic (
-      G_QNICE_HZ   : natural := 50_000_000
+      G_QNICE_HZ   : natural := 50_000_000;
+      G_FAULT      : natural := 0;                 -- simulation: every G_FAULT-th answer's first
+                                                   -- copy reads byte 511 with bit 3 flipped
+      G_LUTRAM     : natural := 0                  -- 1: the ring and the write buffer in LUT RAM
    );
    port (
       qnice_clk_i  : in  std_logic;
@@ -96,6 +107,7 @@ entity disk_sd is
       req_unit_i   : in  std_logic_vector(1 downto 0);
       req_lba_i    : in  std_logic_vector(31 downto 0);
       req_cnt_i    : in  std_logic_vector(8 downto 0);   -- the sectors to come (0: not known)
+      req_fresh_i  : in  std_logic := '0';         -- from the card, a new run (not the ring's copy)
       done_o       : out std_logic;                -- a toggle
       done_err_o   : out std_logic;
 
@@ -105,7 +117,12 @@ entity disk_sd is
       buf_addr_i   : in  std_logic_vector(8 downto 0);
       buf_we_i     : in  std_logic;
       buf_wd_i     : in  std_logic_vector(7 downto 0);
-      buf_rd_o     : out std_logic_vector(7 downto 0)
+      buf_rd_o     : out std_logic_vector(7 downto 0);
+      -- the last copy of the answer's slot (its 512 bytes read in order) did not match the
+      -- checksum of what went into it: a pc_mgmt read asks for the sector again with
+      -- req_fresh_i (two clocks after the copy's last byte came out; cleared by the next copy
+      -- and the next answer)
+      buf_bad_o    : out std_logic
    );
 end entity disk_sd;
 
@@ -181,6 +198,7 @@ architecture synthesis of disk_sd is
    attribute async_reg : string;
    attribute async_reg of req_s : signal is "true";
    signal x_wr      : std_logic := '0';
+   signal x_fresh   : std_logic := '0';
    signal x_drv     : natural range 0 to C_UNITS - 1 := 0;
    signal x_shift   : natural range 0 to 15 := 0;
    signal x_lba     : unsigned(31 downto 0) := (others => '0');
@@ -212,6 +230,7 @@ architecture synthesis of disk_sd is
    signal c_cons    : unsigned(15 downto 0) := (others => '0');   -- the block the PC has now
    signal c_j       : unsigned(15 downto 0) := (others => '0');   -- the block it waits for
    signal a_slot    : std_logic_vector(4 downto 0) := (others => '0');  -- for pc_mgmt
+   signal a_fresh   : std_logic := '0';                           -- the answer's x_fresh
 
    -- the runner: a run through the engine (or one block out of the write buffer)
    type t_rstate is (R_IDLE, R_START, R_RUN, R_RETRY);
@@ -239,11 +258,50 @@ architecture synthesis of disk_sd is
    signal sd_blk    : std_logic;
    signal sd_rdwe   : std_logic;
 
-   -- the ring (QNICE side: the engine's read bytes) and the write buffer (the engine takes
-   -- its write bytes out of it)
+   -- the ring (QNICE side: the engine's read bytes, into the FIFO to main_clk) and the write
+   -- buffer (the engine takes its write bytes out of it)
    signal ring_a_addr : std_logic_vector(13 downto 0);
    signal ring_a_we   : std_logic;
-   signal ring_b_addr : std_logic_vector(13 downto 0);
+   signal ring_w_din  : std_logic_vector(21 downto 0);
+   signal ring_w_dout : std_logic_vector(21 downto 0);
+   signal ring_w_empty : std_logic;
+   signal ring_w_we   : std_logic;                                -- main clock
+   signal ring_w_addr : std_logic_vector(12 downto 0);            -- in the slot's half
+   signal ring_we_e   : std_logic;                                -- the even slots
+   signal ring_we_o   : std_logic;                                -- the odd slots
+   signal ring_r_addr : std_logic_vector(12 downto 0);
+   signal ring_q_e    : std_logic_vector(7 downto 0);
+   signal ring_q_o    : std_logic_vector(7 downto 0);
+   signal ring_q      : std_logic_vector(7 downto 0);
+   signal buf_q       : std_logic_vector(7 downto 0);             -- (with G_FAULT's bit)
+
+   -- the ring's checksums (main clock): each block's as the engine's bytes go in, kept by slot,
+   -- and each copy's as pc_mgmt reads the answer's slot; s = (s rotated left by 1) + byte
+   constant C_FAULT_N : natural := maximum(G_FAULT, 1) - 1;
+   type t_sums is array (0 to C_RING - 1) of unsigned(15 downto 0);
+   signal w_sums    : t_sums := (others => (others => '0'));
+   signal w_sum     : unsigned(15 downto 0) := (others => '0');
+   signal done_m    : std_logic_vector(2 downto 0) := (others => '0');
+   signal k_a1      : std_logic_vector(8 downto 0) := (others => '0');  -- the RAM's address a
+   signal k_a2      : std_logic_vector(8 downto 0) := (others => '0');  -- clock ago, two
+   signal k_slot    : std_logic_vector(4 downto 0) := (others => '0');
+   signal k_run     : std_logic := '0';                           -- a copy in order so far
+   signal k_wr      : std_logic := '0';                           -- a write-buffer fill
+   signal k_next    : unsigned(8 downto 0) := (others => '0');
+   signal k_sum     : unsigned(15 downto 0) := (others => '0');
+   signal k_want    : unsigned(15 downto 0) := (others => '0');
+   signal k_cmp     : std_logic := '0';
+   signal k_bad     : std_logic := '0';
+   signal k_wasbad  : std_logic := '0';                           -- since the answer
+   signal k_fault   : std_logic := '0';
+   signal k_fcnt    : natural range 0 to C_FAULT_N := 0;
+   signal ck_good   : unsigned(15 downto 0) := (others => '0');
+   signal ck_bad    : unsigned(15 downto 0) := (others => '0');
+   signal ck_fixed  : unsigned(15 downto 0) := (others => '0');
+   signal ck_fresh  : unsigned(15 downto 0) := (others => '0');
+   signal ck_slot   : std_logic_vector(4 downto 0) := (others => '0');
+   signal ck_want   : unsigned(15 downto 0) := (others => '0');
+   signal ck_got    : unsigned(15 downto 0) := (others => '0');
    signal buf_a_q    : std_logic_vector(7 downto 0);
 
 begin
@@ -333,6 +391,13 @@ begin
                when 6      => qnice_data_o <= x"00" & cyl(v_d);
                when 7      => qnice_data_o <= x"00" & spt(v_d);
                when 8      => qnice_data_o <= "00000000000000" & heads(v_d);
+               when 9      => qnice_data_o <= std_logic_vector(ck_good);
+               when 10     => qnice_data_o <= std_logic_vector(ck_bad);
+               when 11     => qnice_data_o <= std_logic_vector(ck_fixed);
+               when 12     => qnice_data_o <= "00000000000" & ck_slot;
+               when 13     => qnice_data_o <= std_logic_vector(ck_want);
+               when 14     => qnice_data_o <= std_logic_vector(ck_got);
+               when 15     => qnice_data_o <= std_logic_vector(ck_fresh);
                when others => null;
             end case;
          end if;
@@ -422,35 +487,239 @@ begin
    end process p_c2q;
 
    -- the ring: the engine's read bytes into the run block's slot; pc_mgmt reads the answer's
-   -- slot (a_slot is stable from before the answer until the next request)
+   -- slot (a_slot, its address and its half, is stable from before the answer until the next
+   -- request)
    ring_a_we   <= sd_rdwe when rs = R_RUN and r_wr = '0' else '0';
    ring_a_addr <= std_logic_vector(t_start(4 downto 0) + unsigned(sd_q2c_i(Q2C_RDBLK'low + 4 downto Q2C_RDBLK'low))) &
                   sd_q2c_i(Q2C_RDIDX);
-   ring_b_addr <= a_slot & buf_addr_i;
+
+   -- Both ports of the ring run on main_clk: the engine's bytes (address and data) cross through
+   -- a FIFO. Its few clocks of delay do not reach the answer: that comes after a block's last
+   -- byte (the CRC is in between), and pc_mgmt reads that byte last, 20 us into its copy.
+   --
+   -- The ring is two halves, the even slots and the odd slots, each its own block RAMs. A request
+   -- starts pc_mgmt's copy of slot j and the engine's next block, into slot j - 1, together and
+   -- at nearly the same pace: the two ports work on neighbouring slots at about the same offset.
+   -- In one block RAM that now and then flipped a bit of the byte written or read there, near
+   -- the end of the sector, with the write port on the QNICE clock and on main_clk alike, and
+   -- more or less often by the block RAM's site (PIOTEST, R6). Split by parity, the two
+   -- neighbouring slots are in different block RAMs.
+   ring_w_din  <= ring_a_addr & sd_q2c_i(Q2C_RDDATA);
+   ring_w_we   <= not ring_w_empty;
+   ring_w_addr <= ring_w_dout(21 downto 18) & ring_w_dout(16 downto 8);
+   ring_we_e   <= ring_w_we and not ring_w_dout(17);
+   ring_we_o   <= ring_w_we and ring_w_dout(17);
+   ring_r_addr <= a_slot(4 downto 1) & buf_addr_i;
+   buf_q       <= ring_q xor x"08" when k_fault = '1' and k_a1 = "111111111" else ring_q;
+   buf_rd_o    <= buf_q;
+   buf_bad_o   <= k_bad;
+
+   -- The checksums: a copy is pc_mgmt's reads of offsets 0 to 511 in order after an answer
+   -- (one made again from 0 is checked again), with no write into the write buffer meanwhile
+   -- (a sector to write goes in at the same addresses). Its sum against the slot's block's
+   -- gives buf_bad_o, and the counts QNICE reads.
+   p_check : process (main_clk_i)
+      variable v_off : std_logic_vector(8 downto 0);
+      variable v_sum : unsigned(15 downto 0);
+   begin
+      if rising_edge(main_clk_i) then
+         v_off := ring_w_dout(16 downto 8);
+         if ring_w_we = '1' then
+            if v_off = "000000000" then
+               v_sum := (others => '0');
+            else
+               v_sum := w_sum;
+            end if;
+            v_sum := rotate_left(v_sum, 1) + unsigned(ring_w_dout(7 downto 0));
+            w_sum <= v_sum;
+            if v_off = "111111111" then
+               w_sums(to_integer(unsigned(ring_w_dout(21 downto 17)))) <= v_sum;
+            end if;
+         end if;
+
+         done_m <= done_m(1 downto 0) & done;
+         k_a1   <= buf_addr_i;
+         k_a2   <= k_a1;
+         k_cmp  <= '0';
+         if buf_we_i = '1' then
+            k_wr <= '1';
+         end if;
+         if done_m(2) /= done_m(1) then
+            -- an answer: a_slot and a_fresh are stable from before it (a fresh one is the same
+            -- sector again: a copy that matches now counts as fixed)
+            k_slot   <= a_slot;
+            k_run    <= '0';
+            k_bad    <= '0';
+            if a_fresh = '1' then
+               ck_fresh <= ck_fresh + 1;
+            else
+               k_wasbad <= '0';
+            end if;
+            if G_FAULT > 0 and k_fcnt = C_FAULT_N then
+               k_fault <= '1';
+               k_fcnt  <= 0;
+            elsif G_FAULT > 0 then
+               k_fcnt  <= k_fcnt + 1;
+            end if;
+         elsif k_a1 /= k_a2 then
+            if k_a1 = "000000000" then
+               k_run  <= '1';
+               k_wr   <= buf_we_i;
+               k_next <= to_unsigned(1, 9);
+               k_sum  <= resize(unsigned(buf_q), 16);
+            elsif k_run = '1' and unsigned(k_a1) = k_next then
+               k_sum  <= rotate_left(k_sum, 1) + unsigned(buf_q);
+               k_next <= k_next + 1;
+               if k_next = 511 then
+                  k_run   <= '0';
+                  k_cmp   <= not k_wr;
+                  k_want  <= w_sums(to_integer(unsigned(k_slot)));
+                  k_fault <= '0';
+               end if;
+            else
+               k_run <= '0';
+            end if;
+         end if;
+         if k_cmp = '1' then
+            if k_sum = k_want then
+               k_bad   <= '0';
+               ck_good <= ck_good + 1;
+               if k_wasbad = '1' then
+                  ck_fixed <= ck_fixed + 1;
+               end if;
+            else
+               k_bad    <= '1';
+               k_wasbad <= '1';
+               ck_bad   <= ck_bad + 1;
+               ck_slot  <= k_slot;
+               ck_want  <= k_want;
+               ck_got   <= k_sum;
+            end if;
+         end if;
+      end if;
+   end process p_check;
+
+   i_ring_fifo : xpm_fifo_async
+      generic map (
+         FIFO_MEMORY_TYPE    => "distributed",
+         FIFO_WRITE_DEPTH    => 16,
+         WRITE_DATA_WIDTH    => 22,
+         READ_DATA_WIDTH     => 22,
+         READ_MODE           => "fwft",
+         FIFO_READ_LATENCY   => 0,
+         CDC_SYNC_STAGES     => 2,
+         RELATED_CLOCKS      => 0,
+         USE_ADV_FEATURES    => "0000",
+         ECC_MODE            => "no_ecc",
+         DOUT_RESET_VALUE    => "0",
+         FULL_RESET_VALUE    => 0,
+         PROG_EMPTY_THRESH   => 5,
+         PROG_FULL_THRESH    => 11,
+         RD_DATA_COUNT_WIDTH => 5,
+         WR_DATA_COUNT_WIDTH => 5,
+         WAKEUP_TIME         => 0,
+         SIM_ASSERT_CHK      => 0
+      )
+      port map (
+         sleep         => '0',
+         rst           => qnice_rst_i,
+         wr_clk        => qnice_clk_i,
+         wr_en         => ring_a_we,
+         din           => ring_w_din,
+         full          => open,
+         prog_full     => open,
+         wr_data_count => open,
+         overflow      => open,
+         wr_rst_busy   => open,
+         almost_full   => open,
+         wr_ack        => open,
+         rd_clk        => main_clk_i,
+         rd_en         => ring_w_we,
+         dout          => ring_w_dout,
+         empty         => ring_w_empty,
+         prog_empty    => open,
+         rd_data_count => open,
+         underflow     => open,
+         rd_rst_busy   => open,
+         almost_empty  => open,
+         data_valid    => open,
+         injectsbiterr => '0',
+         injectdbiterr => '0',
+         sbiterr       => open,
+         dbiterr       => open
+      ); -- i_ring_fifo
 
    -- (tdp_ram itself, not M2M's dualport_2clk_ram wrapper: that one passes the clock through an
    -- expression and the address through a process, a delta cycle each, which in simulation makes
    -- the RAM see a new write enable with the previous address)
-   i_ring : entity work.tdp_ram
+   -- G_LUTRAM = 0: the ring's two halves in block RAM
+   g_ring_block : if G_LUTRAM = 0 generate
+
+   ring_q <= ring_q_o when a_slot(0) = '1' else ring_q_e;
+
+   i_ring_e : entity work.tdp_ram
       generic map (
-         ADDR_WIDTH => 14,
+         ADDR_WIDTH => 13,
          DATA_WIDTH => 8
       )
       port map (
-         clock_a   => qnice_clk_i,
-         address_a => ring_a_addr,
-         data_a    => sd_q2c_i(Q2C_RDDATA),
-         wren_a    => ring_a_we,
+         clock_a   => main_clk_i,
+         address_a => ring_w_addr,
+         data_a    => ring_w_dout(7 downto 0),
+         wren_a    => ring_we_e,
          q_a       => open,
          clock_b   => main_clk_i,
-         address_b => ring_b_addr,
+         address_b => ring_r_addr,
          data_b    => x"00",
          wren_b    => '0',
-         q_b       => buf_rd_o
-      ); -- i_ring
+         q_b       => ring_q_e
+      ); -- i_ring_e
+
+   i_ring_o : entity work.tdp_ram
+      generic map (
+         ADDR_WIDTH => 13,
+         DATA_WIDTH => 8
+      )
+      port map (
+         clock_a   => main_clk_i,
+         address_a => ring_w_addr,
+         data_a    => ring_w_dout(7 downto 0),
+         wren_a    => ring_we_o,
+         q_a       => open,
+         clock_b   => main_clk_i,
+         address_b => ring_r_addr,
+         data_b    => x"00",
+         wren_b    => '0',
+         q_b       => ring_q_o
+      ); -- i_ring_o
+
+   end generate g_ring_block;
+
+   -- G_LUTRAM = 1: the ring in LUT RAM (distributed RAM in the slices, no block RAM at all),
+   -- one memory, read like the block RAM (the data one clock after the address). In block RAM
+   -- the ring lost bits now and then, near the end of a sector, some 200 to 1500 per GB by its
+   -- site; in LUT RAM none in 1.7 GB, at the same supply and temperature (PIOTEST, the
+   -- checksums, the XADC; R6)
+   g_ring_dist : if G_LUTRAM /= 0 generate
+      type t_ring is array (0 to 2 ** 14 - 1) of std_logic_vector(7 downto 0);
+      signal ring : t_ring;
+      attribute ram_style : string;
+      attribute ram_style of ring : signal is "distributed";
+   begin
+      p_ring : process (main_clk_i)
+      begin
+         if rising_edge(main_clk_i) then
+            if ring_w_we = '1' then
+               ring(to_integer(unsigned(ring_w_dout(21 downto 8)))) <= ring_w_dout(7 downto 0);
+            end if;
+            ring_q <= ring(to_integer(unsigned(std_logic_vector'(a_slot & buf_addr_i))));
+         end if;
+      end process p_ring;
+   end generate g_ring_dist;
 
    -- the write buffer: pc_mgmt's bytes in, the engine's write bytes out (the byte one clock
    -- after it named it)
+   g_buf_block : if G_LUTRAM = 0 generate
    i_buf : entity work.tdp_ram
       generic map (
          ADDR_WIDTH => 9,
@@ -468,6 +737,32 @@ begin
          wren_b    => buf_we_i,
          q_b       => open
       ); -- i_buf
+   end generate g_buf_block;
+
+   -- G_LUTRAM = 1: the write buffer in LUT RAM too (written on main_clk, read on the QNICE
+   -- clock, the byte one clock after the engine named it)
+   g_buf_dist : if G_LUTRAM /= 0 generate
+      type t_wbuf is array (0 to 511) of std_logic_vector(7 downto 0);
+      signal wbuf : t_wbuf;
+      attribute ram_style : string;
+      attribute ram_style of wbuf : signal is "distributed";
+   begin
+      p_wbuf_w : process (main_clk_i)
+      begin
+         if rising_edge(main_clk_i) then
+            if buf_we_i = '1' then
+               wbuf(to_integer(unsigned(buf_addr_i))) <= buf_wd_i;
+            end if;
+         end if;
+      end process p_wbuf_w;
+
+      p_wbuf_r : process (qnice_clk_i)
+      begin
+         if rising_edge(qnice_clk_i) then
+            buf_a_q <= wbuf(to_integer(unsigned(sd_q2c_i(Q2C_WRIDX))));
+         end if;
+      end process p_wbuf_r;
+   end generate g_buf_dist;
 
    ---------------------------------------------------------------------------------------------
    -- A request: answered from the run in the ring, or the run ends, the map is looked up and a
@@ -507,6 +802,8 @@ begin
             when F_IDLE =>
                if req_s(2) /= req_s(1) then
                   x_wr    <= req_wr_i;
+                  x_fresh <= req_fresh_i;
+                  a_fresh <= '0';                     -- (only a read out of the ring sets it)
                   if unsigned(req_unit_i) < C_UNITS then
                      x_drv <= to_integer(unsigned(req_unit_i));
                   else
@@ -529,8 +826,8 @@ begin
                if mode(x_drv)(0) = '0' or x_lba >= sects(x_drv) or
                   (x_wr = '1' and mode(x_drv)(2) = '1') then
                   st <= F_FAIL;
-               elsif x_wr = '0' and c_valid = '1' and c_drv = x_drv and c_gen = gen(x_drv) and
-                     x_lba >= c_lba and v_j < resize(c_n, 32) and
+               elsif x_wr = '0' and x_fresh = '0' and c_valid = '1' and c_drv = x_drv and
+                     c_gen = gen(x_drv) and x_lba >= c_lba and v_j < resize(c_n, 32) and
                      resize(c_got, 32) <= v_j + (C_RING - 1) and
                      (rs /= R_IDLE or r_go = '1' or v_j < resize(c_got, 32)) then
                   c_j    <= v_j(15 downto 0);
@@ -640,7 +937,8 @@ begin
 
             when F_WAIT_BLK =>
                if c_got > c_j then
-                  a_slot <= std_logic_vector(c_j(4 downto 0));
+                  a_slot  <= std_logic_vector(c_j(4 downto 0));
+                  a_fresh <= x_fresh;
                   st     <= F_DONE;
                elsif rs = R_IDLE and r_go = '0' then
                   c_valid <= '0';                    -- the run ended without it: failed

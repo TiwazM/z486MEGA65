@@ -104,8 +104,16 @@ boots from it.
   drivers' commands (reset, identify, sample rate, status, ...) like a
   standard PS/2 mouse, also when nothing is plugged in: the BIOS's mouse
   functions, which CuteMouse calls, wait for good for a mouse that does not
-  answer. `CORE/sim/run_ps2.sh` simulates the keyboard and the mouse against
-  z486's 8042 (`ps2.v`), and the PIC patch below (`tb_pic.sv`).
+  answer. After any byte from the PC it sends no packets for 300 ms (the
+  motion waits): the Bochs BIOS's mouse functions take the byte after their
+  command as its answer and leave the mouse port off when it was no FA, so
+  a packet in the middle of CuteMouse's set-up (F4, then F3 and its byte)
+  left the mouse dead, or its packets read a byte off (the pointer jumping
+  from edge to edge). The 7th Guest hit it at its start, in native mode
+  nearly every time; the debug log showed it. `CORE/sim/run_ps2.sh`
+  simulates the keyboard and the mouse against z486's 8042 (`ps2.v`;
+  `tb_pc_mouse` has a packet in the middle of F3, which fails without the
+  quiet time), and the PIC patch below (`tb_pic.sv`).
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
@@ -118,8 +126,10 @@ boots from it.
   `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
   image file through the SD host controller's engine port (Megamiga's
   sd-host), with the file's extent map from the firmware (fragmented files are
-  fine); reads come in runs of one SD command each through a 32-sector ring.
-  See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against z486's
+  fine); reads come in runs of one SD command each through a 32-sector ring
+  in LUT RAM, every copy out of it checked against the checksum of what went
+  in (a sector that does not match comes again, fresh from the card); the
+  write buffer is LUT RAM too. See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against z486's
   `floppy.v`, `ide.v` and `rtc.v` (`tb_cdrom.sv`: both IDE channels, the
   packets a DOS CD-ROM driver sends).
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
@@ -169,7 +179,9 @@ boots from it.
   answered from the cache; stores update cached lines; floppy and Sound
   Blaster DMA (the SDRAM's second port) drop their lines before the CPU's
   next lookup. `tools/qmon.py l2` shows the fills from the cache and from the
-  SDRAM, `l2 off` / `l2 on` switch it for comparisons. `CORE/sim/run_l2.sh`
+  SDRAM, `l2 off` / `l2 on` switch it for comparisons (`l1 off` / `l1 on`
+  z486's own L1 caches: off, every access goes uncached; after on, reset the
+  PC). `CORE/sim/run_l2.sh`
   checks it against a memory model with DMA writes and switching. Measured
   (2026-10-31, the same build): Doom's `-timedemo demo3` 35.7 fps without,
   36.9 fps with it (+3.5%), 76% of the line fills from the cache: Doom's hot
@@ -180,13 +192,17 @@ boots from it.
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
   of the PC's state (boot stage, POST code, CS:EIP, VGA frame count, the L2's
   counters) and a 4096-entry log of the BIOS's debug port 0x402, z486's
-  stall watchdog, POST code changes and the PS/2 keyboard's bytes both ways;
+  stall watchdog, POST code changes and the PS/2 keyboard's and mouse's bytes
+  both ways (`qmon.py status`: `>kbd`/`>mou` to the device, `<` from it);
   `mega65.vhd` has the map. `tools/qmon.py` reads them over the JTAG
   adapter's serial port (115200 baud) while the PC and the menu run: the
   firmware answers serial commands in the Shell's background (`R`/`W` QNICE
   memory, `D`/`P` a device's registers, as MegaMac does), no debug mode
   needed. `qmon.py status` (`disks` the mounted images, the sector counts and
-  times; `boot` and `sweep` reset the PC at other SDRAM clock phases).
+  times, the ring's checksums; `boot` and `sweep` reset the PC at other SDRAM
+  clock phases; `xadc` the FPGA's temperature, VCCINT, VCCAUX and VCCBRAM,
+  now and their lowest and highest since the core was loaded,
+  `xadc_mon.vhd`).
   `qmon.py ide [N]` prints the last N of 512 events of the IDE trace
   (`pc_mgmt.vhd`, `pc_cdrom.vhd`; window 2 of `C_DEV_PC_CTL`): every command
   of both channels with its task file, every status the controllers set,
@@ -275,6 +291,38 @@ Checked on the board with MS-DOS 6.22 (`fc /b` of a file against itself and
 against fresh copies, 25,151 sectors read and 2,325 written): no wrong data,
 no failed or repeated transfers.
 
+The ring lost bits in block RAM. The 7th Guest's videos broke up, it hung
+now and then, and DOS said "Invalid COMMAND.COM" on its exit: now and then a
+bit of a sector read came out wrong, near the end of the sector, in the
+data's lower bits, a 1 more often than a 0. PIOTEST (below) found 1 to 1500
+wrong sectors per GB, by where Vivado had put the ring's block RAMs (much the
+most with one on RAMB36_X5Y37, which `CORE-impl.xdc` now leaves empty); the
+ring's write port on the QNICE clock or on the PC's, its slots split over
+two block RAMs by parity, did not help. A checksum per sector, as the engine
+writes it into the ring and as `pc_mgmt` or `pc_cdrom` copies it out, caught
+every one: the bits were stored wrong (copying the slot again never helped),
+and a sector read again from the card came out right (1,390 of 1,390 in
+2 GB). With the ring in LUT RAM, none in 1.7 GB, at the same supply and
+temperature (the XADC: VCCINT and VCCBRAM within 0.01 V of 1.0 V, 52-59
+degrees C). So the ring and the write buffer are LUT RAM (`disk_sd`'s
+`G_LUTRAM`), and the checksums stay: a copy that does not match is read again
+fresh from the card, twice at most, for the hard disk, the CD-ROM (its
+2048-byte block again, as `ide.v`'s buffer only rewinds to its start) and
+the floppies (checked before `floppy.v`'s FIFO gets the sector).
+`qmon.py disks` counts them: copies that matched, copies that did not,
+sectors read again fresh and how many of those came right.
+
+`tools/dos/` has the test programs, on `tools/dos/build/z486test.iso` for
+the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
+- `PIOTEST.COM`: from C:, reads `PIOPAT.BIN` (4 MB, it writes it when it is
+  missing) straight from the IDE ports, past the BIOS and DOS, with REP
+  INSW, single INs, REP INSD and INs compared in registers (nothing stored),
+  pass after pass until a key. Each sector's bytes are its own: a wrong byte
+  says whether it belongs to another sector (and which) or has bits flipped.
+- `VTEST.COM`: the SVGA video memory through VESA's bank window, conventional
+  RAM, XMS and reads through DOS (`CDPAT.BIN` on the CD; `VTEST W` writes it),
+  with the timer at 10 kHz and Sound Blaster DMA running, as during a game.
+
 `tools/floppy-packer.html`, a page that runs in any browser without a server,
 packs files into a FAT12 floppy image of any of the five sizes, with DOS's
 8.3 file names checked.
@@ -293,7 +341,7 @@ printed on the MEGA65's keycaps:
 | F1 F3 F5 F7 F9 F11 | the same; with Shift F2 F4 F6 F8 F10 F12, as on the keycaps (the PC sees no Shift while the key is down) |
 | cursor keys | arrows; with MEGA, up/down = Page Up/Down, left/right = Home/End |
 | CTRL, ALT, TAB, both shifts | Ctrl, Alt, Tab, Shift |
-| CAPS LOCK | Caps Lock (it latches on the MEGA65: each change taps the PC's) |
+| CAPS LOCK | the turbo switch: down (it latches) = the CPU at 33 MHz, up = full speed (64 MHz); z486's throttle, memory and devices keep full speed. The PC's Caps Lock is MEGA+TAB (SHIFT LOCK holds Shift: the MEGA65 wires it to the left Shift) |
 | NO SCROLL | Scroll Lock |
 | symbol keys and shifted digits | as on their keycaps: `:` (Shift `[`), `;` (Shift `]`), `@`, `*`, `+`, `-`, `=`, Shift+2 `"`, Shift+6 `&`, Shift+7 `'`, Shift+8 `(`, Shift+9 `)`, ... (the PC sees Shift pressed or released as each one needs) |
 | PC symbols without a keycap | `£` `\` (Shift `|`), arrow-up `^` (Shift `~`), arrow-left `` ` ``, Shift+`-` `_`, Shift+`@` `{`, Shift+`*` `}` |
@@ -334,7 +382,8 @@ another R6 can be measured the same way.
 - `tools/` - `build_r6.sh` (the core's build in Docker), `gen_xpr.py` (the
   project), `z486_sources.py` (the source list and the Vivado 2022.2 copies),
   `qmon.py` (the debug registers through the M2M debug monitor),
-  `floppy-packer.html` (files into a floppy image, in a browser)
+  `floppy-packer.html` (files into a floppy image, in a browser), `dos/` (the
+  DOS test programs, PIOTEST and VTEST)
 
 Clone with `git clone --recursive`, or run `git submodule update --init` after
 cloning (z486_MiSTer's own submodules are not needed).

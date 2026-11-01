@@ -17,7 +17,17 @@
 //
 // Licensed under GPL v3
 
-module tb_cdrom;
+module tb_cdrom #(
+    // the engine model's pace: clocks per read byte, and clocks between a block's last byte
+    // and its e_blk (the real engine: 2 and ~34, its CRC; 1 and 0: as fast as it goes)
+    parameter int E_PER = 1,
+    parameter int E_CRC = 0,
+    // disk_sd's G_LUTRAM: 1, the ring and the write buffer in LUT RAM
+    parameter int LUTRAM = 0,
+    // disk_sd's G_FAULT: every FAULT-th answer's first copy reads its last byte wrong
+    // (pc_cdrom must make the block again, fresh from the card; the SD read counts then differ)
+    parameter int FAULT = 0
+);
     reg clk = 0;
     always #7.8125 clk = ~clk;              // the PC's 64 MHz
     reg qclk = 0;
@@ -106,6 +116,7 @@ module tb_cdrom;
     wire [8:0] buf_addr;
     wire buf_we;
     wire [7:0] buf_wd, buf_rd;
+    wire buf_bad, sd_req_fresh;
     wire [159:0] mnt;
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
 
@@ -116,8 +127,8 @@ module tb_cdrom;
         .fdd_request_i(2'b00), .ide_request_i(ide0_request), .ide1_request_i(ide1_request),
         .rtc_i(rtc_word), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
-        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_done_i(sd_done), .sd_err_i(sd_err),
-        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd)
+        .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh), .sd_done_i(sd_done), .sd_err_i(sd_err),
+        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
     );
 
     reg [27:0] q_addr = 0;
@@ -127,15 +138,15 @@ module tb_cdrom;
     wire q_wait;
     wire [63:0] q2c;
     wire [75:0] c2q;
-    disk_sd #(.G_QNICE_HZ(50000000)) sd (
+    disk_sd #(.G_QNICE_HZ(50000000), .G_LUTRAM(LUTRAM), .G_FAULT(FAULT)) sd (
         .qnice_clk_i(qclk), .qnice_rst_i(qrst),
         .qnice_addr_i(q_addr), .qnice_data_i(q_wdata), .qnice_ce_i(q_ce), .qnice_unit_i(2'b00), .qnice_we_i(q_we),
         .qnice_data_o(q_rdata), .qnice_wait_o(q_wait),
         .sd_q2c_i(q2c), .sd_c2q_o(c2q), .mnt_o(mnt),
         .req_i(sd_req), .req_wr_i(sd_req_wr), .req_unit_i(sd_req_unit), .req_lba_i(sd_req_lba),
-        .req_cnt_i(sd_req_cnt), .done_o(sd_done), .done_err_o(sd_err),
+        .req_cnt_i(sd_req_cnt), .req_fresh_i(sd_req_fresh), .done_o(sd_done), .done_err_o(sd_err),
         .main_clk_i(clk), .buf_addr_i(buf_addr), .buf_we_i(buf_we), .buf_wd_i(buf_wd),
-        .buf_rd_o(buf_rd)
+        .buf_rd_o(buf_rd), .buf_bad_o(buf_bad)
     );
 
     // ------------------------------------------------------------------------------------------
@@ -193,8 +204,10 @@ module tb_cdrom;
                     for (i = 0; i < 512; i++) begin
                         e_rdwe <= 1; e_rdidx <= i; e_rddata <= sdbyte(b + k, i);
                         @(posedge qclk);
+                        if (E_PER > 1) begin e_rdwe <= 0; repeat (E_PER - 1) @(posedge qclk); end
                     end
                     e_rdwe <= 0;
+                    repeat (E_CRC) @(posedge qclk);
                     e_blk <= 1; @(posedge qclk); e_blk <= 0;
                     eng_blocks++;
                     if (c2q[2]) stop = 1;
@@ -488,14 +501,14 @@ module tb_cdrom;
         // READ (10): across the extents (99 | 100), 2048 bytes per block
         r0 = eng_reads;
         cd_read(0, 97, 6, 16'hfffe);
-        check(blocks == 6 && eng_reads - r0 == 2, $sformatf("  %0d blocks, %0d SD reads", blocks, eng_reads - r0));
+        check(blocks == 6 && (FAULT != 0 || eng_reads - r0 == 2), $sformatf("  %0d blocks, %0d SD reads", blocks, eng_reads - r0));
         // a byte count limit of 512: four blocks a sector
         cd_read(0, 5000, 2, 16'h0200);
         check(blocks == 8, $sformatf("  %0d blocks", blocks));
         // READ (12) of 40 sectors: one SD transfer (160 of the image's sectors)
         r0 = eng_reads;
         cd_read(1, 20000, 40, 16'hfffe);
-        check(eng_reads - r0 == 1, $sformatf("  %0d SD reads", eng_reads - r0));
+        check(FAULT != 0 || eng_reads - r0 == 1, $sformatf("  %0d SD reads", eng_reads - r0));
         // past the end: ILLEGAL REQUEST, LBA out of range
         set_cdb(8'h28, 0, 0, 0, 8'h75, 8'h2f, 0, 0, 2, 0, 0, 0);   // 29999, 2 sectors
         packet(16'hfffe);
