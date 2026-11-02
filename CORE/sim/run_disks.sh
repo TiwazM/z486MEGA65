@@ -44,7 +44,7 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
               /core/CORE/sim/tb_floppy.sv /core/CORE/sim/tb_ide.sv /core/CORE/sim/tb_cdrom.sv &&
         xvhdl -2008 sdhost_pkg.vhd /core/M2M/vhdl/cdc_stable.vhd /core/M2M/vhdl/tdp_ram.vhd \
                     /core/M2M/vhdl/2port2clk_ram.vhd /core/M2M/vhdl/qnice_csr.vhd \
-                    /core/CORE/vhdl/pc_cdrom.vhd /core/CORE/vhdl/pc_mgmt.vhd /core/CORE/vhdl/disk_sd.vhd &&
+                    /core/CORE/vhdl/cd_audio.vhd /core/CORE/vhdl/pc_cdrom.vhd /core/CORE/vhdl/pc_mgmt.vhd /core/CORE/vhdl/disk_sd.vhd &&
         for tb in $tbs; do
             g=\"\"; [ \$tb != tb_floppy ] && g=\"$gen\"
             g=\"\$g $fault\"

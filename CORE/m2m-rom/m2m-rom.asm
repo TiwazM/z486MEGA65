@@ -151,8 +151,7 @@ DISK_PREP       INCRB
                 MOVE    0x01FF, R4              ; R4: the sector size - 1
                 CMP     3, @SP
                 RBRA    _DP_HDD, !Z
-                MOVE    0x07FF, R4              ; the CD-ROM: 2048-byte sectors
-                RBRA    _DP_WHOLE, 1
+                RBRA    _DP_CD, 1               ; the CD-ROM: cdimage.asm
 _DP_HDD         CMP     2, @SP
                 RBRA    _DP_FDD, !Z
 _DP_WHOLE       MOVE    R3, R1                  ; the hard disk, the CD-ROM: whole
@@ -214,6 +213,32 @@ _DP_FOUND       MOVE    M2M$RAMROM_DEV, R1
                 RBRA    _DP_FRAG, Z
                 MOVE    R9, R8                  ; another FAT32 error: its code
                 MOVE    ERR_DISK_FAT, R9
+                RBRA    _DP_RET, 1
+
+                ; the CD-ROM: away, then CD_PREP writes the track table and the
+                ; extent map of an ISO, a raw .bin or a .cue's files; R6:R5 =
+                ; the virtual image's sectors
+_DP_CD          MOVE    M2M$RAMROM_DEV, R1
+                MOVE    PC_DEV_DISK, @R1
+                MOVE    M2M$RAMROM_4KWIN, R1
+                MOVE    0, @R1
+                MOVE    0, @R7                  ; MODE: no image
+                MOVE    R0, R8
+                RSUB    CD_PREP_X, 1
+                MOVE    R9, R5
+                MOVE    R10, R6
+                MOVE    CD_ERRS, R1             ; its error: the message
+_DP_CDE         CMP     0, R8
+                RBRA    _DP_MAPOK, Z
+                CMP     0, @R1
+                RBRA    _DP_CDEX, Z             ; (the table's end: unknown)
+                CMP     @R1++, R8
+                RBRA    _DP_CDEM, Z
+                ADD     1, R1
+                RBRA    _DP_CDE, 1
+_DP_CDEM        MOVE    @R1, R9
+                RBRA    _DP_RET, 1
+_DP_CDEX        MOVE    ERR_DISK_FAT, R9
                 RBRA    _DP_RET, 1
 
                 ; 4. shift = log2(sectors per cluster), base, sectors, geometry,
@@ -290,9 +315,6 @@ _DP_OK          XOR     R8, R8
                 RBRA    _DP_RET, 1
 _DP_BADHD       MOVE    DISK_E_SIZE, R8
                 MOVE    ERR_HDD_SIZE, R9
-                CMP     3, @SP
-                RBRA    _DP_RET, !Z
-                MOVE    ERR_CD_SIZE, R9
                 RBRA    _DP_RET, 1
 _DP_BADSZ       MOVE    DISK_E_SIZE, R8
                 MOVE    ERR_FDD_SIZE, R9
@@ -319,13 +341,36 @@ ERR_FDD_SIZE    .ASCII_P "Not a floppy image: it\n"
                 .ASCII_W "must be 360K, 720K,\n1.2M, 1.44M or 2.88M.\n"
 ERR_HDD_SIZE    .ASCII_P "Not a disk image: its\n"
                 .ASCII_W "size must be whole\n512-byte sectors.\n"
-ERR_CD_SIZE     .ASCII_P "Not a CD image (ISO):\n"
-                .ASCII_W "its size must be whole\n2048-byte sectors.\n"
+ERR_CD_SIZE     .ASCII_P "Not a CD image: an ISO\n"
+                .ASCII_P "must be whole 2048-byte\n"
+                .ASCII_W "sectors, a BIN 2352.\n"
 ERR_DISK_FRAG   .ASCII_W "The image file has too\nmany fragments.\n"
 ERR_DISK_FAT    .ASCII_W "Cannot read the image\nfile (FAT32 error).\n"
+ERR_CUE         .ASCII_P "Cannot read the cue\n"
+                .ASCII_W "sheet (TRACK, INDEX).\n"
+ERR_CUE_FILE    .ASCII_P "A FILE of the cue sheet\n"
+                .ASCII_W "is not in its folder.\n"
+ERR_CUE_LONG    .ASCII_W "The cue sheet is too\nlong (16K at most).\n"
+ERR_CUE_WAVE    .ASCII_P "A WAVE file must be\n"
+                .ASCII_W "PCM, 16-bit stereo,\n44.1 kHz.\n"
+ERR_CUE_TYPE    .ASCII_P "MP3 and other compressed\n"
+                .ASCII_W "audio: convert it to\nBIN or WAVE.\n"
+; CD_PREP's errors (cdimage.asm, CDI_E_*) and their messages
+CD_ERRS         .DW     0x00F1, ERR_CD_SIZE
+                .DW     0x00F2, ERR_DISK_FRAG
+                .DW     0x00F3, ERR_CUE
+                .DW     0x00F4, ERR_CUE_FILE
+                .DW     0x00F5, ERR_DISK_FAT
+                .DW     0x00F6, ERR_CUE_LONG
+                .DW     0x00F7, ERR_CUE_WAVE
+                .DW     0x00F8, ERR_CUE_TYPE
+                .DW     0
 FDD_AUTO        .ASCII_W "/z486/floppy.img"
 HDD_AUTO        .ASCII_W "/z486/hdd.img"
-CD_AUTO         .ASCII_W "/z486/cdrom.iso"
+CD_AUTO         .ASCII_W "cdrom.cue"
+CD_AUTO_DIR     .ASCII_W "/z486"
+CD_AUTO_ROOT    .ASCII_W "/"
+CD_AUTO_ISO     .ASCII_W "/z486/cdrom.iso"
 
 ; DISK_AUTO: mount the file R10 (a path) from the device R8 as unit R9, if it
 ; is there; its menu line then shows its name. Output: C = 1: mounted.
@@ -547,11 +592,30 @@ _PCS_VGA        MOVE    R8, R7                  ; R7: device handle
                 MOVE    2, R9
                 MOVE    HDD_AUTO, R10
                 RSUB    DISK_AUTO, 1
+                MOVE    R7, R8                  ; the CD-ROM: /z486/cdrom.cue
+                MOVE    CD_AUTO_DIR, R9         ; from its folder (its FILEs are
+                XOR     R10, R10                ; relative to it), else
+                SYSCALL(f32_cd, 1)              ; /z486/cdrom.iso
+                CMP     0, R9
+                RBRA    _PCS_CDISO, !Z
                 MOVE    R7, R8
                 MOVE    3, R9
                 MOVE    CD_AUTO, R10
                 RSUB    DISK_AUTO, 1
-                MOVE    R7, R8
+                MOVE    0, R6                   ; R6: 1 = mounted
+                RBRA    _PCS_CDROOT, !C
+                MOVE    1, R6
+_PCS_CDROOT     MOVE    R7, R8                  ; back to the root
+                MOVE    CD_AUTO_ROOT, R9
+                XOR     R10, R10
+                SYSCALL(f32_cd, 1)
+                CMP     1, R6
+                RBRA    _PCS_FDD, Z
+_PCS_CDISO      MOVE    R7, R8
+                MOVE    3, R9
+                MOVE    CD_AUTO_ISO, R10
+                RSUB    DISK_AUTO, 1
+_PCS_FDD        MOVE    R7, R8
                 XOR     R9, R9
                 MOVE    FDD_AUTO, R10
                 RSUB    DISK_AUTO, 1
@@ -983,10 +1047,18 @@ _F32WX_SEC      RSUB    FAR_CALL, 1
                 .DW     BANK_F32W, _F32W_SEC
 _F32WX_SETDE    RSUB    FAR_CALL, 1
                 .DW     BANK_F32W, _F32W_SETDE
+
+; CD images (cdimage.asm: ISO, raw .bin, .cue + .bin/.wav) for DISK_PREP
+BANK_CDI        .EQU    2
+CD_PREP_X       RSUB    FAR_CALL, 1
+                .DW     BANK_CDI, CD_PREP
 #else
 #include "../../M2M/QNICE/monitor/fat32_wglue.asm"
 #include "../../M2M/QNICE/monitor/fat32_write.asm"
 #include "../../M2M/QNICE/monitor/fat32_wfile.asm"
+CD_PREP_X       RBRA    CD_PREP, 1
+#include "cdimage.asm"
+#include "cdimage_sel.asm"
 #endif
 
 ; ----------------------------------------------------------------------------
@@ -1004,6 +1076,11 @@ END_OF_ROM      .DW 0
                 .ORG    0x9000
                 .DW     0x4B01                  ; bank 1: BANK_F32F
 #include "../../M2M/QNICE/monitor/fat32_wfile.asm"
+
+                .ORG    0x9000
+                .DW     0x4B02                  ; bank 2: BANK_CDI
+#include "cdimage.asm"
+#include "cdimage_sel.asm"
 #endif
 
 ; ----------------------------------------------------------------------------
@@ -1024,6 +1101,9 @@ PC_ROM_FILE     .BLOCK  FAT32$FDH_STRUCT_SIZE
 
 ; DISK_AUTO_NAME's auto-mounted paths per unit (0: none), for DAN_FLUSH
 DAN_PEND        .BLOCK  4
+
+; CD_PREP's (cdimage.asm)
+#include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
 ; for this 39-line menu: 20 + 380 item characters + 1 + 5 x 39 (the line

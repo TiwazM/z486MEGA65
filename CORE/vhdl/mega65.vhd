@@ -371,6 +371,9 @@ signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
+signal main_joy_dig           : std_logic_vector(7 downto 0);    -- the game port's joystick
+signal main_joy_b2            : std_logic := '0';
+signal main_joy_b3            : std_logic := '0';
 signal main_ddram_rst         : std_logic;
 signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
 signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
@@ -403,6 +406,52 @@ signal main_dbg_cpu_eip       : std_logic_vector(31 downto 0);
 signal main_dbg_log_byte      : std_logic_vector(7 downto 0);
 signal main_dbg_log_we        : std_logic;
 signal main_dbg_mem_busy      : std_logic;
+signal main_dbg_io_rd         : std_logic_vector(23 downto 0);   -- the last I/O read: port, byte
+signal main_dbg_io_wr         : std_logic_vector(23 downto 0);   -- the last I/O write
+signal main_dbg_sb_req        : std_logic_vector(1 downto 0);    -- the SB's DMA requests
+signal main_dbg_sb_irq        : std_logic;
+signal main_dbg_io_rd_stb     : std_logic;                       -- main_dbg_io_rd/wr are new
+signal main_dbg_io_wr_stb     : std_logic;
+signal main_dbg_sb_cmd_wait   : std_logic;                       -- a DSP DMA command held back
+signal main_dbg_sb_smp_stb    : std_logic;                       -- a DSP DMA output sample:
+signal main_dbg_sb_smp_dif    : std_logic_vector(15 downto 0);   -- its jump from the last one
+signal main_dbg_sb_smp_pos    : std_logic_vector(15 downto 0);   -- its index in the block
+
+-- The DMA and Sound Blaster I/O trace (p_main_iot)
+signal main_iot_div           : unsigned(5 downto 0) := (others => '0');
+signal main_iot_tick          : std_logic := '0';                -- a microsecond
+signal main_iot_us            : unsigned(31 downto 0) := (others => '0');
+signal main_iot_cnt           : unsigned(15 downto 0) := (others => '0');  -- entries written
+signal main_iot_full          : std_logic := '0';                -- 1024 or more
+signal main_iot_run           : std_logic := '1';
+signal main_iot_we            : std_logic := '0';
+signal main_iot_entry         : std_logic_vector(63 downto 0) := (others => '0');
+signal main_iot_last_rd       : std_logic_vector(23 downto 0) := (others => '1');
+signal main_iot_irq_d         : std_logic := '0';
+signal main_iot_irq_p         : std_logic := '0';
+signal main_iot_req_d         : std_logic_vector(1 downto 0) := "00";
+signal main_iot_wait          : unsigned(15 downto 0) := (others => '0');  -- us the request is up
+signal main_iot_stall         : unsigned(15 downto 0) := (others => '0');
+signal main_iot_stall_req     : std_logic_vector(1 downto 0) := "00";
+signal main_iot_stall_p       : std_logic := '0';
+signal main_iot_freeze_p      : std_logic := '0';
+signal main_iot_imr           : std_logic_vector(7 downto 0) := x"FF";  -- the last write to 21
+signal main_iot_cwait         : unsigned(15 downto 0) := (others => '0');  -- us a command waits
+signal main_iot_cdef          : unsigned(15 downto 0) := (others => '0');
+signal main_iot_cdef_p        : std_logic := '0';
+signal main_iot_clong_p       : std_logic := '0';
+signal main_iot_jump_p        : std_logic := '0';
+signal main_iot_jump          : std_logic_vector(7 downto 0) := (others => '0');
+signal main_iot_jpos          : std_logic_vector(15 downto 0) := (others => '0');
+-- 7..0 changed: start again, 8: stop at a 1 ms wait, 9: stop now, 10: the Sound Blaster's
+-- stalled-transfer fix off (sound_dsp.v's dma_take_starved), 11: stop when full, 19..12: the
+-- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range)
+signal main_iot_arm           : std_logic_vector(19 downto 0);
+signal main_iot_arm_d         : std_logic_vector(19 downto 0) := (others => '0');
+signal main_iot_stat          : std_logic_vector(17 downto 0);
+signal qnice_iot_arm          : std_logic_vector(19 downto 0) := x"40000";
+signal qnice_iot_stat         : std_logic_vector(17 downto 0);
+signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
 signal main_dbg_tick          : unsigned(19 downto 0) := (others => '0');
 signal main_dbg_post_cnt      : unsigned(7 downto 0) := (others => '0');
@@ -417,6 +466,15 @@ signal qnice_dbg_snap         : std_logic_vector(255 downto 0);
 signal main_dbg_log_wr        : std_logic;
 signal main_dbg_log_entry     : std_logic_vector(11 downto 0);
 signal qnice_dbg_log_q        : std_logic_vector(11 downto 0);
+-- the CD-ROM drive (pc_cdrom.vhd): its track table (C_DEV_PC_CDTOC), its audio and status
+signal main_cd_tab_addr       : std_logic_vector(11 downto 0);
+signal main_cd_tab_q          : std_logic_vector(15 downto 0);
+signal main_cd_l              : std_logic_vector(15 downto 0);
+signal main_cd_r              : std_logic_vector(15 downto 0);
+signal main_cd_stat           : std_logic_vector(63 downto 0);
+signal qnice_cd_stat          : std_logic_vector(63 downto 0);
+signal qnice_cdtoc_q          : std_logic_vector(15 downto 0);
+signal qnice_cdtoc_we         : std_logic;
 -- the IDE trace (pc_mgmt.vhd, pc_cdrom.vhd): sequence number, milliseconds, the event
 signal main_tr_we             : std_logic;
 signal main_tr_d              : std_logic_vector(63 downto 0);
@@ -601,10 +659,12 @@ component z486_mega65 is
       ps2_mouse_data_in  : in    std_logic;
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
+      joy_dig            : in    std_logic_vector(7 downto 0);
       cpu_slow           : in    std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
       l2_enable          : in    std_logic;
       cache_off          : in    std_logic;
+      sb_take_starved    : in    std_logic;
       l2_hits            : out   std_logic_vector(31 downto 0);
       l2_misses          : out   std_logic_vector(31 downto 0);
       dbg_boot_stage     : out   std_logic_vector(2 downto 0);
@@ -619,7 +679,19 @@ component z486_mega65 is
       dbg_cpu_eip        : out   std_logic_vector(31 downto 0);
       dbg_log_byte       : out   std_logic_vector(7 downto 0);
       dbg_log_we         : out   std_logic;
-      dbg_mem_busy       : out   std_logic
+      dbg_mem_busy       : out   std_logic;
+      dbg_io_rd          : out   std_logic_vector(23 downto 0);
+      dbg_io_wr          : out   std_logic_vector(23 downto 0);
+      dbg_sb_req         : out   std_logic_vector(1 downto 0);
+      dbg_sb_irq         : out   std_logic;
+      dbg_io_rd_stb      : out   std_logic;
+      dbg_io_wr_stb      : out   std_logic;
+      dbg_sb_cmd_wait    : out   std_logic;
+      dbg_sb_smp_stb     : out   std_logic;
+      dbg_sb_smp_dif     : out   std_logic_vector(15 downto 0);
+      dbg_sb_smp_pos     : out   std_logic_vector(15 downto 0);
+      cd_l               : in    std_logic_vector(15 downto 0);
+      cd_r               : in    std_logic_vector(15 downto 0)
    );
 end component z486_mega65;
 
@@ -826,6 +898,7 @@ begin
          ps2_kbd_data_out   => main_kbd_host_dat,
          ps2_mouse_clk_in   => main_mouse_dev_clk,
          ps2_mouse_data_in  => main_mouse_dev_dat,
+         joy_dig            => main_joy_dig,
          cpu_slow           => main_cpu_slow,
          ps2_mouse_clk_out  => main_mouse_host_clk,
          ps2_mouse_data_out => main_mouse_host_dat,
@@ -833,6 +906,7 @@ begin
          ram_size           => C_RAM_SIZE,
          l2_enable          => main_l2_on(0),
          cache_off          => not main_l2_on(1),
+         sb_take_starved    => not main_iot_arm(10),
          l2_hits            => main_l2_hits,
          l2_misses          => main_l2_misses,
 
@@ -848,7 +922,19 @@ begin
          dbg_cpu_eip        => main_dbg_cpu_eip,
          dbg_log_byte       => main_dbg_log_byte,
          dbg_log_we         => main_dbg_log_we,
-         dbg_mem_busy       => main_dbg_mem_busy
+         dbg_mem_busy       => main_dbg_mem_busy,
+         dbg_io_rd          => main_dbg_io_rd,
+         dbg_io_wr          => main_dbg_io_wr,
+         dbg_sb_req         => main_dbg_sb_req,
+         dbg_sb_irq         => main_dbg_sb_irq,
+         dbg_io_rd_stb      => main_dbg_io_rd_stb,
+         dbg_io_wr_stb      => main_dbg_io_wr_stb,
+         dbg_sb_cmd_wait    => main_dbg_sb_cmd_wait,
+         dbg_sb_smp_stb     => main_dbg_sb_smp_stb,
+         dbg_sb_smp_dif     => main_dbg_sb_smp_dif,
+         dbg_sb_smp_pos     => main_dbg_sb_smp_pos,
+         cd_l               => main_cd_l,
+         cd_r               => main_cd_r
       ); -- i_z486
 
    -- The management bus: MiSTer's ARM side in hardware (CMOS, floppy, hard disk). Not reset
@@ -883,9 +969,52 @@ begin
          buf_wd_o          => main_disk_buf_wd,
          buf_rd_i          => main_disk_buf_rd,
          buf_bad_i         => main_disk_buf_bad,
+         cd_tab_addr_o     => main_cd_tab_addr,
+         cd_tab_q_i        => main_cd_tab_q,
+         cd_l_o            => main_cd_l,
+         cd_r_o            => main_cd_r,
+         cd_stb_o          => open,
+         cd_stat_o         => main_cd_stat,
          trace_we_o        => main_tr_we,
          trace_o           => main_tr_d
       ); -- i_pc_mgmt
+
+   -- The CD-ROM's track table (pc_cdrom.vhd has the layout): QNICE writes it (C_DEV_PC_CDTOC,
+   -- window 0; windows 1 to 3 are the firmware's scratch: a cue sheet's text and the extent
+   -- map's staging copy, as disk_sd's map is write-only for QNICE), the drive reads window 0
+   -- on the PC's clock (the data two clocks after the address)
+   qnice_cdtoc_we <= qnice_dev_ce_i and qnice_dev_we_i when qnice_dev_id_i = C_DEV_PC_CDTOC and
+                                                            qnice_dev_addr_i(27 downto 14) = "00000000000000"
+                     else '0';
+
+   i_cd_toc : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 14,
+         DATA_WIDTH => 16,
+         FALLING_B  => true                    -- QNICE's device convention
+      )
+      port map (
+         clock_a    => main_clk,
+         address_a  => "00" & main_cd_tab_addr,
+         q_a        => main_cd_tab_q,
+         clock_b    => qnice_clk_i,
+         address_b  => qnice_dev_addr_i(13 downto 0),
+         data_b     => qnice_dev_data_i,
+         wren_b     => qnice_cdtoc_we,
+         q_b        => qnice_cdtoc_q
+      ); -- i_cd_toc
+
+   i_cdc_cd_stat : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 64,
+         G_REGISTER_SRC => true
+      )
+      port map (
+         src_clk_i  => main_clk,
+         src_data_i => main_cd_stat,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_cd_stat
+      ); -- i_cdc_cd_stat
 
    -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
    -- is not: the BIOS resets it with command FF.
@@ -923,8 +1052,6 @@ begin
          ps2_dat_o  => main_kbd_dev_dat
       ); -- i_ps2_keyboard
 
-   -- A mouse on joystick port 1 as the PC's PS/2 mouse, always there (the BIOS waits for good
-   -- for a mouse that does not answer). Not reset with the PC either.
    -- The turbo switch: CAPS LOCK (it latches) down = the CPU at 33 MHz, up = full speed
    -- (z486's throttle, cpu_slow; the keyboard sends the PC nothing for it)
    p_main_turbo : process (main_clk)
@@ -936,6 +1063,33 @@ begin
       end if;
    end process p_main_turbo;
 
+   -- A joystick on port 2 as the PC's game port joystick (201h). Fire is button 1; a second
+   -- and third fire button on the paddle lines (POT X, POT Y; the C64 two- and three-button
+   -- joysticks connect them to +5 V) are buttons 2 and 3. A pressed one reads near 255 here
+   -- (M2M inverts the paddle values), an open line near 0. The directions and fire come
+   -- debounced, on main_clk, from M2M (the paddle values too).
+   p_main_joy : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         if unsigned(main_pot2_x_i) >= 192 then
+            main_joy_b2 <= '1';
+         elsif unsigned(main_pot2_x_i) < 64 then
+            main_joy_b2 <= '0';
+         end if;
+         if unsigned(main_pot2_y_i) >= 192 then
+            main_joy_b3 <= '1';
+         elsif unsigned(main_pot2_y_i) < 64 then
+            main_joy_b3 <= '0';
+         end if;
+      end if;
+   end process p_main_joy;
+
+   main_joy_dig <= '0' & main_joy_b3 & main_joy_b2 & not main_joy_2_fire_n_i &
+                   not main_joy_2_up_n_i & not main_joy_2_down_n_i &
+                   not main_joy_2_left_n_i & not main_joy_2_right_n_i;
+
+   -- A mouse on joystick port 1 as the PC's PS/2 mouse, always there (the BIOS waits for good
+   -- for a mouse that does not answer). Not reset with the PC either.
    i_pc_mouse : entity work.pc_mouse
       generic map (
          G_CLK_HZ        => CORE_CLK_SPEED
@@ -997,7 +1151,8 @@ begin
          end if;
          if main_dbg_tick = 0 then
             main_dbg_snap_cnt <= main_dbg_snap_cnt + 1;
-            main_dbg_snap <= x"000000000000000" & "00" & main_l2_on &
+            main_dbg_snap <= main_dbg_io_wr & main_dbg_io_rd & "0000" & main_dbg_sb_req & main_joy_dig &
+                             main_l2_on &
                              main_l2_misses & main_l2_hits &
                              std_logic_vector(main_dbg_snap_cnt) &
                              std_logic_vector(main_dbg_vs_cnt) &
@@ -1085,6 +1240,217 @@ begin
          address_b  => qnice_dev_addr_i(11 downto 3),
          q_b        => qnice_tr_q
       ); -- i_ide_trace
+
+   -- The DMA and Sound Blaster I/O trace: the last 1024 of these, each with the time in
+   -- microseconds (qmon.py iotrace):
+   --   kind 0  a write to the DMA controllers (00-0F, C0-DF), their page registers (81-8F),
+   --           the PICs (20/A0 but a plain end of interrupt and OCW3, which interrupt handlers
+   --           and the CD-ROM driver's polling write all the time; 21 when it changes the
+   --           mask), the 8042 (60, 64) or the Sound Blaster (224-22F, not its FM ports)
+   --   kind 1  a read of the DSP (22A, 22E, 22F), the mixer (225), the DMA status (08, D0)
+   --           or the 8042 (60, 64); a read that returns what the last one logged did is
+   --           left out (polling)
+   --   kind 2  the Sound Blaster's IRQ rises
+   --   kind 3  its DMA request waited 64 us or more before the DMA controller answered (bits
+   --           31..16 the microseconds, 7..0 which request: 1 8-bit, 2 16-bit)
+   --   kind 4  a request has waited 1 ms (the card has nothing to play); the trace stops
+   --           there when QNICE started it so, until QNICE starts it again
+   --   kind 5  a new DMA command the DSP held back for 64 us or more has started (bits 31..16
+   --           the microseconds; sound_dsp.v waits for the block in progress to end)
+   --   kind 6  a new DMA command has been held back for 1 ms
+   --   kind 7  a DMA output sample jumped from the one before (left channel) by the threshold
+   --           or more (main_iot_arm(19..12), in 256ths; bits 7..0 the jump in 256ths, 31..16
+   --           its index in the DSP's block: a late buffer half jumps at index 0)
+   -- QNICE can also stop it (main_iot_arm(9)), or start it to stop when full (main_iot_arm(11):
+   -- the first 1024 entries instead of the last).
+   -- Bits 63..32 the time, 31..16 the port, 15..13 the kind, 7..0 the byte.
+   p_main_iot : process (main_clk)
+      function wr_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      begin
+         return p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
+                (p(15 downto 4) = x"008" and p /= x"0080") or
+                p = x"0060" or p = x"0064" or
+                (p(15 downto 4) = x"022" and p(3 downto 2) /= "00" and p(3 downto 1) /= "100");
+      end function wr_ok;
+      function pic_ok (p : std_logic_vector(15 downto 0); v, imr : std_logic_vector(7 downto 0))
+         return boolean is
+      begin
+         return ((p = x"0020" or p = x"00A0") and v /= x"20" and v(4 downto 3) /= "01") or
+                (p = x"0021" and v /= imr);
+      end function pic_ok;
+      function rd_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      begin
+         return p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
+                p = x"00D0" or p = x"0060" or p = x"0064";
+      end function rd_ok;
+   begin
+      if rising_edge(main_clk) then
+         main_iot_tick <= '0';
+         main_iot_div  <= main_iot_div + 1;
+         if main_iot_div = 63 then                -- 64 MHz
+            main_iot_tick <= '1';
+            main_iot_us   <= main_iot_us + 1;
+         end if;
+
+         main_iot_irq_d <= main_dbg_sb_irq;
+         if main_dbg_sb_irq = '1' and main_iot_irq_d = '0' then
+            main_iot_irq_p <= '1';
+         end if;
+         main_iot_req_d <= main_dbg_sb_req;
+         if main_dbg_sb_req = "00" then
+            if main_iot_wait >= 64 then
+               main_iot_stall_p   <= '1';
+               main_iot_stall     <= main_iot_wait;
+               main_iot_stall_req <= main_iot_req_d;
+            end if;
+            main_iot_wait <= (others => '0');
+         elsif main_iot_tick = '1' and main_iot_wait /= x"FFFF" then
+            main_iot_wait <= main_iot_wait + 1;
+            if main_iot_wait = 999 then
+               main_iot_freeze_p <= '1';
+            end if;
+         end if;
+         if main_dbg_sb_cmd_wait = '0' then
+            if main_iot_cwait >= 64 then
+               main_iot_cdef_p <= '1';
+               main_iot_cdef   <= main_iot_cwait;
+            end if;
+            main_iot_cwait <= (others => '0');
+         elsif main_iot_tick = '1' and main_iot_cwait /= x"FFFF" then
+            main_iot_cwait <= main_iot_cwait + 1;
+            if main_iot_cwait = 999 then
+               main_iot_clong_p <= '1';
+            end if;
+         end if;
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr(23 downto 8) = x"0021" then
+            main_iot_imr <= main_dbg_io_wr(7 downto 0);
+         end if;
+         if main_dbg_sb_smp_stb = '1' and
+            unsigned(main_dbg_sb_smp_dif(15 downto 8)) >= unsigned(main_iot_arm(19 downto 12)) then
+            main_iot_jump_p <= '1';
+            main_iot_jump   <= main_dbg_sb_smp_dif(15 downto 8);
+            main_iot_jpos   <= main_dbg_sb_smp_pos;
+         end if;
+
+         main_iot_we <= '0';
+         -- stopping when full: the 1024th entry may be on its way (main_iot_we)
+         if main_iot_run = '1' and (main_iot_arm(11) = '0' or main_iot_cnt < 1023 or
+                                    (main_iot_cnt = 1023 and main_iot_we = '0')) then
+            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8)) or
+               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) then
+               main_iot_entry <= std_logic_vector(main_iot_us) & main_dbg_io_wr(23 downto 8) &
+                                 "000" & "00000" & main_dbg_io_wr(7 downto 0);
+               main_iot_we    <= '1';
+            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8)) and
+                  main_dbg_io_rd /= main_iot_last_rd then
+               main_iot_entry  <= std_logic_vector(main_iot_us) & main_dbg_io_rd(23 downto 8) &
+                                  "001" & "00000" & main_dbg_io_rd(7 downto 0);
+               main_iot_we     <= '1';
+               main_iot_last_rd <= main_dbg_io_rd;
+            elsif main_iot_irq_p = '1' then
+               main_iot_entry <= std_logic_vector(main_iot_us) & x"0000" & "010" & "00000" & x"00";
+               main_iot_we    <= '1';
+               main_iot_irq_p <= '0';
+            elsif main_iot_stall_p = '1' then
+               main_iot_entry   <= std_logic_vector(main_iot_us) & std_logic_vector(main_iot_stall) &
+                                   "011" & "00000" & "000000" & main_iot_stall_req;
+               main_iot_we      <= '1';
+               main_iot_stall_p <= '0';
+            elsif main_iot_freeze_p = '1' then
+               main_iot_entry    <= std_logic_vector(main_iot_us) & x"0000" & "100" & "00000" &
+                                    "000000" & main_dbg_sb_req;
+               main_iot_we       <= '1';
+               main_iot_freeze_p <= '0';
+               main_iot_run      <= not main_iot_arm(8);
+            elsif main_iot_cdef_p = '1' then
+               main_iot_entry  <= std_logic_vector(main_iot_us) & std_logic_vector(main_iot_cdef) &
+                                  "101" & "00000" & x"00";
+               main_iot_we     <= '1';
+               main_iot_cdef_p <= '0';
+            elsif main_iot_clong_p = '1' then
+               main_iot_entry   <= std_logic_vector(main_iot_us) & x"0000" & "110" & "00000" & x"00";
+               main_iot_we      <= '1';
+               main_iot_clong_p <= '0';
+            elsif main_iot_jump_p = '1' then
+               main_iot_entry  <= std_logic_vector(main_iot_us) & main_iot_jpos & "111" & "00000" &
+                                  main_iot_jump;
+               main_iot_we     <= '1';
+               main_iot_jump_p <= '0';
+            end if;
+         end if;
+         if main_iot_we = '1' then
+            main_iot_cnt <= main_iot_cnt + 1;
+            if main_iot_cnt = 1023 then
+               main_iot_full <= '1';
+            end if;
+         end if;
+         if main_iot_arm(11) = '1' and main_iot_cnt >= 1024 then
+            main_iot_run <= '0';
+         end if;
+
+         -- QNICE (re)starts it: empty, running
+         main_iot_arm_d <= main_iot_arm;
+         if main_iot_arm(7 downto 0) /= main_iot_arm_d(7 downto 0) then
+            main_iot_run      <= '1';
+            main_iot_cnt      <= (others => '0');
+            main_iot_full     <= '0';
+            main_iot_we       <= '0';
+            main_iot_irq_p    <= '0';
+            main_iot_stall_p  <= '0';
+            main_iot_freeze_p <= '0';
+            main_iot_cdef_p   <= '0';
+            main_iot_clong_p  <= '0';
+            main_iot_jump_p   <= '0';
+            main_iot_last_rd  <= (others => '1');
+         end if;
+         if main_iot_arm(9) = '1' then
+            main_iot_run <= '0';
+         end if;
+      end if;
+   end process p_main_iot;
+
+   main_iot_stat <= main_iot_run & main_iot_full & std_logic_vector(main_iot_cnt);
+
+   i_io_trace : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 10,
+         DATA_WIDTH => 64,
+         FALLING_B  => true                    -- QNICE's device convention
+      )
+      port map (
+         clock_a    => main_clk,
+         address_a  => std_logic_vector(main_iot_cnt(9 downto 0)),
+         data_a     => main_iot_entry,
+         wren_a     => main_iot_we,
+         q_a        => open,
+         clock_b    => qnice_clk_i,
+         address_b  => qnice_dev_addr_i(11 downto 2),
+         q_b        => qnice_iot_q
+      ); -- i_io_trace
+
+   i_cdc_iot_arm : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 20,
+         G_REGISTER_SRC => false
+      )
+      port map (
+         src_clk_i  => qnice_clk_i,
+         src_data_i => qnice_iot_arm,
+         dst_clk_i  => main_clk,
+         dst_data_o => main_iot_arm
+      ); -- i_cdc_iot_arm
+
+   i_cdc_iot_stat : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 18,
+         G_REGISTER_SRC => true
+      )
+      port map (
+         src_clk_i  => main_clk,
+         src_data_i => main_iot_stat,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_iot_stat
+      ); -- i_cdc_iot_stat
 
    -- Native (M2M-UPSTREAM native): the PC's picture size as ascal sees it: the pixels (ce) of
    -- the widest line's display enable, the lines of a frame; the SVGA framebuffer's size while
@@ -1384,17 +1750,35 @@ begin
    --    0x0003      bit 0 = the L2 cache is on (guest_l2.sv; default on, switching it on
    --                empties it first), bit 1 = z486's L1 caches are on (default on; off, every
    --                access goes uncached; back on, reset the PC: lines may be stale)
+   --    0x0004      read: the I/O trace's entries written (p_main_iot); write: start it again
+   --                (empty, running; bit 0 = stop at the Sound Blaster's first 1 ms DMA wait,
+   --                bit 1 = stop when full)
+   --    0x0005      read: bit 1 = it is running, bit 0 = it has wrapped (1024 or more);
+   --                write: stop it
+   --    0x0006      bit 0 = the Sound Blaster takes a new DMA command over a stalled transfer
+   --                at once (sound_dsp.v's dma_take_starved, z486_sources.py; default on)
+   --    0x0007      bits 7..0 = the smallest jump between two Sound Blaster samples the I/O
+   --                trace logs, in 256ths (default 0x40; 0 logs every sample)
+   --    0x0008..0B  read: the CD-ROM's audio (pc_cdrom.vhd's cd_stat_o), the high word first:
+   --                the audio status | the LBA heard (23..16), its low word, the samples the
+   --                FIFO did not have, the fewest words it held since the PLAY
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
    --                log count, VGA vsync count, snapshot count; 0x0018..1C the L2's line
    --                fills from the cache (lo, hi) and from the SDRAM (lo, hi), whether it is on
+   --                (0x001C bits 1..0), the game port's joystick (bits 9..2, main_joy_dig) and
+   --                the Sound Blaster's DMA requests (bit 10 8-bit, bit 11 16-bit);
+   --                0x001D..1F the last I/O read (port, byte) and write (port, byte), 48 bits
+   --                from bit 0 of 0x001D: read byte, read port, write byte, write port
    --    0x0020..2B  read: the FPGA's temperature, VCCINT, VCCAUX and VCCBRAM now, their maxima,
    --                their minima since the configuration (xadc_mon.vhd)
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    --    0x2000..2FFF read: the IDE trace (p_main_trace), event n at 0x2000 + 8 * (n mod 512):
    --                its sequence number, milliseconds, then the event (pc_mgmt.vhd) in four
    --                words, the high one first
+   --    0x3000..3FFF read: the I/O trace (p_main_iot), entry n at 0x3000 + 4 * (n mod 1024),
+   --                its 64 bits the high word first
    p_qnice_pc_ctl : process (qnice_clk_i)
    begin
       if falling_edge(qnice_clk_i) then
@@ -1405,6 +1789,16 @@ begin
                qnice_sdram_ps_target <= qnice_dev_data_i;
             elsif qnice_dev_addr_i = x"0000003" then
                qnice_l2_on <= qnice_dev_data_i(1 downto 0);
+            elsif qnice_dev_addr_i = x"0000004" then
+               qnice_iot_arm(9 downto 0) <= '0' & qnice_dev_data_i(0) &
+                                            std_logic_vector(unsigned(qnice_iot_arm(7 downto 0)) + 1);
+               qnice_iot_arm(11) <= qnice_dev_data_i(1);
+            elsif qnice_dev_addr_i = x"0000005" then
+               qnice_iot_arm(9) <= '1';
+            elsif qnice_dev_addr_i = x"0000006" then
+               qnice_iot_arm(10) <= not qnice_dev_data_i(0);
+            elsif qnice_dev_addr_i = x"0000007" then
+               qnice_iot_arm(19 downto 12) <= qnice_dev_data_i(7 downto 0);
             end if;
          end if;
          if qnice_rst_i = '1' then
@@ -1414,42 +1808,65 @@ begin
       end if;
    end process p_qnice_pc_ctl;
 
+   -- QNICE's reads: a select per source from the device and the address alone (the sources
+   -- never overlap), then each source's data through an AND and one OR tree; EEEE where
+   -- nothing is selected. The block RAMs among them are read on the falling edge, half a QNICE
+   -- clock to the CPU: as an if-elsif chain (nested priority logic) this was the QNICE clock's
+   -- slowest path; alone, from the RAM data to the result, 3 logic levels instead of 5.
    p_qnice_dev_data : process (all)
+      variable v_ctl, v_blk0, v_any : boolean;
       variable v_word : natural range 0 to 7;
+      variable v_low  : natural range 0 to 63;
+      variable v_q    : natural range 0 to 3;
+      variable v_d    : std_logic_vector(15 downto 0);
+
+      procedure put(sel : boolean; d : std_logic_vector(15 downto 0)) is
+      begin
+         if sel then
+            v_d   := v_d or d;
+            v_any := true;
+         end if;
+      end procedure put;
    begin
       v_word := to_integer(unsigned(qnice_dev_addr_i(2 downto 0)));
-      qnice_dev_data_o <= x"EEEE";
-      if qnice_disk_sel = '1' then
-         qnice_dev_data_o <= qnice_disk_data;
-      elsif qnice_dev_id_i = C_DEV_PC_CTL then
-         if qnice_dev_addr_i = x"0000000" then
-            qnice_dev_data_o <= x"000" & "000" & qnice_pc_roms_ok(0);
-         elsif qnice_dev_addr_i = x"0000001" then
-            qnice_dev_data_o <= qnice_sdram_ps_target;
-         elsif qnice_dev_addr_i = x"0000002" then
-            qnice_dev_data_o <= qnice_sdram_ps_pos;
-         elsif qnice_dev_addr_i = x"0000003" then
-            qnice_dev_data_o <= x"000" & "00" & qnice_l2_on;
-         elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000010" then
-            qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 15 downto 16 * v_word);
-         elsif qnice_dev_addr_i(27 downto 3) = "0000000000000000000000011" then
-            qnice_dev_data_o <= qnice_dbg_snap(16 * v_word + 143 downto 16 * v_word + 128);
-         elsif qnice_dev_addr_i(27 downto 4) = x"000002" then
-            qnice_dev_data_o <= qnice_xadc;
-         elsif qnice_dev_addr_i(27 downto 12) = x"0001" then
-            qnice_dev_data_o <= "0000" & qnice_dbg_log_q;
-         elsif qnice_dev_addr_i(27 downto 12) = x"0002" then
-            case v_word is
-               when 0      => qnice_dev_data_o <= qnice_tr_q(95 downto 80);
-               when 1      => qnice_dev_data_o <= qnice_tr_q(79 downto 64);
-               when 2      => qnice_dev_data_o <= qnice_tr_q(63 downto 48);
-               when 3      => qnice_dev_data_o <= qnice_tr_q(47 downto 32);
-               when 4      => qnice_dev_data_o <= qnice_tr_q(31 downto 16);
-               when 5      => qnice_dev_data_o <= qnice_tr_q(15 downto 0);
-               when others => null;
-            end case;
-         end if;
+      v_low  := to_integer(unsigned(qnice_dev_addr_i(5 downto 0)));
+      v_q    := to_integer(unsigned(qnice_dev_addr_i(1 downto 0)));
+      v_ctl  := qnice_dev_id_i = C_DEV_PC_CTL;
+      v_blk0 := v_ctl and qnice_dev_addr_i(27 downto 6) = "0000000000000000000000";
+      v_d    := (others => '0');
+      v_any  := false;
+
+      put(qnice_disk_sel = '1', qnice_disk_data);
+      put(qnice_dev_id_i = C_DEV_PC_CDTOC, qnice_cdtoc_q);
+      put(v_blk0 and v_low = 0, x"000" & "000" & qnice_pc_roms_ok(0));
+      put(v_blk0 and v_low = 1, qnice_sdram_ps_target);
+      put(v_blk0 and v_low = 2, qnice_sdram_ps_pos);
+      put(v_blk0 and v_low = 3, x"000" & "00" & qnice_l2_on);
+      put(v_blk0 and v_low = 4, qnice_iot_stat(15 downto 0));
+      put(v_blk0 and v_low = 5, x"000" & "00" & qnice_iot_stat(17 downto 16));
+      put(v_blk0 and v_low = 6, x"000" & "000" & not qnice_iot_arm(10));
+      put(v_blk0 and v_low = 7, x"00" & qnice_iot_arm(19 downto 12));
+      for k in 0 to 3 loop                     -- the CD-ROM's audio (pc_cdrom's cd_stat_o)
+         put(v_blk0 and v_low = 8 + k, qnice_cd_stat(63 - 16 * k downto 48 - 16 * k));
+      end loop;
+      for k in 0 to 7 loop
+         put(v_blk0 and v_low = 16 + k, qnice_dbg_snap(16 * k + 15 downto 16 * k));
+         put(v_blk0 and v_low = 24 + k, qnice_dbg_snap(16 * k + 143 downto 16 * k + 128));
+      end loop;
+      put(v_blk0 and v_low >= 32 and v_low <= 47, qnice_xadc);
+      put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0001", "0000" & qnice_dbg_log_q);
+      for k in 0 to 5 loop
+         put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0002" and v_word = k,
+             qnice_tr_q(95 - 16 * k downto 80 - 16 * k));
+      end loop;
+      for k in 0 to 3 loop
+         put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0003" and v_q = k,
+             qnice_iot_q(63 - 16 * k downto 48 - 16 * k));
+      end loop;
+      if not v_any then
+         v_d := x"EEEE";
       end if;
+      qnice_dev_data_o <= v_d;
    end process p_qnice_dev_data;
    qnice_dev_wait_o <= qnice_disk_wait when qnice_disk_sel = '1' else '0';
 

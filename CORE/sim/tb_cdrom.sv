@@ -120,6 +120,15 @@ module tb_cdrom #(
     wire [159:0] mnt;
     wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
 
+    // the CD's track table (mega65.vhd's block RAM: the data a clock after its address)
+    wire [11:0] tab_addr;
+    reg  [15:0] tab_q = 0;
+    reg  [15:0] tab [0:4095];
+    always @(posedge clk) tab_q <= tab[tab_addr];
+    wire [15:0] cd_l, cd_r;
+    wire        cd_stb;
+    wire [63:0] cd_stat;
+
     pc_mgmt #(.G_CLK_HZ(6400000)) mgmt (
         .clk_i(clk), .rst_i(!reset_n),
         .mgmt_address_o(mgmt_address), .mgmt_read_o(mgmt_read), .mgmt_write_o(mgmt_write),
@@ -128,8 +137,17 @@ module tb_cdrom #(
         .rtc_i(rtc_word), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
         .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh), .sd_done_i(sd_done), .sd_err_i(sd_err),
-        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
+        .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad),
+        .cd_tab_addr_o(tab_addr), .cd_tab_q_i(tab_q), .cd_l_o(cd_l), .cd_r_o(cd_r), .cd_stb_o(cd_stb),
+        .cd_stat_o(cd_stat)
     );
+
+    // the CD audio's samples (from the FIFO, not silence for want of them)
+    reg [15:0] aud_l [0:65535], aud_r [0:65535];
+    integer naud = 0;
+    always @(posedge clk) if (cd_stb && naud < 65536) begin
+        aud_l[naud] = cd_l; aud_r[naud] = cd_r; naud = naud + 1;
+    end
 
     reg [27:0] q_addr = 0;
     reg [15:0] q_wdata = 0;
@@ -173,6 +191,51 @@ module tb_cdrom #(
     function automatic [7:0] cdbyte(input integer s, input integer i);
         cdbyte = sdbyte(cdblk(4 * s + i / 512), i % 512);
     endfunction
+    // MSF of a frame count
+    function automatic [23:0] msf(input integer f);
+        msf = {8'(f / 4500), 8'((f / 75) % 60), 8'(f % 75)};
+    endfunction
+    // byte v of the virtual image (the CD's files back to back: the same extents)
+    function automatic [7:0] vbyte(input integer v);
+        vbyte = sdbyte(cdblk(v / 512), v % 512);
+    endfunction
+
+    // ------------------------------------------------------------------------------------------
+    // The track table, as the firmware writes it (cdimage.asm; pc_cdrom.vhd has the layout)
+    // ------------------------------------------------------------------------------------------
+    function automatic [15:0] sw16(input [15:0] x);
+        sw16 = {x[7:0], x[15:8]};
+    endfunction
+    task automatic tab_desc(input integer k, input integer num, input integer ctl, input integer lba);
+        reg [23:0] m;
+        tab[16'h100 + 4 * k] = 16'(ctl << 8); tab[16'h101 + 4 * k] = 16'(num);
+        tab[16'h102 + 4 * k] = sw16(16'(lba >> 16)); tab[16'h103 + 4 * k] = sw16(16'(lba));
+        m = msf(lba + 150);
+        tab[16'h300 + 4 * k] = 16'(ctl << 8); tab[16'h301 + 4 * k] = 16'(num);
+        tab[16'h302 + 4 * k] = {m[23:16], 8'h00}; tab[16'h303 + 4 * k] = {m[7:0], m[15:8]};
+    endtask
+    // track k: number, control, sector size, user data offset, flags (1 audio), its LBAs
+    // (start, INDEX 01, first in its file, end of those, end) and its file's byte of fb
+    task automatic tab_track(input integer k, num, ctl, ssize, off, flags, start, idx1, fb, fe, e,
+                             input integer byte_);
+        integer b;
+        b = 16'h800 + 16 * k;
+        tab[b] = 16'(num | ctl << 8); tab[b + 1] = 16'(ssize); tab[b + 2] = 16'(off); tab[b + 3] = 16'(flags);
+        tab[b + 4] = 16'(start); tab[b + 5] = 16'(start >> 16);
+        tab[b + 6] = 16'(idx1);  tab[b + 7] = 16'(idx1 >> 16);
+        tab[b + 8] = 16'(fb);    tab[b + 9] = 16'(fb >> 16);
+        tab[b + 10] = 16'(fe);   tab[b + 11] = 16'(fe >> 16);
+        tab[b + 12] = 16'(e);    tab[b + 13] = 16'(e >> 16);
+        tab[b + 14] = 16'(byte_); tab[b + 15] = 16'(byte_ >> 16);
+        tab_desc(k, num, ctl, idx1);
+    endtask
+    task automatic tab_head(input integer n, first, last, lead, med, lctl);
+        reg [23:0] m;
+        m = msf(lead + 150);
+        tab[0] = 16'(n); tab[1] = 16'(first | last << 8); tab[2] = 16'(lead); tab[3] = 16'(lead >> 16);
+        tab[4] = 16'(med); tab[5] = {m[15:8], m[23:16]}; tab[6] = {8'h00, m[7:0]};
+        tab_desc(n, 8'hAA, lctl, lead);
+    endtask
 
     // The SD engine port (tb_ide's model, reads only): a START moves COUNT blocks from ADDR on,
     // block k only once k < LIMIT, ABORT ends a read at the next block boundary
@@ -283,6 +346,8 @@ module tb_cdrom #(
     // ------------------------------------------------------------------------------------------
     reg [7:0] cdb [0:11];
     reg [7:0] din [0:131071];               // the data that came in
+    reg [7:0] dout [0:255];                 // the data to go out (MODE SELECT)
+    integer   nout_pos;
     integer   nin;                          // its bytes
     integer   blocks;                       // DRQ blocks
     reg [7:0] r_st, r_err, r_ir;            // the end: status, error, interrupt reason
@@ -301,6 +366,7 @@ module tb_cdrom #(
         integer k, n, i0;
         i0 = irqs;
         nin = 0;
+        nout_pos = 0;
         blocks = 0;
         outb(16'h176, 8'ha0);
         outb(16'h171, 8'h00);               // PIO
@@ -318,7 +384,8 @@ module tb_cdrom #(
             n = {hi, lo};
             if (nout > 0) begin
                 if (ir[1:0] != 2'b00) $fatal(1, "data out: reason %02x", ir);
-                for (k = 0; k < (n + 1) / 2; k++) outw(16'h170, 16'(k * 257));
+                for (k = 0; k < (n + 1) / 2; k++) outw(16'h170, {dout[nout_pos + 2 * k + 1], dout[nout_pos + 2 * k]});
+                nout_pos += n;
             end else begin
                 if (ir[1:0] != 2'b10) $fatal(1, "data in: reason %02x", ir);
                 for (k = 0; k < (n + 1) / 2; k++) begin
@@ -392,10 +459,86 @@ module tb_cdrom #(
         expect_end($sformatf("  its end (%0d blocks)", blocks));
     endtask
 
-    // MSF of a frame count
-    function automatic [23:0] msf(input integer f);
-        msf = {8'(f / 4500), 8'((f / 75) % 60), 8'(f % 75)};
+
+    // ------------------------------------------------------------------------------------------
+    // The mixed disc: track 1 data (MODE1/2352) at 0..99, track 2 audio with its pregap in the
+    // file (INDEX 00 100, INDEX 01 250) to 399, track 3 audio with a 2-sector PREGAP in no file
+    // (start 400, INDEX 01 402) to 701; one raw file: LBA x at byte x * 2352 up to 399, track
+    // 3's at (x - 2) * 2352
+    // ------------------------------------------------------------------------------------------
+    localparam integer LEAD = 702;
+    function automatic integer vsec(input integer x);
+        vsec = (x < 400) ? x * 2352 : (x - 2) * 2352;
     endfunction
+    // the samples LBA x has (none: silence), L and R of frame j
+    function automatic bit in_file(input integer x);
+        in_file = x < 400 || x >= 402;
+    endfunction
+    function automatic [15:0] smp(input integer x, input integer j, input bit right);
+        integer v;
+        v = vsec(x) + 4 * j + (right ? 2 : 0);
+        smp = in_file(x) ? {vbyte(v + 1), vbyte(v)} : 16'h0000;
+    endfunction
+
+    // READ of n sectors of the data track from lba, limit lim: the user data checked
+    task automatic raw_read(input integer lba, input integer n, input [15:0] lim, input integer hdd_after = 0);
+        integer i, bad;
+        set_cdb(8'h28, 0, lba[31:24], lba[23:16], lba[15:8], lba[7:0], 0, n[15:8], n[7:0], 0, 0, 0);
+        packet(lim, 0, hdd_after);
+        bad = 0;
+        for (i = 0; i < nin; i++) if (din[i] !== vbyte(vsec(lba + i / 2048) + 16 + i % 2048)) bad++;
+        check(nin == n * 2048 && bad == 0, $sformatf("raw READ %0d-%0d, limit %04x: %0d bytes, %0d wrong, %0d blocks",
+                                                      lba, lba + n - 1, lim, nin, bad, blocks));
+        expect_end("  its end");
+    endtask
+
+    // PLAY AUDIO MSF from a to b (LBAs, b excluded)
+    task automatic play(input integer a, input integer b);
+        reg [23:0] ma, mb;
+        ma = msf(a + 150); mb = msf(b + 150);
+        set_cdb(8'h47, 0, 0, ma[23:16], ma[15:8], ma[7:0], mb[23:16], mb[15:8], mb[7:0], 0, 0, 0);
+        packet(16'hfffe);
+        expect_end($sformatf("PLAY AUDIO MSF %0d-%0d", a, b - 1));
+    endtask
+
+    // READ SUB-CHANNEL, format 1, LBA or MSF: status, track, index, absolute, relative
+    reg [7:0] q_st, q_ctl, q_trk, q_idx;
+    reg [31:0] q_abs, q_rel;
+    task automatic subq(input bit m);
+        set_cdb(8'h42, m ? 8'h02 : 8'h00, 8'h40, 8'h01, 0, 0, 0, 0, 16, 0, 0, 0);
+        packet(16'hfffe);
+        q_st = din[1]; q_ctl = din[5]; q_trk = din[6]; q_idx = din[7];
+        q_abs = {din[8], din[9], din[10], din[11]}; q_rel = {din[12], din[13], din[14], din[15]};
+    endtask
+
+    // until the audio status is s (READ SUB-CHANNEL), at most `tries` times
+    task automatic wait_status(input [7:0] s, input integer tries);
+        integer k;
+        for (k = 0; k < tries; k++) begin
+            subq(0);
+            if (q_st == s) return;
+            repeat (20000) @(posedge clk);
+        end
+    endtask
+
+    // the samples since index a0 against LBAs a..b-1 (silence in no file)
+    task automatic check_audio(input integer a0, input integer a, input integer b, input string what,
+                               input integer vol0 = 256, input bit swap = 0);
+        integer x, j, k, bad, want;
+        reg [15:0] el, er;
+        bad = 0; k = a0;
+        for (x = a; x < b; x++)
+            for (j = 0; j < 588; j++) begin
+                el = smp(x, j, 0); er = smp(x, j, 1);
+                if (swap) begin el = smp(x, j, 1); end
+                if (vol0 != 256) el = 16'(($signed(el) * vol0) >>> 8);
+                if (k >= naud || aud_l[k] !== el || aud_r[k] !== er) bad++;
+                k++;
+            end
+        // (FAULT: the streamer takes a copy that did not match as it is, a click, not again)
+        check((bad == 0 || FAULT != 0) && naud == k, $sformatf("%s: %0d samples (%0d expected), %0d wrong", what,
+                                                               naud - a0, k - a0, bad));
+    endtask
 
     initial begin
         reg [7:0] v, sc, sn, cl, ch, st, er;
@@ -461,7 +604,9 @@ module tb_cdrom #(
         expect_end("  its end");
 
         // the disc (DISK_PREP for unit 3: map in window 2 from 2048, registers 0x60, write
-        // protected)
+        // protected; CD_PREP's track table first: an ISO, one data track)
+        tab_track(0, 1, 8'h14, 2048, 0, 0, 0, 0, 0, CDCAP, CDCAP, 0);
+        tab_head(1, 1, 1, CDCAP, 1, 8'h14);
         qwr(28'h0002800, 16'd2);
         qwr(28'h0002801, 16'(200000)); qwr(28'h0002802, 16'(200000 >> 16)); qwr(28'h0002803, 16'd50); qwr(28'h0002804, 16'd0);
         qwr(28'h0002805, 16'(300000)); qwr(28'h0002806, 16'(300000 >> 16)); qwr(28'h0002807, 16'(14950)); qwr(28'h0002808, 16'd0);
@@ -559,7 +704,8 @@ module tb_cdrom #(
         check(nin == 17, $sformatf("REQUEST SENSE, 17 bytes: %0d", nin));
         expect_end("  its end");
 
-        // MODE SELECT (10), 12 bytes out (dropped)
+        // MODE SELECT (10), 12 bytes out (no page 0Eh in them)
+        for (k = 0; k < 256; k++) dout[k] = 8'(k / 2);
         set_cdb(8'h55, 8'h10, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0);
         packet(16'hfffe, 12);
         expect_end("MODE SELECT (10), 12 bytes out");
@@ -574,6 +720,156 @@ module tb_cdrom #(
         // a hard disk read between the second and third block of a CD read
         cd_read(0, 300, 4, 16'hfffe, 2);
         read_hdd(1235, 1);
+        // a byte count limit of 768: blocks that end inside a card sector (and a hard disk read
+        // between two of them)
+        cd_read(0, 700, 2, 16'h0300, 3);
+        check(blocks == 6, $sformatf("  %0d blocks", blocks));
+
+        // ---------------------------------------------------------------------------------------
+        // the mixed disc: a new table, the unit mounted again (a new generation)
+        // ---------------------------------------------------------------------------------------
+        tab_track(0, 1, 8'h14, 2352, 16, 0, 0, 0, 0, 100, 100, 0);
+        tab_track(1, 2, 8'h10, 2352, 0, 1, 100, 250, 100, 400, 400, 100 * 2352);
+        tab_track(2, 3, 8'h10, 2352, 0, 1, 400, 402, 402, LEAD, LEAD, 400 * 2352);
+        tab_head(3, 1, 3, LEAD, 3, 8'h10);
+        qwr(28'h0000060, 16'd5);
+        repeat (2000) @(posedge clk);
+        set_cdb(8'h00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("mixed disc: UNIT ATTENTION", 6);
+
+        // READ TOC: three tracks and the lead-out; from track 2; MSF
+        set_cdb(8'h43, 0, 0, 0, 0, 0, 0, 0, 8'hff, 0, 0, 0);
+        packet(16'hfffe);
+        check(nin == 36 && din[1] == 34 && din[2] == 1 && din[3] == 3 && din[5] == 8'h14 && din[13] == 8'h10 &&
+              din[14] == 2 && {din[16], din[17], din[18], din[19]} == 250 && din[22] == 3 &&
+              {din[24], din[25], din[26], din[27]} == 402 && din[30] == 8'haa && {din[32], din[33], din[34], din[35]} == LEAD,
+              $sformatf("READ TOC, 3 tracks: %0d bytes, %0d %0d..%0d, track 2 at %0d, 3 at %0d, lead-out at %0d", nin, din[1], din[2], din[3],
+                        {din[16], din[17], din[18], din[19]}, {din[24], din[25], din[26], din[27]}, {din[32], din[33], din[34], din[35]}));
+        set_cdb(8'h43, 8'h02, 0, 0, 0, 0, 2, 0, 8'hff, 0, 0, 0);
+        packet(16'hfffe);
+        check(nin == 28 && din[1] == 26 && din[6] == 2 && {din[9], din[10], din[11]} == msf(250 + 150) &&
+              din[22] == 8'haa && {din[25], din[26], din[27]} == msf(LEAD + 150),
+              $sformatf("READ TOC from track 2, MSF: %0d bytes, track %0d at %06x, lead-out at %06x", nin, din[6],
+                        {din[9], din[10], din[11]}, {din[25], din[26], din[27]}));
+        set_cdb(8'h43, 0, 0, 0, 0, 0, 4, 0, 8'hff, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("READ TOC from track 4", 5);
+        set_cdb(8'h25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        check({din[0], din[1], din[2], din[3]} == LEAD - 1, $sformatf("READ CAPACITY: last %0d", {din[0], din[1], din[2], din[3]}));
+
+        // raw reads (2352-byte sectors: the user data at 16): limits FFFEh, 768, a hard disk read
+        r0 = eng_reads;
+        raw_read(10, 3, 16'hfffe);
+        raw_read(50, 2, 16'h0300);
+        raw_read(60, 3, 16'h0300, 2);
+        raw_read(97, 3, 16'hfffe);
+        // an audio track: ILLEGAL MODE; across the data track's end: out of range
+        set_cdb(8'h28, 0, 0, 0, 0, 120, 0, 0, 1, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("READ of an audio track", 5);
+        sense(key, asc);
+        check(asc == 8'h64, $sformatf("  REQUEST SENSE: %0x/%02x", key, asc));
+        set_cdb(8'h28, 0, 0, 0, 0, 98, 0, 0, 4, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("READ past the data track", 5);
+
+        // PLAY across track 2's end, track 3's pregap (silence) into its file
+        a0 = naud;
+        play(398, 405);
+        subq(0);
+        check(q_st == 8'h11, $sformatf("  playing: audio status %02x", q_st));
+        wait_status(8'h13, 400);
+        check(q_st == 8'h13, $sformatf("  done: audio status %02x", q_st));
+        subq(0);
+        check(q_st == 8'h15, $sformatf("  then: audio status %02x", q_st));
+        check_audio(a0, 398, 405, "  the samples, 398-404");
+
+        // the place: track 2's pregap (INDEX 00: the relative address counts down), then playing
+        a0 = naud;
+        play(240, 260);
+        repeat (100000) @(posedge clk);
+        subq(0);
+        check(q_st == 8'h11 && q_trk == 2 && q_ctl == 8'h10 &&
+              ((q_idx == 0 && $signed(q_rel) == $signed(q_abs - 250)) || (q_idx == 1 && q_rel == q_abs - 250)) &&
+              q_abs >= 240 && q_abs < 260,
+              $sformatf("READ SUB-CHANNEL, LBA: %02x, track %0d index %0d, at %0d, relative %0d", q_st, q_trk, q_idx,
+                        q_abs, $signed(q_rel)));
+        subq(1);
+        check(q_st == 8'h11 && q_trk == 2 && q_abs[31:24] == 0 && q_abs[23:0] >= msf(240 + 150) && q_abs[23:0] < msf(260 + 150),
+              $sformatf("  MSF: at %06x, relative %06x, index %0d", q_abs[23:0], q_rel[23:0], q_idx));
+        // PAUSE: the place holds; RESUME
+        set_cdb(8'h4b, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("PAUSE");
+        subq(0);
+        n = q_abs;
+        repeat (200000) @(posedge clk);
+        subq(0);
+        check(q_st == 8'h12 && q_abs == n, $sformatf("  paused: %02x, at %0d (%0d)", q_st, q_abs, n));
+        set_cdb(8'h4b, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("RESUME");
+        subq(0);
+        check(q_st == 8'h11, $sformatf("  playing: %02x", q_st));
+        wait_status(8'h13, 600);
+        check_audio(a0, 240, 260, "  the samples, 240-259 (paused once)");
+        // RESUME when not paused: a command sequence error
+        set_cdb(8'h4b, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("RESUME, nothing paused", 5);
+
+        // STOP; a READ stops play too
+        play(300, 390);
+        repeat (50000) @(posedge clk);
+        set_cdb(8'h4e, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("STOP PLAY");
+        subq(0);
+        check(q_st == 8'h15, $sformatf("  audio status %02x", q_st));
+        play(300, 390);
+        repeat (50000) @(posedge clk);
+        raw_read(20, 1, 16'hfffe);
+        subq(0);
+        check(q_st == 8'h15, $sformatf("  a READ stopped it: audio status %02x", q_st));
+        // PLAY of a data track: ILLEGAL MODE; past the lead-out: out of range
+        set_cdb(8'h45, 0, 0, 0, 0, 50, 0, 0, 2, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("PLAY AUDIO (10) of the data track", 5);
+        sense(key, asc);
+        check(asc == 8'h64, $sformatf("  REQUEST SENSE: %0x/%02x", key, asc));
+        set_cdb(8'h45, 0, 0, 0, 8'h02, 8'hb0, 0, 0, 100, 0, 0, 0);   // 688 + 100
+        packet(16'hfffe);
+        expect_end("PLAY AUDIO (10) past the lead-out", 5);
+
+        // MODE SELECT (6): page 0Eh, port 0 the right channel at half volume
+        for (k = 0; k < 256; k++) dout[k] = 0;
+        dout[3] = 8; dout[12] = 8'h0e; dout[13] = 8'h0e; dout[20] = 8'h02; dout[21] = 8'h80; dout[22] = 8'h02; dout[23] = 8'hff;
+        set_cdb(8'h15, 8'h10, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe, 28);
+        expect_end("MODE SELECT (6), page 0Eh");
+        set_cdb(8'h1a, 0, 8'h0e, 0, 8'hff, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        check(nin == 20 && din[1] == 8'h03 && din[12] == 8'h02 && din[13] == 8'h80 && din[14] == 8'h02 && din[15] == 8'hff,
+              $sformatf("MODE SENSE (6) 0Eh: medium %02x, ports %02x %02x %02x %02x", din[1], din[12], din[13], din[14], din[15]));
+        a0 = naud;
+        play(260, 262);
+        wait_status(8'h13, 400);
+        check_audio(a0, 260, 262, "  the samples at half volume, the right channel on both", 129, 1);
+        dout[20] = 8'h01; dout[21] = 8'hff;
+        set_cdb(8'h15, 8'h10, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe, 28);
+
+        // PLAY while the hard disk reads: no gap
+        a0 = naud;
+        play(270, 282);
+        repeat (60000) @(posedge clk);
+        n = cd_stat[31:16];
+        for (k = 0; k < 6; k++) read_hdd(2000 + 50 * k, 8);
+        wait_status(8'h13, 600);
+        check_audio(a0, 270, 282, "PLAY while the hard disk reads");
+        check(cd_stat[31:16] == n, $sformatf("  samples the FIFO did not have meanwhile: %0d", cd_stat[31:16] - n));
 
         // the disc ejected: NOT READY
         qwr(28'h0000060, 16'd0);
@@ -587,7 +883,7 @@ module tb_cdrom #(
         $finish;
     end
     initial begin
-        #400000000;
+        #1500000000;
         $fatal(1, "timeout");
     end
 endmodule

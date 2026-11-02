@@ -14,8 +14,8 @@
 // The ddram_* port is MiSTer's DDR3 port (64-bit words, clk_sys): the boot image and the SVGA
 // framebuffer. mega65.vhd maps it into HyperRAM. fb_base_o is still a DDR3 address.
 //
-// The PS/2 keyboard and mouse lines and the mgmt bus of ide.v / floppy.v come from mega65.vhd.
-// Not wired yet (inputs idle): joysticks.
+// The PS/2 keyboard and mouse lines, the game port's joystick and the mgmt bus of ide.v /
+// floppy.v come from mega65.vhd.
 
 `default_nettype none
 
@@ -96,6 +96,10 @@ module z486_mega65 #(
     output wire        ps2_mouse_clk_out,
     output wire        ps2_mouse_data_out,
 
+    // The game port (201h): joystick 1, digital, active high (MiSTer's layout: 0 right, 1 left,
+    // 2 down, 3 up, 4..7 buttons 1..4); a 4-button joystick, joystick 2 absent
+    input  wire  [7:0] joy_dig,
+
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
@@ -103,6 +107,8 @@ module z486_mega65 #(
     // from the cache and from the SDRAM
     input  wire        l2_enable,
     input  wire        cache_off,          // z486's L1 caches off (every access uncached)
+    input  wire        sb_take_starved,    // a new Sound Blaster DMA command takes over a starved
+                                           // transfer at once (sound_dsp.v, z486_sources.py)
     output wire [31:0] l2_hits,
     output wire [31:0] l2_misses,
 
@@ -120,7 +126,22 @@ module z486_mega65 #(
     output wire [31:0] dbg_cpu_eip,
     output wire  [7:0] dbg_log_byte,
     output wire        dbg_log_we,
-    output wire        dbg_mem_busy        // the SDRAM controller (initialization, refresh)
+    output wire        dbg_mem_busy,       // the SDRAM controller (initialization, refresh)
+    output wire [23:0] dbg_io_rd,          // the last I/O read: port, byte (z486_sources.py)
+    output wire [23:0] dbg_io_wr,          // the last I/O write: port, byte
+    output wire  [1:0] dbg_sb_req,         // the Sound Blaster's DMA requests: 16-bit, 8-bit
+    output wire        dbg_sb_irq,         // the Sound Blaster's IRQ
+    output wire        dbg_io_rd_stb,      // dbg_io_rd / dbg_io_wr hold a new access
+    output wire        dbg_io_wr_stb,
+    output wire        dbg_sb_cmd_wait,    // the Sound Blaster holds a new DMA command back
+    output wire        dbg_sb_smp_stb,     // the Sound Blaster took a DMA output sample:
+    output wire [15:0] dbg_sb_smp_dif,     // its distance from the one before (left channel),
+    output wire [15:0] dbg_sb_smp_pos,     // its index in the DSP's block
+
+    // CD audio (pc_cdrom.vhd's cd_audio, clk_sys, 44.1 kHz): mixed with the SB Pro mixer's CD
+    // volume, as z486_mister.sv mixes cdda.v's
+    input  wire [15:0] cd_l,
+    input  wire [15:0] cd_r
 );
 
 // z486_mister.sv's build: 8 KB + 8 KB L1, critical-word-first line reads, x87 on, no CMS
@@ -347,12 +368,12 @@ system #(
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
     .floppy_wp           (2'b00),
-    .joystick_dis        (2'b00),
-    .joystick_dig_1      (14'd0),
+    .joystick_dis        (2'b10),          // joystick 2 absent: its axes and buttons read 1
+    .joystick_dig_1      ({6'd0, joy_dig}),
     .joystick_dig_2      (14'd0),
-    .joystick_ana_1      (16'd0),
+    .joystick_ana_1      (16'd0),          // no stick movement: the axes follow the directions
     .joystick_ana_2      (16'd0),
-    .joystick_mode       (3'd0),
+    .joystick_mode       (3'd1),           // 4 buttons: buttons 3 and 4 are joystick 1's
     .joystick_timed      (2'd0),
 
     .mgmt_address        (mgmt_address),
@@ -544,7 +565,18 @@ system #(
     .cpu_vm              (),
     .cpu_cs              (dbg_cpu_cs),
     .cpu_eip             (dbg_cpu_eip),
-    .cpu_cs_base         ()
+    .cpu_cs_base         (),
+    .dbg_io_rd           (dbg_io_rd),
+    .dbg_io_wr           (dbg_io_wr),
+    .dbg_sb_req          (dbg_sb_req),
+    .dbg_sb_irq          (dbg_sb_irq),
+    .dbg_io_rd_stb       (dbg_io_rd_stb),
+    .dbg_io_wr_stb       (dbg_io_wr_stb),
+    .dbg_sb_cmd_wait     (dbg_sb_cmd_wait),
+    .sb_take_starved     (sb_take_starved),
+    .dbg_sb_smp_stb      (dbg_sb_smp_stb),
+    .dbg_sb_smp_dif      (dbg_sb_smp_dif),
+    .dbg_sb_smp_pos      (dbg_sb_smp_pos)
 );
 
 // ------------------------------------------------------------------------------------------
@@ -626,9 +658,22 @@ assign fb_pal_d  = {vga_pal_d[17:12], vga_pal_d[17:16],
 assign fb_pal_wr = vga_pal_we;
 
 // ------------------------------------------------------------------------------------------
-// Audio (clk_audio): z486_mister.sv's mix without CMS, CD-DA and MT-32. The SB Pro mixer
-// volumes apply to the voice (SB) and MIDI (OPL) channels and, as master, to the whole mix.
+// Audio (clk_audio): z486_mister.sv's mix without CMS and MT-32. The SB Pro mixer volumes
+// apply to the voice (SB), MIDI (OPL) and CD channels and, as master, to the whole mix; the
+// mixer's output switches (vol_en) turn the CD's left and right on and off, as on MiSTer.
 // ------------------------------------------------------------------------------------------
+
+wire [15:0] cdda_l;
+wire [15:0] cdda_r;
+
+cdc_vector_handshake_continuous #(
+    .DATA_WIDTH(32)
+) cd_cdc (
+    .clk_in  (clk_sys),
+    .clk_out (clk_audio),
+    .data_in ({cd_l, cd_r}),
+    .data_out({cdda_l, cdda_r})
+);
 
 wire        speaker_out_audio;
 reg  [16:0] spk;
@@ -649,24 +694,27 @@ reg  [15:0] mix_dry_l;
 reg  [15:0] mix_dry_r;
 reg  [16:0] mix_tmp_l;
 reg  [16:0] mix_tmp_r;
-wire [15:0] master_l, master_r, sb_l, sb_r, opl_l, opl_r;
+wire [15:0] master_l, master_r, sb_l, sb_r, opl_l, opl_r, cdv_l, cdv_r;
 wire        sb_volume_valid;
 
 sb_volume #(
-    .NUM_CH(6),
+    .NUM_CH(8),
     .SAMPLE_WIDTH(16)
 ) sb_volume_inst (
     .clk        (clk_audio),
     .sbp        (sbp),
     .volumes_in ({vol_master_l, vol_master_r,
                   vol_voice_l,  vol_voice_r,
-                  vol_midi_l,   vol_midi_r}),
+                  vol_midi_l,   vol_midi_r,
+                  vol_cd_l,     vol_cd_r}),
     .samples_in ({mix_dry_l,    mix_dry_r,
                   sample_sb_l,  sample_sb_r,
-                  sample_opl_l, sample_opl_r}),
+                  sample_opl_l, sample_opl_r,
+                  cdda_l,       cdda_r}),
     .samples_out({master_l, master_r,
                   sb_l,     sb_r,
-                  opl_l,    opl_r}),
+                  opl_l,    opl_r,
+                  cdv_l,    cdv_r}),
     .valid      (sb_volume_valid)
 );
 
@@ -674,8 +722,10 @@ always @(posedge clk_audio) begin
     if (sb_volume_valid) begin
         audio_l   <= master_l;
         audio_r   <= master_r;
-        mix_tmp_l <= spk_out + {sb_l[15], sb_l} + {opl_l[15], opl_l};
-        mix_tmp_r <= spk_out + {sb_r[15], sb_r} + {opl_r[15], opl_r};
+        mix_tmp_l <= spk_out + {sb_l[15], sb_l} + {opl_l[15], opl_l}
+                   + (vol_en[2] ? {cdv_l[15], cdv_l} : 17'd0);
+        mix_tmp_r <= spk_out + {sb_r[15], sb_r} + {opl_r[15], opl_r}
+                   + (vol_en[1] ? {cdv_r[15], cdv_r} : 17'd0);
     end
     mix_dry_l <= (^mix_tmp_l[16:15]) ? {mix_tmp_l[16], {15{mix_tmp_l[15]}}} : mix_tmp_l[15:0];
     mix_dry_r <= (^mix_tmp_r[16:15]) ? {mix_tmp_r[16], {15{mix_tmp_r[15]}}} : mix_tmp_r[15:0];

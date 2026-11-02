@@ -114,6 +114,13 @@ boots from it.
   simulates the keyboard and the mouse against z486's 8042 (`ps2.v`;
   `tb_pc_mouse` has a packet in the middle of F3, which fails without the
   quiet time), and the PIC patch below (`tb_pic.sv`).
+- Joystick: a joystick on port 2 is the PC's game port joystick at 201h
+  (z486_MiSTer's `joystick.v`, as a 4-button joystick; the second joystick
+  absent). The directions put the axes at their ends, fire is button 1. A
+  second and third fire button on the paddle lines (pin 9 and pin 5, the C64
+  two- and three-button joysticks, which connect them to +5 V) are buttons 2
+  and 3; a button that grounds pin 9 (Amiga style) is invisible, like the
+  Amiga mouse's right button. `qmon.py status` shows what is held.
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
@@ -122,8 +129,9 @@ boots from it.
   requests) and the hard disk, the master of the first IDE channel (`ide.v`:
   IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
   types following the images; the CD-ROM drive, an ATAPI device on the second
-  channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does), which
-  `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
+  channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does, with
+  `cd_audio.vhd` for CD audio and the firmware's `cdimage.asm` for cue sheets),
+  which `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
   image file through the SD host controller's engine port (Megamiga's
   sd-host), with the file's extent map from the firmware (fragmented files are
   fine); reads come in runs of one SD command each through a 32-sector ring
@@ -131,10 +139,13 @@ boots from it.
   in (a sector that does not match comes again, fresh from the card); the
   write buffer is LUT RAM too. See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against z486's
   `floppy.v`, `ide.v` and `rtc.v` (`tb_cdrom.sv`: both IDE channels, the
-  packets a DOS CD-ROM driver sends).
+  packets a DOS CD-ROM driver sends, an ISO and a disc with data and audio
+  tracks: raw reads, the TOC, PLAY sample by sample); `CORE/m2m-rom/test/run.sh`
+  runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
+  BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
   scanlines, help, "Reset the PC". An image mounted at start-up
-  (`/z486/hdd.img`, `/z486/cdrom.iso`, `/z486/floppy.img`) shows its name
+  (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard
   dis..." (the line's own text taken for the name).
@@ -212,7 +223,7 @@ boots from it.
   `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
   Cursor Up, then press Help).
 
-Not wired yet: joysticks, CD audio, the MEGA65's own floppy drive.
+Not wired yet: the MEGA65's own floppy drive.
 
 ## SD card
 
@@ -221,7 +232,8 @@ Not wired yet: joysticks, CD audio, the MEGA65's own floppy drive.
 /z486/boot1.rom    the VGA BIOS
 /z486/floppy.img   optional: drive A: at start-up (a raw floppy image)
 /z486/hdd.img      optional: the hard disk at start-up (a raw disk image)
-/z486/cdrom.iso    optional: the CD-ROM's disc at start-up (an ISO image)
+/z486/cdrom.cue    optional: the CD-ROM's disc at start-up (a cue sheet, its files in /z486)
+/z486/cdrom.iso    optional: the same as an ISO image (when there is no cdrom.cue)
 ```
 
 Both come with z486_MiSTer, in
@@ -247,19 +259,34 @@ image file from the card, under any name; writes go to the file.
   4 GB less 512 bytes, the largest file FAT32 holds. The BIOS looks for disks
   only when the PC starts: after mounting one from the menu, "Reset the PC".
   It reads the size from IDENTIFY (LBA) and translates for DOS.
-- **CD-ROM:** an ISO image (whole 2048-byte sectors, one data track), any
-  time: the drive is always there, the master of the second IDE channel
-  (ports 170h/376h, IRQ 15), with or without a disc, and a new disc is a
-  media change for the driver. The BIOS lists it ("IDE1 master: CD-ROM z486
-  MEGA65 CD-ROM"); MS-DOS 6.22 reads it with `DEVICE=OAKCDROM.SYS
-  /D:MSCD001` and `MSCDEX /D:MSCD001` (tested on the board; OAKCDROM.SYS
-  comes with Windows 98's boot disk). No CD audio: an ISO has none, and PLAY
-  AUDIO is refused; a `.bin` (2352-byte raw sectors) has to become an ISO
-  first (`bchunk game.bin game.cue game`).
+- **CD-ROM:** a disc image, any time: the drive is always there, the master
+  of the second IDE channel (ports 170h/376h, IRQ 15), with or without a
+  disc, and a new disc is a media change for the driver. The BIOS lists it
+  ("IDE1 master: CD-ROM z486 MEGA65 CD-ROM"); MS-DOS 6.22 reads it with
+  `DEVICE=OAKCDROM.SYS /D:MSCD001` and `MSCDEX /D:MSCD001` (tested on the
+  board; OAKCDROM.SYS comes with Windows 98's boot disk). The image can be
+  - an ISO (whole 2048-byte sectors, one data track);
+  - a raw `.bin` (whole 2352-byte sectors, one data track, MODE1 or MODE2);
+  - a `.cue` sheet with its files in the same folder: data and CD audio
+    tracks, one file for all or one per track (`FILE ... BINARY`, `MOTOROLA`
+    for big-endian audio, `WAVE`: PCM, 16-bit stereo, 44.1 kHz; MP3 and other
+    compressed audio are refused: convert those tracks to WAVE or BIN),
+    `TRACK` (`AUDIO`, `MODE1/2048`, `MODE1/2352`, `MODE2/2352`, `MODE2/2336`),
+    `INDEX 00/01`, `PREGAP`, `POSTGAP`; at most 99 tracks, one session, 16K
+    characters of cue text and 511 fragments for all its files together.
+  Mount the `.cue` (the firmware, `cdimage.asm`, reads it and maps its files).
+  **CD audio**: PLAY AUDIO (10, 12, MSF, TRACK/INDEX), PAUSE/RESUME, STOP and
+  READ SUB-CHANNEL, as MSCDEX and games use them; the music goes through the
+  Sound Blaster mixer's CD volume (and its CD output switches) and the drive's
+  own volume (MODE SELECT page 0Eh, what a game's music slider sets through
+  MSCDEX). As on a real drive, a READ (or SEEK) stops the music: games load
+  their data first, or stop the music to load. A track's pregap that is in no
+  file (`PREGAP`) plays as silence. `qmon.py cd` shows the disc's tracks and
+  how the music goes.
 - **Eject:** every folder of the file browser starts with `<No Disk>` (right
   after `<..>`): choosing it empties the drive. A mount lasts until the
   MEGA65 is switched off; only `/z486/floppy.img`, `/z486/hdd.img` and
-  `/z486/cdrom.iso` come back by themselves.
+  `/z486/cdrom.cue` (or `/z486/cdrom.iso`) come back by themselves.
 
 An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
 
@@ -312,6 +339,14 @@ the floppies (checked before `floppy.v`'s FIFO gets the sector).
 `qmon.py disks` counts them: copies that matched, copies that did not,
 sectors read again fresh and how many of those came right.
 
+An SD card that a core has used in SPI mode (MegaMac does) stays in SPI mode
+until it loses power, and loading z486 over JTAG does not power it: the SD
+host's native 4-bit bus then fails and it falls back to SPI at 25 MHz, which
+works but makes the disks about 8x slower (PIOTEST 1,940 instead of 3,000+
+KB/s). `qmon.py disks` shows each slot's bus (native 4-bit at 50 MHz, or SPI);
+take the card out and put it back in once (or switch off) to bring it back to
+the native bus.
+
 `tools/dos/` has the test programs, on `tools/dos/build/z486test.iso` for
 the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
 - `PIOTEST.COM`: from C:, reads `PIOPAT.BIN` (4 MB, it writes it when it is
@@ -322,6 +357,10 @@ the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
 - `VTEST.COM`: the SVGA video memory through VESA's bank window, conventional
   RAM, XMS and reads through DOS (`CDPAT.BIN` on the CD; `VTEST W` writes it),
   with the timer at 10 kHz and Sound Blaster DMA running, as during a game.
+- `CPUSPEED.COM [MHz]`: the CPU's clocks per instruction in real mode (about
+  30 kinds, the PIT's counter 2 as the clock), beside a 486's, and the MHz a
+  speed test that times each one would report (64 unless given). A row well
+  under 64 is an instruction z486 takes longer for than a 486.
 
 `tools/floppy-packer.html`, a page that runs in any browser without a server,
 packs files into a FAT12 floppy image of any of the five sizes, with DOS's

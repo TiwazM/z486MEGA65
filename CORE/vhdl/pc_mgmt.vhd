@@ -101,6 +101,15 @@ entity pc_mgmt is
       -- or floppy read then asks for the sector again, fresh from the card, twice at most)
       buf_bad_i         : in  std_logic := '0';
 
+      -- the CD-ROM drive's track table (mega65.vhd's block RAM: the data two clocks after the
+      -- address), its audio (44.1 kHz) and how that goes (pc_cdrom.vhd's cd_stat_o)
+      cd_tab_addr_o     : out std_logic_vector(11 downto 0);
+      cd_tab_q_i        : in  std_logic_vector(15 downto 0) := (others => '0');
+      cd_l_o            : out std_logic_vector(15 downto 0);
+      cd_r_o            : out std_logic_vector(15 downto 0);
+      cd_stb_o          : out std_logic;          -- a pulse: a sample from the FIFO (testbench)
+      cd_stat_o         : out std_logic_vector(63 downto 0);
+
       -- the IDE trace (mega65.vhd keeps it): one event per clock at most, bits 63..60 the
       -- event, 59..56 0, then three bytes A, B, C and 32 bits of data (CD-ROM events from
       -- pc_cdrom.vhd too)
@@ -384,6 +393,9 @@ begin
    trace_o          <= cd_tr when cd_tr_we = '1' else tr;
 
    i_cdrom : entity work.pc_cdrom
+      generic map (
+         G_CLK_HZ         => G_CLK_HZ
+      )
       port map (
          clk_i            => clk_i,
          rst_i            => rst_i,
@@ -396,6 +408,8 @@ begin
          mgmt_readdata_i  => mgmt_readdata_i,
          ide_request_i    => ide1_request_i,
          mnt_i            => m_dst(159 downto 120),
+         tab_addr_o       => cd_tab_addr_o,
+         tab_q_i          => cd_tab_q_i,
          sd_req_o         => cd_req,
          sd_req_lba_o     => cd_req_lba,
          sd_req_cnt_o     => cd_req_cnt,
@@ -405,6 +419,10 @@ begin
          buf_addr_o       => cd_buf_addr,
          buf_rd_i         => buf_rd_i,
          buf_bad_i        => buf_bad_i,
+         cd_l_o           => cd_l_o,
+         cd_r_o           => cd_r_o,
+         cd_stb_o         => cd_stb_o,
+         cd_stat_o        => cd_stat_o,
          trace_we_o       => cd_tr_we,
          trace_o          => cd_tr
       ); -- i_cdrom
@@ -741,6 +759,8 @@ begin
 
             when S_SD_ASK =>
                req   <= not req;                     -- unit, wr and lba were set a clock ago
+               pm_buf_addr <= (others => '1');       -- (so that the copy's start at 0 counts:
+                                                     -- disk_sd checks a copy that moves to 0)
                state <= S_SD_WAIT;
 
             when S_SD_WAIT =>

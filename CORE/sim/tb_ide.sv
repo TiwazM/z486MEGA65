@@ -8,7 +8,8 @@
 // port), with a model of the SD host controller's engine port behind them. The test does what
 // the Bochs BIOS's ATA probe and INT 13h do: soft reset (the master, then the slave, which must
 // read cylinder FFFFh), IDENTIFY, LBA28 reads across the image file's two extents, writes, SET
-// MULTIPLE and READ MULTIPLE, an unknown command (aborted); and the CMOS's hard disk bytes.
+// MULTIPLE and READ MULTIPLE, an unknown command (aborted); and the CMOS's hard disk bytes. Then
+// a reset on the clock that starts a sector's copy: the next read's copy still checked.
 // CORE/sim/run_disks.sh runs it with xsim.
 //
 // Licensed under GPL v3
@@ -229,6 +230,19 @@ module tb_ide #(
         end
     end
 
+    // disk_sd's answers to pc_mgmt (done toggles), counted as G_FAULT counts them: with FAULT,
+    // answer FAULT, 2 * FAULT, ... has the wrong first copy
+    integer answers = 0;
+    reg done_q = 0;
+    always @(posedge qclk) begin
+        done_q <= sd_done;
+        if (sd_done === ~done_q) answers++;
+    end
+    // pc_mgmt's synchronizer of them (done_s), the same flops: it sees an answer at the edge
+    // where bits 2 and 1 differ
+    reg [2:0] done_s = 0;
+    always @(posedge clk) done_s <= {done_s[1:0], sd_done};
+
     // ------------------------------------------------------------------------------------------
     // QNICE writes, the PC's I/O
     // ------------------------------------------------------------------------------------------
@@ -344,8 +358,9 @@ module tb_ide #(
     initial begin
         reg [7:0] v, sc, sn, cl, ch, st, er, hi, lo;
         reg [15:0] id [0:255];
-        integer k, sum;
-        reg [15:0] ck_good, ck_bad, ck_fixed, ck_fresh;
+        integer k, sum, d;
+        bit hit;
+        reg [15:0] ck_good, ck_bad, ck_fixed, ck_fresh, ck_b0;
         repeat (5) @(negedge clk);
         reset_n = 1;
         repeat (5) @(posedge qclk);
@@ -447,6 +462,36 @@ module tb_ide #(
         // the reads still work after it
         read_sectors(8'h21, 0, 1);
         check(eng_writes == 2, $sformatf("engine: %0d writes", eng_writes));
+        // a reset (pc_mgmt's, with the PC's) on the clock that starts a copy: pc_mgmt's ring
+        // address stays 0 through it, as at power-up. The next read's copy must still be
+        // checked (disk_sd checks a copy that moves to 0): with FAULT it is the wrong one, and
+        // the PC gets it right. The reset goes low after the edge where pc_mgmt sees the answer
+        // (the next one sets the address to 0), or d edges later on a retry; before each try,
+        // reads until the read after the reset is answer FAULT, 2 * FAULT, ...
+        hit = 0;
+        for (d = 0; d < 4 && !hit; d++) begin
+            while (FAULT > 1 && (answers + 2) % FAULT != 0) read_sectors(8'h20, 3100 + answers, 1);
+            ata_cmd(8'h20, 3000 + d, 1);
+            do @(posedge clk); while (done_s[2] == done_s[1]);
+            repeat (d) @(posedge clk);
+            @(negedge clk) reset_n = 0;
+            repeat (4) @(posedge clk);
+            @(negedge clk) reset_n = 1;
+            // pc_mgmt starts again: the CMOS, the hard disk mounted again
+            for (k = 0; k < 200; k++) begin
+                cmos_rd(7'h12, v);
+                if (v == 8'hF0) break;
+                repeat (500) @(posedge clk);
+            end
+            if (v != 8'hF0) $fatal(1, "after the reset: CMOS 12h %02x", v);
+            hit = buf_addr === 9'd0;
+        end
+        check(hit && d == 1, $sformatf("a reset on the clock that starts a copy (%0d edges late): the ring address stays 0", d - 1));
+        qrd(28'h000004a, ck_b0);
+        read_sectors(8'h20, 3200, 1);
+        qrd(28'h000004a, ck_bad);
+        check(FAULT <= 1 || ck_bad == ck_b0 + 1,
+              $sformatf("  the read after it: its wrong first copy checked (%0d copies did not match)", ck_bad - ck_b0));
         // the ring's checksums: with FAULT, every wrong copy came again fresh from the card
         // (the SD read counts above do not hold then) and then matched
         qrd(28'h0000049, ck_good); qrd(28'h000004a, ck_bad); qrd(28'h000004b, ck_fixed);

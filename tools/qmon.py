@@ -21,6 +21,21 @@
 #   qmon.py disks watch [s]   sectors per second over s seconds (default 10)
 #   qmon.py xadc              the FPGA's temperature, VCCINT, VCCAUX, VCCBRAM: now, and the
 #                             lowest and highest since the core was loaded (xadc_mon.vhd)
+#   qmon.py iotrace           the I/O trace (mega65.vhd p_main_iot): the last 1024 accesses to
+#                             the DMA controllers, PICs, 8042 and Sound Blaster, its IRQs, its
+#                             DMA requests' long waits and the DMA commands its DSP held back,
+#                             with microseconds, and its samples' big jumps; stops it first
+#                             ("peek": reads it running)
+#   qmon.py iotrace start [freeze] [once]
+#                             start it again (empty); "freeze": stop at the card's first 1 ms
+#                             wait; "once": stop when full (the first 1024 entries)
+#   qmon.py iotrace jump [N]  the smallest sample jump it logs, N/256 of the full range
+#                             (default 64)
+#   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
+#                             dma_take_starved, z486_sources.py; on after the core loads)
+#   qmon.py cd                the CD-ROM's disc (its track table, C_DEV_PC_CDTOC, written by
+#                             m2m-rom.asm's cdimage.asm) and its audio (pc_cdrom.vhd): the
+#                             status, the LBA heard, the FIFO's underruns and lowest fill
 #   qmon.py ide [N]           the IDE trace (mega65.vhd, pc_mgmt.vhd): the last N events
 #                             (default 40, at most 512) of both IDE channels and the floppies,
 #                             with milliseconds before the newest
@@ -116,6 +131,14 @@ def status():
         "post": w[1] & 0xFF, "posts": w[1] >> 8, "cs": w[2], "eip": w[4] << 16 | w[3],
         "logs": w[5], "vsyncs": w[6], "snap": w[7], "ps_target": ps[0], "ps_pos": ps[1],
     }
+    joy = dump(0x801C, 0x801C)[0]          # bits 9..2: the game port's joystick
+    if joy is not None:
+        s["joy"] = joy >> 2 & 0xFF
+        s["sb_req"] = joy >> 10 & 3        # the Sound Blaster's DMA requests: 8-bit, 16-bit
+    io = dump(0x801D, 0x801F)              # the last I/O read and write, 48 bits
+    if None not in io:
+        v = io[2] << 32 | io[1] << 16 | io[0]
+        s["io_rd"], s["io_wr"] = v & 0xFFFFFF, v >> 24
     return s
 
 
@@ -165,7 +188,28 @@ def line(s):
              s["cs"], s["eip"], s["logs"], s["vsyncs"]))
 
 
+def sd_modes():
+    # each slot's SD host (sdhost.vhd: 0xFF25 the CSR, 0xFF26 the bus mode) through
+    # M2M$SD_SLOT (0xFF27), put back afterwards. A card that an SPI-only controller has used
+    # (MegaMac) stays in SPI mode until it loses power: the native bus fails, ~8x slower.
+    old = dump(0xFF27, 0xFF27)[0]
+    for slot, where in ((0, "bottom"), (1, "back")):
+        poke(0xFF27, slot)
+        csr, mode = dump(0xFF25, 0xFF26)
+        ctype = ["no card / unknown", "SD V1", "SD V2", "SDHC"][csr >> 12 & 3]
+        if not mode & 4:
+            bus = "not ready"
+        elif mode & 1:
+            bus = "native 4-bit, " + ("50 MHz (high speed)" if mode & 0x10 else "25 MHz")
+        else:
+            bus = "SPI, %s MHz%s" % ("12.5" if mode & 2 else "25",
+                                     " (SPI only)" if mode & 8 else " (the native bus failed)")
+        print("SD slot %d (%s): %s, %s, %d transfers retried" % (slot, where, ctype, bus, mode >> 8))
+    poke(0xFF27, old)
+
+
 def disks():
+    sd_modes()
     poke(0xFFF4, 0x0101)                   # M2M$RAMROM_DEV = C_DEV_PC_DISK
     poke(0xFFF5, 0x0000)
     for u, name in enumerate(["A:", "B:", "hard disk", "CD-ROM"]):
@@ -189,6 +233,41 @@ def disks():
           "%d sectors read fresh from the card, %d of them right then" % (ck[0], ck[1], ck[6], ck[2]))
     if ck[1]:
         print("  the last that did not: slot %d, checksum %04X wanted, %04X read" % (ck[3], ck[4], ck[5]))
+
+
+def cd():
+    pc_dev()
+    st = dump(0x8008, 0x800B)
+    if None in st:
+        print("no answer")
+        return
+    ast = st[0] >> 8
+    print("audio: %s, LBA heard %d, samples the FIFO did not have %d, fewest words in it %s" %
+          ({0x11: "playing", 0x12: "paused", 0x13: "done", 0x14: "stopped by an error",
+            0x15: "none"}.get(ast, "%02X" % ast), (st[0] & 0xFF) << 16 | st[1], st[2],
+           "-" if st[3] == 0x3FFF else "%d of 8192" % st[3]))
+    poke(0xFFF4, 0x0105)                   # M2M$RAMROM_DEV = C_DEV_PC_CDTOC
+    poke(0xFFF5, 0x0000)
+    h = dump(0x8000, 0x8006)
+    n = h[0]
+    if not n or n > 99:
+        print("no disc (%s tracks in the table)" % n)
+        return
+    msf = lambda l: "%02d:%02d:%02d" % ((l + 150) // 4500, (l + 150) // 75 % 60, (l + 150) % 75)
+    print("%d tracks (%d..%d), %s, lead-out at LBA %d (%s)" %
+          (n, h[1] & 0xFF, h[1] >> 8, {1: "data", 2: "audio", 3: "data and audio"}.get(h[4], "?"),
+           h[3] << 16 | h[2], msf(h[3] << 16 | h[2])))
+    print("track  type          INDEX 00  INDEX 01 (MSF)     in its file  end    sector  byte in the image")
+    e = dump(0x8800, 0x8800 + 16 * n - 1)
+    for k in range(n):
+        w = e[16 * k:16 * k + 16]
+        l32 = lambda i: w[i + 1] << 16 | w[i]
+        kind = "audio" if w[3] & 1 else "data"
+        if w[3] & 2:
+            kind += " (BE)"
+        print("%5d  %-12s %9d %9d (%s) %6d-%-6d %6d  %4d+%-2d %d" %
+              (w[0] & 0xFF, kind, l32(4), l32(6), msf(l32(6)), l32(8), l32(10) - 1, l32(12),
+               w[1], w[2], l32(14)))
 
 
 def xadc():
@@ -287,6 +366,148 @@ def ide_event(t, a, b, c, d):
     return "? %X %02X %02X %02X %08X" % (t, a, b, c, d)
 
 
+# The I/O trace (mega65.vhd p_main_iot): DMA, PIC, 8042 and Sound Blaster accesses
+IOT_DMA = ["ch%d address", "ch%d count"] * 4
+IOT_DMA_REG = {8: "command", 9: "request", 10: "single mask", 11: "mode", 12: "clear flip-flop",
+               13: "master clear", 14: "clear masks", 15: "write masks"}
+IOT_PAGE = {0x87: 0, 0x83: 1, 0x81: 2, 0x82: 3, 0x8F: 4, 0x8B: 5, 0x89: 6, 0x8A: 7}
+IOT_PORT = {0x20: "PIC1 command", 0x21: "PIC1 mask", 0xA0: "PIC2 command", 0xA1: "PIC2 mask",
+            0x60: "8042 data", 0x64: "8042 status/command", 0x224: "mixer index",
+            0x225: "mixer data", 0x226: "DSP reset", 0x22A: "DSP read data",
+            0x22C: "DSP write", 0x22E: "DSP status (8-bit IRQ ack)", 0x22F: "16-bit IRQ ack"}
+# DSP commands: name, parameter bytes
+DSP_CMD = {0x10: ("direct 8-bit sample", 1), 0x14: ("8-bit single-cycle DMA", 2),
+           0x1C: ("8-bit auto-init DMA", 0), 0x40: ("time constant", 1),
+           0x41: ("output rate", 2), 0x42: ("input rate", 2), 0x48: ("block size", 2),
+           0x80: ("pause DAC (silence)", 2), 0x90: ("high-speed 8-bit auto-init", 0),
+           0x91: ("high-speed 8-bit single", 0), 0xD0: ("pause 8-bit DMA", 0),
+           0xD1: ("speaker on", 0), 0xD3: ("speaker off", 0), 0xD4: ("continue 8-bit DMA", 0),
+           0xD5: ("pause 16-bit DMA", 0), 0xD6: ("continue 16-bit DMA", 0),
+           0xD8: ("speaker status", 0), 0xD9: ("exit 16-bit auto-init", 0),
+           0xDA: ("exit 8-bit auto-init", 0), 0xE1: ("version", 0), 0xE0: ("invert", 1),
+           0xE2: ("DMA identification", 1), 0xE4: ("write test", 1), 0xE8: ("read test", 0),
+           0xF2: ("IRQ 8-bit", 0), 0xF3: ("IRQ 16-bit", 0)}
+
+
+def iot_port(port, val, wr, dsp):
+    """A name for the port, and for the byte where it says more."""
+    if port < 0x10 or 0xC0 <= port <= 0xDF:
+        hi = port >= 0xC0
+        reg = (port - 0xC0) >> 1 if hi else port
+        base = 4 if hi else 0
+        if reg < 8:
+            return "DMA%d %s" % (2 if hi else 1, IOT_DMA[reg] % (base + reg // 2))
+        name = "DMA%d %s" % (2 if hi else 1, IOT_DMA_REG[reg])
+        if wr and reg == 10:
+            name += ": ch%d %s" % (base + (val & 3), "masked" if val & 4 else "unmasked")
+        elif wr and reg == 11:
+            name += ": ch%d %s%s%s" % (base + (val & 3),
+                                      {0: "verify", 1: "write (to memory)", 2: "read (from memory)",
+                                       3: "?"}[val >> 2 & 3], ", auto-init" if val & 0x10 else "",
+                                      {0: ", demand", 1: ", single", 2: ", block",
+                                       3: ", cascade"}[val >> 6])
+        elif wr and reg == 15:
+            name += ": %s" % ", ".join("ch%d %s" % (base + i, "m" if val >> i & 1 else "u")
+                                       for i in range(4))
+        elif not wr and reg == 8:
+            tc = [base + i for i in range(4) if val >> i & 1]
+            rq = [base + i for i in range(4) if val >> (4 + i) & 1]
+            name += ": terminal count %s, request %s" % (tc or "-", rq or "-")
+        return name
+    if port in IOT_PAGE:
+        return "DMA page ch%d" % IOT_PAGE[port]
+    name = IOT_PORT.get(port, "port %03X" % port)
+    if wr and port == 0x22C:
+        if dsp["left"]:
+            dsp["left"] -= 1
+            name += "  (%s parameter)" % dsp["cmd"]
+        elif 0xB0 <= val <= 0xCF:
+            dsp["cmd"], dsp["left"] = "%d-bit %s %s DMA" % (
+                16 if val < 0xC0 else 8, "input" if val & 8 else "output",
+                "auto-init" if val & 4 else "single-cycle"), 3
+            name += "  %s (mode, length lo, hi follow)" % dsp["cmd"]
+        elif val in DSP_CMD:
+            dsp["cmd"], dsp["left"] = DSP_CMD[val]
+            name += "  " + dsp["cmd"]
+    elif wr and port == 0x226:
+        dsp["left"] = 0
+    elif port in (0x21, 0xA1):
+        base = 0 if port == 0x21 else 8
+        name += ": " + ("masked %s" % [base + i for i in range(8) if val >> i & 1])
+    return name
+
+
+def iotrace(opts):
+    pc_dev()
+    if opts[:1] == ["jump"]:
+        if len(opts) > 1:
+            poke(0x8007, int(opts[1], 0) & 0xFF)
+        v = dump(0x8007, 0x8007)[0]
+        print("I/O trace: logs sample jumps of %s/256 of the full range or more" %
+              ("?" if v is None else v & 0xFF))
+        return
+    if opts[:1] in (["start"], ["freeze"]):
+        freeze, once = "freeze" in opts, "once" in opts
+        poke(0x8004, (1 if freeze else 0) | (2 if once else 0))
+        print("I/O trace started%s%s" % (
+            ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
+            ", stops when full" if once else ""))
+        return
+    if opts[:1] != ["peek"]:
+        poke(0x8005, 0)                    # stop it: a running trace changes while it is read
+        time.sleep(0.05)
+    st = dump(0x8004, 0x8005)
+    if None in st:
+        print("no answer")
+        return
+    n, run, full = st[0], st[1] >> 1 & 1, st[1] & 1
+    poke(0xFFF5, 0x0003)                   # the trace: device addresses 0x3000.., window 3
+    raw = dump(0x8000, 0x8FFF)
+    pc_dev()
+    first = n % 1024 if full else 0
+    count = 1024 if full else n % 1024 if n else 0
+    print("I/O trace: %d entries%s, %s" % (n, " (the last 1024 shown)" if full else "",
+                                          "running" if run else "stopped"))
+    dsp = {"cmd": "", "left": 0}
+    t0 = tp = None
+    for i in range(count):
+        j = (first + i) % 1024
+        w = raw[4 * j:4 * j + 4]
+        if None in w:
+            continue
+        t = w[0] << 16 | w[1]
+        t0 = t if t0 is None else t0
+        dt = 0 if tp is None else (t - tp) & 0xFFFFFFFF
+        tp = t
+        kind, val, port = w[3] >> 13, w[3] & 0xFF, w[2]
+        head = "%10.3f ms %+9d us  " % (((t - t0) & 0xFFFFFFFF) / 1000.0, dt)
+        if kind == 0:
+            print(head + "W %03X <- %02X  %s" % (port, val, iot_port(port, val, True, dsp)))
+        elif kind == 1:
+            print(head + "R %03X -> %02X  %s" % (port, val, iot_port(port, val, False, dsp)))
+        elif kind == 2:
+            print(head + "--- Sound Blaster IRQ")
+        elif kind == 3:
+            print(head + "--- the %s DMA request waited %d us" %
+                  ({1: "8-bit", 2: "16-bit"}.get(val, "?"), port))
+        elif kind == 4:
+            print(head + "--- the DMA request has waited 1 ms: the card has nothing to play")
+        elif kind == 5:
+            print(head + "--- the DSP started a new DMA command it held back for %d us" % port)
+        elif kind == 6:
+            print(head + "--- the DSP has held a new DMA command back for 1 ms")
+        elif kind == 7:
+            print(head + "--- sample jump of %3d/256 at sample %d of the block" % (val, port))
+
+
+def sbfix(arg):
+    pc_dev()
+    if arg in ("on", "off"):
+        poke(0x8006, 1 if arg == "on" else 0)
+    v = dump(0x8006, 0x8006)[0]
+    print("Sound Blaster stalled-transfer fix: %s" % ("?" if v is None else "on" if v & 1 else "off"))
+
+
 def ide(n):
     pc_dev()
     poke(0xFFF5, 0x0002)                   # the IDE trace: device addresses 0x2000.., window 2
@@ -329,12 +550,27 @@ elif args and args[0] == "disks":
     disks()
 elif args and args[0] == "xadc":
     xadc()
+elif args and args[0] == "iotrace":
+    iotrace(args[1:])
+elif args and args[0] == "sbfix":
+    sbfix(args[1] if len(args) > 1 else "")
+elif args and args[0] == "cd":
+    cd()
 elif args and args[0] == "ide":
     ide(int(args[1]) if len(args) > 1 else 40)
 elif args and args[0] == "status":
     s = status()
     print(line(s), " vga_chk %d vga_bad %d sdram_busy %d reset %d snap %d" %
           (s["vga_chk"], s["vga_bad"], s["sdram_busy"], s["reset"], s["snap"]))
+    if "io_rd" in s:
+        print("last I/O read: port %04X -> %02X   last I/O write: port %04X <- %02X" %
+              (s["io_rd"] >> 8, s["io_rd"] & 0xFF, s["io_wr"] >> 8, s["io_wr"] & 0xFF))
+    if "joy" in s:
+        names = ("right", "left", "down", "up", "fire", "fire 2", "fire 3", "button 4")
+        held = [n for i, n in enumerate(names) if s["joy"] >> i & 1]
+        print("joystick (port 2): %s   Sound Blaster DMA request: %s" %
+              (", ".join(held) or "centred, no button",
+               {0: "none", 1: "8-bit up", 2: "16-bit up", 3: "both up"}[s["sb_req"]]))
     print(log(s["logs"]))
 elif args and args[0] == "boot":
     s = boot(int(args[1], 0), float(args[2]) if len(args) > 2 else 3.0)

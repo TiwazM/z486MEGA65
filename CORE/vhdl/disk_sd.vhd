@@ -515,7 +515,8 @@ begin
    buf_bad_o   <= k_bad;
 
    -- The checksums: a copy is pc_mgmt's reads of offsets 0 to 511 in order after an answer
-   -- (one made again from 0 is checked again), with no write into the write buffer meanwhile
+   -- (one made again from 0 is checked again; a copy starts where the address moves to 0, so a
+   -- reader sitting at 0 moves away first), with no write into the write buffer meanwhile
    -- (a sector to write goes in at the same addresses). Its sum against the slot's block's
    -- gives buf_bad_o, and the counts QNICE reads.
    p_check : process (main_clk_i)

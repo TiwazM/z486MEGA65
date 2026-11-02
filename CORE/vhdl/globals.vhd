@@ -99,6 +99,12 @@ constant C_DEV_PC_DISK_B      : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_PC_DISK_HD     : std_logic_vector(15 downto 0) := x"0103";
 constant C_DEV_PC_DISK_CD     : std_logic_vector(15 downto 0) := x"0104";
 
+-- The CD-ROM's track table (pc_cdrom.vhd has the layout), written by m2m-rom.asm's cdimage.asm
+-- (CD_PREP) for every disc: window 0 the table, windows 1 to 3 the firmware's scratch (a cue
+-- sheet's text; the extent map's staging copy). 16K x 16 bits of block RAM, window 0 read by
+-- pc_cdrom on the PC's clock.
+constant C_DEV_PC_CDTOC       : std_logic_vector(15 downto 0) := x"0105";
+
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System: not used
 ----------------------------------------------------------------------------------------------------------
