@@ -18,7 +18,20 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   [pc10-iii](https://github.com/johansmolinski/pc10-iii).
 - **Keyboard and mouse:** MEGA65 keyboard and joystick-port mouse as PS/2
   devices, after PCXT-EGA-MEGA65's `keyboard.vhd` and `m65_mouse_ps2.vhd`.
-- **Later:** a complete x87 FPU; perhaps a Voodoo 1.
+- **Later:**
+  - a complete x87 FPU; FPU rows in the CPU speed test (FADD, FDIV, FLD/FSTP,
+    FISTP, conversions); perhaps a Voodoo 1.
+  - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
+    position about every 10 ms, and packets at the 40 per second Windows
+    sets take two or three of those steps in turn (an I/O trace while moving
+    steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
+    each step over the time to the next one would even it out.
+  - Joysticks that games count by timing (TIE Fighter does not see the stick;
+    MiSTer has "Count" modes for that).
+  - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
+    with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
+    taking interrupts; where it is then is not known.
+  - CD music while a game loads from the hard disk, not tried on the board.
 
 ## What the shell does now
 
