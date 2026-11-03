@@ -22,7 +22,7 @@
 -- reset after a move (mega65.vhd: C_DEV_PC_CTL).
 --
 -- VCO 1280 MHz (600..1440 MHz for -2), PFD 20 MHz. 64 MHz, not a DX2-66's 66.667 MHz: with the
--- framework in, the CPU's paths close at about 65.6 MHz (README). Implementation aims 0.3 ns
+-- framework in, the CPU's paths close at about 65.6 MHz (doc/results.md). Implementation aims 0.3 ns
 -- above 64 MHz (CORE-impl.xdc), which keeps that margin against build-to-build variation.
 --
 -- Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's clk.vhd

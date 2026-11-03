@@ -4,238 +4,66 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 486DX2-class PC built around the [z486](https://github.com/nand2mario/z486) CPU,
 to the MEGA65 R6.
 
-Status: the MEGA65 shell exists, and the whole core synthesizes, places and
-routes for the R6 (MiSTer2MEGA65, Megamiga's fork) and meets timing at 64 MHz
-with 0.3 ns to spare (the CPU floorplanned, `impl strong`, the PC's clock
-over-constrained in implementation). 66.667 MHz, a DX2-66's clock, misses by
-0.25 ns (about 65.6 MHz), all inside the CPU. On an R6 the PC boots its BIOS
-from the SD card, typed on the MEGA65 keyboard as the PC's PS/2 keyboard, and
-FreeDOS 1.4 installs from its boot floppies (image files on the card, swapped
-through the menu) onto the IDE hard disk (a 2 GB image file on the card) and
-boots from it.
+It runs at 64 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
+The current version is **v0.1-preview** (see
+[Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
-## Plan
+## Features
 
-- **Board:** MEGA65 R6 (XC7A200T-2), on MiSTer2MEGA65 in Megamiga's fork
-  ([doc/m2m-provenance.md](doc/m2m-provenance.md)).
-- **Memory:** the R6's 64 MB SDRAM for system RAM; HyperRAM for the SVGA
-  framebuffer (VRAM) and the boot image.
-- **Clock:** 64 MHz. A DX2-66 runs at 66.667 MHz, which the CPU's paths miss by
-  0.25 ns with the framework in; 64 MHz meets timing with room for
-  build-to-build variation.
-- **Disks:** a hardware replacement for MiSTer's ARM-side IDE/floppy handling,
-  after `mgmt_bridge.sv` in
-  [PCXT-EGA-MEGA65](https://github.com/silent-command/PCXT-EGA-MEGA65)
-  (same `ide.v` / `floppy.v`), fed by the fork's hardware SD engine as in
-  [pc10-iii](https://github.com/johansmolinski/pc10-iii).
-- **Keyboard and mouse:** MEGA65 keyboard and joystick-port mouse as PS/2
-  devices, after PCXT-EGA-MEGA65's `keyboard.vhd` and `m65_mouse_ps2.vhd`.
-- **Later:** a complete x87 FPU; perhaps a Voodoo 1.
+**PC**
+- z486 486DX2-class CPU at 64 MHz, with L1 caches and an x87 FPU
+- 256 KB L2 cache in block RAM, as on a 486 board
+- 64 MB RAM (the R6's SDRAM)
+- Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
 
-## What the shell does now
+**Video**
+- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included)
+- HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
+  resolution
+- Scaling filters (Sharp, Smooth, Pixels) and optional scanlines (25 % or 50 %)
+- No tearing when the PC's 70 Hz text mode goes out at 60 Hz
 
-- `CORE/sv/z486_mega65.sv` wires z486_MiSTer's `system.sv` (CPU, chipset,
-  VGA/ET4000, OPL3/SB, IDE, floppy) and its SDRAM backend (64 MB on the R6's
-  IS42S16320F, with DQM) as `z486_mister.sv` does on MiSTer, plus the SVGA
-  framebuffer descriptor, the SB Pro mix, and a video stream for M2M
-  (positive syncs, separate blanks).
-- `CORE/vhdl/mega65.vhd` maps z486's MiSTer DDR3 port into HyperRAM:
-  DDR3 `0x3F800000` (the SVGA framebuffer, 4 MB) to HyperRAM `0x400000`, the
-  rest (the boot image at `0x300C0000`) into `0x300000`-`0x3FFFFF`, through
-  `avm_fifo` and `avm_decrease` (64 to 16 bits). The reset button resets
-  HyperRAM with the core (M2M's `hr_rst`), and ascal with it. ascal's write
-  request had no reset (`--avl_write_i<='0'` in M2M's ascal.vhd): a reset
-  during one of its input write bursts left it high, the HyperRAM side took
-  it for a new burst and waited for its beats for good. HyperRAM stopped (0
-  transactions a second), the screen repeated one line, z486's boot loader
-  waited for its first read (stage 2), and a long press did not help: the
-  next reset caught ascal writing again. It resets now (M2M-UPSTREAM
-  reset-write; `tb_ascal.vhd`'s G_RST replays it, the old ascal fails). The
-  bridge's z486 side resets with HyperRAM too, and the PC waits for it.
-  ascal shows the framebuffer
-  from HyperRAM (M2M-UPSTREAM rtg-framebuffer). Below `0x300000` ascal keeps
-  three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
-  on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
-  changed (a flickering clock, stray lines, the cursor). The scaler
-  interpolates sharp bilinear by default: the 720x400 text mode scales by 1.2
-  (480p, 720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes
-  uneven. The menu's "Filter" switches it (Sharp, Smooth = bilinear, Pixels =
-  nearest neighbour), and "Scanlines" darkens every second output line by
-  25 % or 50 % (a register stage behind ascal, M2M-UPSTREAM scanlines,
-  `digital_pipeline.vhd`). They line up with the PC's lines only in 1280x1024,
-  where a 480-line mode is exactly two lines each; in the other modes a PC
-  line is 1.25 to 1.92 output lines and the dark lines beat into bands.
-  ascal's bilinear path (Smooth, Sharp) left one clock before the nearest one
-  and wrote every pixel one output pixel to the left: the picture moved left,
-  at 800x600 the PC's first column was gone, and thin strokes broke (the top
-  of a "6"). It now runs one stage later (M2M-UPSTREAM filter-align); Smooth
-  matches a centre-aligned bilinear exactly, Sharp's edges sit where Pixels'
-  do (`CORE/sim/tb_ascal.vhd` with `G_PAT=1`: "68" text at 720x400 into
-  1280x960 and 800x600).
-- Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
-  for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
-  MMCM at VCO 1280 MHz.
-- The SDRAM clock is a third output of that MMCM at 292.5 degrees, through an
-  ODDR (see [SDRAM clock](#sdram-clock)). `sdram.v`'s shortcut below 75 MHz
-  (one cycle for tRCD and tRP, 15.6 ns at 64 MHz, under the chip's 18 ns) is
-  patched out in the build copy (`tools/z486_sources.py`): two cycles each.
-- BIOS: at startup the firmware (`CORE/m2m-rom/m2m-rom.asm`, `PREP_START`)
-  loads `boot1.rom` (VGA BIOS, to `0xC0000`) and `boot0.rom` (system BIOS, to
-  `0xF0000`, or `0xE0000` if above 64 KB) from the SD card into the HyperRAM
-  window z486's boot loader copies from (`0x3C0000`, 256 KB, cleared first).
-  The PC stays in reset until they are in (QNICE device `C_DEV_PC_CTL`,
-  `mega65.vhd`). A missing or unreadable ROM stops with a message on screen.
-  The framework's own ROM auto-loader is not used: it writes one byte per
-  HyperRAM word, and z486 reads the ROMs packed.
-- Firmware space: the QNICE ROM holds 28,286 of its 32,768 words. The FAT32
-  write layer (the Shell's settings file) lives in code banks 0 and 1, 4K-word
-  banks behind the window 0x9000-0x9FFF (Megamiga's code-banks, as in MegaMac),
-  called through `FAR_CALL` stubs; six banks are free.
-- Keyboard: the MEGA65 keyboard is the PC's PS/2 keyboard
-  (`CORE/vhdl/pc_keyboard.vhd`, `ps2_device.vhd`): scan code set 2, which the
-  PC's 8042 translates to set 1, typematic repeat, and the replies to the
-  BIOS's keyboard commands, which MiSTer's ARM side gives there. See
-  [Keyboard](#keyboard).
-- Mouse: an Amiga mouse on joystick port 1, or a USB mouse behind a mouSTer in
-  Amiga mode, is the PC's PS/2 mouse (`CORE/vhdl/pc_mouse.vhd`): its
-  quadrature lines as MegaMac decodes them, the left button on pin 6. The
-  right button (pin 9) is invisible to the MEGA65's paddle circuit (Megamiga
-  measured it, and the R6 is no different), so F13 stands in for it. For a
-  real right button, use a Commodore 1351 or a mouSTer in its C64 mode
-  (`c1351`, `mode=mouse` in its INI): its position on the paddle lines, the
-  right button on pin 1. The core finds a 1351 by itself (its paddle lines
-  read driven for 0.1 s) and goes back to Amiga mode half a second after
-  they read open. Its x is on POT X (pin 9), its y on POT Y (pin 5), as on a
-  C64; `qmon.py c1351` shows the mode and reverses or swaps axes that run the
-  wrong way. The mouse answers the BIOS's and the
-  drivers' commands (reset, identify, sample rate, status, ...) like a
-  standard PS/2 mouse, also when nothing is plugged in: the BIOS's mouse
-  functions, which CuteMouse calls, wait for good for a mouse that does not
-  answer. After any byte from the PC it sends no packets for 300 ms (the
-  motion waits): the Bochs BIOS's mouse functions take the byte after their
-  command as its answer and leave the mouse port off when it was no FA, so
-  a packet in the middle of CuteMouse's set-up (F4, then F3 and its byte)
-  left the mouse dead, or its packets read a byte off (the pointer jumping
-  from edge to edge). The 7th Guest hit it at its start, in native mode
-  nearly every time; the debug log showed it. `CORE/sim/run_ps2.sh`
-  simulates the keyboard and the mouse against z486's 8042 (`ps2.v`;
-  `tb_pc_mouse` has a packet in the middle of F3, which fails without the
-  quiet time), and the PIC patch below (`tb_pic.sv`).
-- Joystick: a joystick on port 2 is the PC's game port joystick at 201h
-  (z486_MiSTer's `joystick.v`, as a 4-button joystick; the second joystick
-  absent). The directions put the axes at their ends, fire is button 1. A
-  second and third fire button on the paddle lines (the C64 two- and
-  three-button joysticks, which connect them to +5 V) are buttons 2 and 3:
-  the second on pin 9 (POT X, as the C64GS's), or on pin 5 for sticks that
-  have it there ("Joystick fire 2" in the menu); the third on the other one.
-  A button that grounds pin 9 (Amiga style) is invisible, like the Amiga
-  mouse's right button. `qmon.py status` shows what is held, `qmon.py joy`
-  every change.
-- Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
-  serves z486's floppy and IDE controllers and fills the CMOS through the
-  management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
-  (equipment, base memory, checksum, the date and time from the MEGA65's RTC);
-  then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
-  requests) and the hard disk, the master of the first IDE channel (`ide.v`:
-  IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
-  types following the images; the CD-ROM drive, an ATAPI device on the second
-  channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does, with
-  `cd_audio.vhd` for CD audio and the firmware's `cdimage.asm` for cue sheets),
-  which `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
-  image file through the SD host controller's engine port (Megamiga's
-  sd-host), with the file's extent map from the firmware (fragmented files are
-  fine); reads come in runs of one SD command each through a 32-sector ring
-  in LUT RAM, every copy out of it checked against the checksum of what went
-  in (a sector that does not match comes again, fresh from the card); the
-  write buffer is LUT RAM too. See [Disks](#disks). `CORE/sim/run_disks.sh` simulates them against z486's
-  `floppy.v`, `ide.v` and `rtc.v` (`tb_cdrom.sv`: both IDE channels, the
-  packets a DOS CD-ROM driver sends, an ISO and a disc with data and audio
-  tracks: raw reads, the TOC, PLAY sample by sample); `CORE/m2m-rom/test/run.sh`
-  runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
-  BIN and cue sheets, checked against its own layout of the disc.
-- Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
-  scanlines, the joystick's fire 2 (pin 9 or pin 5), help, "Reset the PC". An image mounted at start-up
-  (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
-  once the menu opens (`DAN_FLUSH`): the
-  menu has no memory before that, and the line read "Hard disk:  Hard
-  dis..." (the line's own text taken for the name).
-- HDMI modes: 720p 60 Hz (the PC's 4:3 picture between bars), 480p, 800x600,
-  1024x768 and 1280x1024 at 60 Hz, and "Native resolution": the HDMI output
-  follows the PC's own picture size and the monitor does the only scaling
-  (M2M-UPSTREAM native, `digital_pipeline.vhd`: ascal's window is the
-  picture's size in the middle of the output). `mega65.vhd` measures the
-  picture as ascal sees it (the widest line's pixels, the lines of a frame;
-  a size counts once it held for eight frames) and picks the smallest mode it
-  fits into: 720x400 text in 720x480 (40 lines of bars), 640x480 and 640x400
-  in 640x480, SVGA 800x600 and 1024x768 in their own modes; 320- and
-  360-pixel lines and 200-line modes come doubled (the core gives them
-  without the VGA's doubling), so 320x200 is 640x400. Native uses nearest
-  neighbour and no scanlines, and the monitor resyncs when the PC changes
-  mode, as a real VGA monitor does. On an R6 with a 1280x1024 monitor the DOS
-  prompt came out as 720x480 and The 7th Guest's VESA screens as 640x480,
-  switching by themselves. The HDMI modes all exist already; the
-  PC's 70 Hz text mode goes out at 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
-  resolution: the picture is 1280x960 between bars and the monitor scales
-  nothing, where 480p or 720p are scaled twice (by the core and by the
-  monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
-  CVT-RB) at 90 MHz: VESA's DMT timing needs 108 MHz, at which the HDMI
-  domain misses timing (the menu overlay's blending). The 90 MHz is a new
-  entry in the framework's HDMI clock (M2M-UPSTREAM sxga-mode:
-  `video_out_clock.vhd`, values from Xilinx's MMCM functions; the HDMI
-  domain is timed at it), and the scaler is built without its bicubic and
-  polyphase interpolators (`ASCAL_MASK` in `globals.vhd`), whose DSP paths
-  were the slowest of that domain. Its 15.8 µs lines are shorter than the
-  scaler's fetch of a 640-pixel line from the HyperRAM (15 bursts, ~13-20
-  µs with the input's writes in between); ascal's line accounting waited for
-  each fetch, fell behind, missed the start of the frame and showed noise.
-  The fetches now run on their own from a queue (M2M-UPSTREAM late-fetch,
-  `ascal.vhd`), so the accounting keeps the display's time;
-  `CORE/sim/run_ascal.sh` compares ascal with a slow memory against a fast
-  one. On a 5:4 monitor 1280x1024 is the sharpest mode by far: 800x600 is
-  1.25x (every fourth pixel doubled, then smoothed) and the monitor scales
-  it again.
-- L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
-  between the CPU's memory port and the SDRAM, as on a 486 board:
-  direct-mapped, 16-byte lines, write-through. A line fill that hits is
-  answered from the cache; stores update cached lines; floppy and Sound
-  Blaster DMA (the SDRAM's second port) drop their lines before the CPU's
-  next lookup. `tools/qmon.py l2` shows the fills from the cache and from the
-  SDRAM, `l2 off` / `l2 on` switch it for comparisons (`l1 off` / `l1 on`
-  z486's own L1 caches: off, every access goes uncached; after on, reset the
-  PC). `CORE/sim/run_l2.sh`
-  checks it against a memory model with DMA writes and switching. Measured
-  (2026-10-31, the same build): Doom's `-timedemo demo3` 35.7 fps without,
-  36.9 fps with it (+3.5%), 76% of the line fills from the cache: Doom's hot
-  data mostly fits z486's own 8 + 8 KB. Dr. Hardware: average RAM throughput
-  24.5 -> 31.4 MB/s (+28%; blocks between the L1's 16 KB and 256 KB), the
-  minimum (beyond 256 KB) and maximum (within the L1) unchanged, Hardstones
-  26345 -> 27418 (+4%).
-- Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
-  of the PC's state (boot stage, POST code, CS:EIP, VGA frame count, the L2's
-  counters) and a 4096-entry log of the BIOS's debug port 0x402, z486's
-  stall watchdog, POST code changes and the PS/2 keyboard's and mouse's bytes
-  both ways (`qmon.py status`: `>kbd`/`>mou` to the device, `<` from it);
-  `mega65.vhd` has the map. `tools/qmon.py` reads them over the JTAG
-  adapter's serial port (115200 baud) while the PC and the menu run: the
-  firmware answers serial commands in the Shell's background (`R`/`W` QNICE
-  memory, `D`/`P` a device's registers, as MegaMac does), no debug mode
-  needed. `qmon.py status` (`disks` the mounted images, the sector counts and
-  times, the ring's checksums; `boot` and `sweep` reset the PC at other SDRAM
-  clock phases; `xadc` the FPGA's temperature, VCCINT, VCCAUX and VCCBRAM,
-  now and their lowest and highest since the core was loaded,
-  `xadc_mon.vhd`).
-  `qmon.py ide [N]` prints the last N of 512 events of the IDE trace
-  (`pc_mgmt.vhd`, `pc_cdrom.vhd`; window 2 of `C_DEV_PC_CTL`): every command
-  of both channels with its task file, every status the controllers set,
-  every block done, reset, floppy request and SD answer, with milliseconds
-  before the newest. It is not cleared by a PC reset, so it shows what led up
-  to a hang.
-  `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
-  Cursor Up, then press Help).
+**Sound**
+- Sound Blaster 16 with OPL3 FM music
+- CD audio, played in hardware and mixed through the Sound Blaster's CD volume
 
-Not wired yet: the MEGA65's own floppy drive.
+**Disks**
+- IDE hard disk from an image file on the SD card
+- Floppy drives A: and B: from image files, swapped from the menu
+- ATAPI CD-ROM drive:
+  - ISO images, raw BIN images, and BIN/CUE discs, including multiple files,
+    WAVE audio, pregaps and mixed sector sizes
+  - Up to 99 tracks, with CD audio
+  - Works with DOS CD-ROM drivers and MSCDEX, and Windows' Media Player
+- Disc and disk images mount automatically at start-up, or from the menu at any
+  time
 
-## SD card
+**Input**
+- The MEGA65 keyboard as a PC keyboard, with symbols as on the keycaps. MEGA works
+  as an Fn key for Page Up/Down, Home/End and Delete.
+- PS/2 mouse on joystick port 1:
+  - Commodore 1351, or a mouSTer in C64 mode: both buttons, detected
+    automatically
+  - Amiga mouse, or a mouSTer in Amiga mode: F13 is the right button
+- Game port joystick on port 2 with up to three buttons. The second fire button
+  can be on pin 9 (C64GS style) or pin 5, set in the menu.
+
+**Core**
+- Menu on HELP: disks, HDMI mode, filter, scanlines, joystick, reset; settings
+  are saved to the SD card
+- The reset button and Ctrl+Alt+Del restart the PC cleanly
+
+## Tested
+
+On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
+SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
+Guest, and Quake (slowly: about 6 fps in `timedemo demo1`).
+
+## Getting started
+
+1. Flash `z486-R6-<version>.cor` from [Releases](https://github.com/TiwazM/z486MEGA65/releases)
+   with MEGAFLASH. The `.bit` is the same core, for loading over JTAG.
+2. Put the BIOS files, and any disk images, on the SD card:
 
 ```
 /z486/boot0.rom    the system BIOS
@@ -255,126 +83,7 @@ this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
 
-## Disks
-
-The menu's "Floppy A:", "Floppy B:", "Hard disk:" and "CD-ROM:" lines mount an
-image file from the card, under any name; writes go to the file.
-
-- **Floppies:** raw images of 360K, 720K, 1.2M, 1.44M or 2.88M; the size gives
-  the geometry and the drive type in the CMOS. A floppy mounted while the PC
-  runs is a disk change, as on a real drive, so disks can be swapped during an
-  installation. The PC boots from A: when it holds a floppy, else from the
-  hard disk (z486's default boot order, as on MiSTer).
-- **Hard disk:** a raw image of any whole number of 512-byte sectors, up to
-  4 GB less 512 bytes, the largest file FAT32 holds. The BIOS looks for disks
-  only when the PC starts: after mounting one from the menu, "Reset the PC".
-  It reads the size from IDENTIFY (LBA) and translates for DOS.
-- **CD-ROM:** a disc image, any time: the drive is always there, the master
-  of the second IDE channel (ports 170h/376h, IRQ 15), with or without a
-  disc, and a new disc is a media change for the driver. The BIOS lists it
-  ("IDE1 master: CD-ROM z486 MEGA65 CD-ROM"); MS-DOS 6.22 reads it with
-  `DEVICE=OAKCDROM.SYS /D:MSCD001` and `MSCDEX /D:MSCD001` (tested on the
-  board; OAKCDROM.SYS comes with Windows 98's boot disk). The image can be
-  - an ISO (whole 2048-byte sectors, one data track);
-  - a raw `.bin` (whole 2352-byte sectors, one data track, MODE1 or MODE2);
-  - a `.cue` sheet with its files in the same folder: data and CD audio
-    tracks, one file for all or one per track (`FILE ... BINARY`, `MOTOROLA`
-    for big-endian audio, `WAVE`: PCM, 16-bit stereo, 44.1 kHz; MP3 and other
-    compressed audio are refused: convert those tracks to WAVE or BIN),
-    `TRACK` (`AUDIO`, `MODE1/2048`, `MODE1/2352`, `MODE2/2352`, `MODE2/2336`),
-    `INDEX 00/01`, `PREGAP`, `POSTGAP`; at most 99 tracks, one session, 16K
-    characters of cue text and 511 fragments for all its files together.
-  Mount the `.cue` (the firmware, `cdimage.asm`, reads it and maps its files).
-  **CD audio**: PLAY AUDIO (10, 12, MSF, TRACK/INDEX), PAUSE/RESUME, STOP and
-  READ SUB-CHANNEL, as MSCDEX and games use them; the music goes through the
-  Sound Blaster mixer's CD volume (and its CD output switches) and the drive's
-  own volume (MODE SELECT page 0Eh, what a game's music slider sets through
-  MSCDEX). As on a real drive, a READ (or SEEK) stops the music: games load
-  their data first, or stop the music to load. A track's pregap that is in no
-  file (`PREGAP`) plays as silence. `qmon.py cd` shows the disc's tracks and
-  how the music goes.
-- **Eject:** every folder of the file browser starts with `<No Disk>` (right
-  after `<..>`): choosing it empties the drive. A mount lasts until the
-  MEGA65 is switched off; only `/z486/floppy.img`, `/z486/hdd.img` and
-  `/z486/cdrom.cue` (or `/z486/cdrom.iso`) come back by themselves.
-
-An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
-
-```bash
-mkfile -n 2g hdd.img
-```
-
-Copy it to the card as `/z486/hdd.img`, boot FreeDOS's boot floppy from A:,
-and let the installer partition and format C: (it restarts the PC in between)
-and install, swapping the floppies through the menu's "Floppy A:" line. To
-start from C: afterwards, choose `<No Disk>` for A: and "Reset the PC".
-
-Reads come in runs: one multi-block SD read (CMD18) for the sectors the PC
-will read next (what an IDE command still wants, a track on a floppy), within
-the image's extent, into a ring of 32 sectors. The PC's sector is answered as
-soon as it is in, and the next ones come out of the ring; the card waits (its
-clock stopped) while the ring is full, so a 64-sector DOS cluster is one SD
-command. A read elsewhere ends the run. Before, every sector was an SD
-command of its own, about 440 µs: Dr. Hardware measured 997 KB/s with 64 KB
-blocks; with the runs 2989 KB/s (10 KB blocks: 1036 -> 2624 KB/s), the
-average sector 456 -> 146 µs. Its access time stayed 6.1-6.2 ms. A CD-ROM
-READ is one run too: its 2048-byte sectors are four of the image's. Writes still go to
-the card one sector at a time (DOS without a disk cache rewrites the FAT for
-every file). `tools/qmon.py disks` shows the sector counts, the time per
-sector and the SD transfers (`disks clear` zeroes them, `disks watch 10`
-counts sectors per second over 10 seconds).
-
-Checked on the board with MS-DOS 6.22 (`fc /b` of a file against itself and
-against fresh copies, 25,151 sectors read and 2,325 written): no wrong data,
-no failed or repeated transfers.
-
-The ring lost bits in block RAM. The 7th Guest's videos broke up, it hung
-now and then, and DOS said "Invalid COMMAND.COM" on its exit: now and then a
-bit of a sector read came out wrong, near the end of the sector, in the
-data's lower bits, a 1 more often than a 0. PIOTEST (below) found 1 to 1500
-wrong sectors per GB, by where Vivado had put the ring's block RAMs (much the
-most with one on RAMB36_X5Y37, which `CORE-impl.xdc` now leaves empty); the
-ring's write port on the QNICE clock or on the PC's, its slots split over
-two block RAMs by parity, did not help. A checksum per sector, as the engine
-writes it into the ring and as `pc_mgmt` or `pc_cdrom` copies it out, caught
-every one: the bits were stored wrong (copying the slot again never helped),
-and a sector read again from the card came out right (1,390 of 1,390 in
-2 GB). With the ring in LUT RAM, none in 1.7 GB, at the same supply and
-temperature (the XADC: VCCINT and VCCBRAM within 0.01 V of 1.0 V, 52-59
-degrees C). So the ring and the write buffer are LUT RAM (`disk_sd`'s
-`G_LUTRAM`), and the checksums stay: a copy that does not match is read again
-fresh from the card, twice at most, for the hard disk, the CD-ROM (its
-2048-byte block again, as `ide.v`'s buffer only rewinds to its start) and
-the floppies (checked before `floppy.v`'s FIFO gets the sector).
-`qmon.py disks` counts them: copies that matched, copies that did not,
-sectors read again fresh and how many of those came right.
-
-An SD card that a core has used in SPI mode (MegaMac does) stays in SPI mode
-until it loses power, and loading z486 over JTAG does not power it: the SD
-host's native 4-bit bus then fails and it falls back to SPI at 25 MHz, which
-works but makes the disks about 8x slower (PIOTEST 1,940 instead of 3,000+
-KB/s). `qmon.py disks` shows each slot's bus (native 4-bit at 50 MHz, or SPI);
-take the card out and put it back in once (or switch off) to bring it back to
-the native bus.
-
-`tools/dos/` has the test programs, on `tools/dos/build/z486test.iso` for
-the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
-- `PIOTEST.COM`: from C:, reads `PIOPAT.BIN` (4 MB, it writes it when it is
-  missing) straight from the IDE ports, past the BIOS and DOS, with REP
-  INSW, single INs, REP INSD and INs compared in registers (nothing stored),
-  pass after pass until a key. Each sector's bytes are its own: a wrong byte
-  says whether it belongs to another sector (and which) or has bits flipped.
-- `VTEST.COM`: the SVGA video memory through VESA's bank window, conventional
-  RAM, XMS and reads through DOS (`CDPAT.BIN` on the CD; `VTEST W` writes it),
-  with the timer at 10 kHz and Sound Blaster DMA running, as during a game.
-- `CPUSPEED.COM [MHz]`: the CPU's clocks per instruction in real mode (about
-  30 kinds, the PIT's counter 2 as the clock), beside a 486's, and the MHz a
-  speed test that times each one would report (64 unless given). A row well
-  under 64 is an instruction z486 takes longer for than a 486.
-
-`tools/floppy-packer.html`, a page that runs in any browser without a server,
-packs files into a FAT12 floppy image of any of the five sizes, with DOS's
-8.3 file names checked.
+3. Press HELP for the menu, to mount images and pick the HDMI mode.
 
 ## Keyboard
 
@@ -395,204 +104,38 @@ printed on the MEGA65's keycaps:
 | symbol keys and shifted digits | as on their keycaps: `:` (Shift `[`), `;` (Shift `]`), `@`, `*`, `+`, `-`, `=`, Shift+2 `"`, Shift+6 `&`, Shift+7 `'`, Shift+8 `(`, Shift+9 `)`, ... (the PC sees Shift pressed or released as each one needs) |
 | PC symbols without a keycap | `£` `\` (Shift `|`), arrow-up `^` (Shift `~`), arrow-left `` ` ``, Shift+`-` `_`, Shift+`@` `{`, Shift+`*` `}` |
 | MEGA | the Fn key above, nothing by itself |
-| F13 | the mouse's right button (see Mouse above) |
+| F13 | the mouse's right button (see [Mouse and joystick](#mouse-and-joystick)) |
 | HELP | the menu |
 
-After Ctrl+Alt+Del, or Enter at a "restart" prompt, the keyboard could stay
-dead until a full reset. The Bochs BIOS sets up the keyboard (POST 77) before
-the interrupt controllers; a key released in between raises IRQ1, ICW1 then
-clears the request, and an 8259 waits for a new rising edge, which never
-comes while nobody reads port 60h. `tools/z486_sources.py` patches `pic.v`:
-after ICW1 an input that is already high counts as a new edge, so it is
-served once (the same for the mouse's IRQ12). `tb_pic.sv` replays the race;
-upstream's `pic.v` fails it.
+## Mouse and joystick
 
-## SDRAM clock
+- **Mouse on port 1.** A Commodore 1351, or a USB mouse behind a mouSTer set to
+  C64 mode (`c1351` and `mode=mouse` in its INI), has both buttons. An Amiga
+  mouse, or a mouSTer in Amiga mode, works too, but the MEGA65 can't read its
+  right button (pin 9): F13 stands in for it. The core tells them apart by
+  itself. Load a PS/2 mouse driver (CuteMouse, or Windows' "Microsoft or IBM
+  PS/2"). There is no scroll wheel.
+- **Joystick on port 2** is the PC's game port joystick. Fire is button 1. A C64
+  two- or three-button stick's extra buttons are buttons 2 and 3: the second on
+  pin 9 (POT X, as the C64GS), or on pin 5 if your stick has it there ("Joystick
+  fire 2" in the menu).
 
-`sdram.v` (z486_MiSTer) reads its data three clocks after each READ command.
-MiSTer runs it at 85 MHz with the SDRAM clock at 180 degrees; at 64 MHz on the
-R6 that phase puts the read outside the data window, and the first bitstream
-ran garbage from F000:FFF0 on (black screen). With the phase swept at run
-time (the MMCM's dynamic phase shift, in 13.95 ps steps), the PC boots for
-every phase from 180 degrees + 130 steps to + 570 steps (1.81 to 7.95 ns
-later), and fails at +120 and +580. The core uses the middle, +350 steps =
-4.88 ns = 292.5 degrees, 3.07 ns from either edge. That window is one board's;
-another R6 can be measured the same way.
+## Known limits
 
-## Layout
+- A 486 at 64 MHz with a microcoded FPU: Pentium-era 3D games are slow.
+- Some games don't detect the joystick (TIE Fighter).
+- The MEGA65's own floppy drive isn't used.
+- CD music while a game loads from the hard disk hasn't been tried on the board
+  yet.
 
-- `CORE/` - the MEGA65 core: `vhdl/`, `sv/`, the firmware (`m2m-rom/`), the
-  constraints (`CORE.xdc`; `CORE-impl.xdc` for implementation only), the
-  project (`CORE-R6.xpr`, generated), `build_synth.tcl` and `build_impl.tcl`
-- `M2M/` - the framework (vendored from Megamiga, QNICE as a submodule)
-- `z486/` - the CPU (submodule, nand2mario/z486)
-- `z486_MiSTer/` - the MiSTer PC core (submodule, nand2mario/z486_MiSTer)
-- `ooc/` - out-of-context Vivado builds of the CPU and of `system.sv`
-- `tools/` - `build_r6.sh` (the core's build in Docker), `gen_xpr.py` (the
-  project), `z486_sources.py` (the source list and the Vivado 2022.2 copies),
-  `qmon.py` (the debug registers through the M2M debug monitor),
-  `floppy-packer.html` (files into a floppy image, in a browser), `dos/` (the
-  DOS test programs, PIOTEST and VTEST)
+## Documentation
 
-Clone with `git clone --recursive`, or run `git submodule update --init` after
-cloning (z486_MiSTer's own submodules are not needed).
-
-## Building
-
-Vivado 2022.2 in the vivado-on-mac Docker setup (`m65build` image):
-
-```sh
-tools/build_r6.sh            # synthesize the core; reports in CORE/reports/synth/
-tools/build_r6.sh reports    # re-report the last synthesis after constraint changes
-tools/build_r6.sh impl       # synthesize if needed, then place and route; CORE/reports/impl/
-tools/build_r6.sh finish     # only the post-route phys_opt_design and reports of the last impl
-tools/build_r6.sh impl strong   # the same with place ExtraTimingOpt and a post-route
-                                # AggressiveExplore phys_opt pass
-tools/build_r6.sh impl incr  # incremental place and route from CORE/reports/ref/
-tools/build_r6.sh bit        # the last impl's bitstream and core file, CORE/bitstream/z486-R6.cor
-tools/build_r6.sh patch      # firmware only (m2m-rom.asm): the last impl's bitstream with the
-                             # current firmware, in minutes, no synthesis
-```
-
-`build_r6.sh` regenerates `CORE/CORE-R6.xpr` and the source copies in
-`CORE/gen/`, then runs `CORE/build_synth.tcl` or `CORE/build_impl.tcl`.
-Implementation stops after the strategy's post-route `phys_opt_design`; `bit`
-writes the bitstream from its checkpoint (`CORE/build_bit.tcl`) and makes the
-`.cor` with `coretool` from the MEGA65 tools release (`CORETOOL=path`, default
-`~/Downloads/m65tools-release-1.00-macos/coretool`). MEGAFLASH shows it as
-"z486", version "WIP-" and the commit. `incr` places and routes incrementally
-(directive TimingClosure) from the routed checkpoint in `CORE/reports/ref/`:
-copy a good build's `CORE/reports/impl/mega65_r6_routed.dcp` there, and the
-next small change keeps the rest of its placement and routing. Synthesis takes
-about 8 minutes, a full `impl strong` about an hour more. To open the project
-in the Vivado GUI, run `python3 tools/gen_xpr.py` first.
-
-Out-of-context builds of the CPU or of `system.sv` alone:
-
-```sh
-cd ooc
-./run_ooc.sh 1 66                              # CPU with x87 at 66 MHz
-OOC_TCL=z486_pc_a7.tcl ./run_ooc.sh 1 66       # system.sv at 66 MHz
-OOC_TCL=z486_pc_a7.tcl ./run_ooc.sh 1 66 xc7a200tfbg484-2 resume   # P&R only
-```
-
-Toolchain notes (Vivado 2022.2):
-
-- z486 and z486_MiSTer set `` `default_nettype none `` and declare ports
-  without a net type, which 2022.2 rejects (Synth 8-6735; the error cannot be
-  downgraded). The builds read copies with `` `default_nettype wire `` (only
-  the lint check is lost): `CORE/gen/` for the core, `build-*/patched/` for
-  the out-of-context runs.
-- z486_MiSTer's `.v` files use SystemVerilog: the project reads every z486
-  source as SystemVerilog.
-- Under Docker emulation, Vivado's WebTalk host-info lookup crashes in libudev
-  (`realloc(): invalid pointer`). The scripts turn WebTalk off and run in the
-  `m65build` image, whose `LD_PRELOAD` avoids the same crash in the license
-  library.
-- `Z486_XILINX` selects the Xilinx RAM variants; nothing Intel-only is left.
-
-## Results so far (XC7A200T-2, Vivado 2022.2)
-
-The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
-disk, the keyboard, the SDRAM clock at 292.5 degrees, debug registers;
-incremental from the previous build, CPU pblock, `main_clk` over-constrained
-by 0.3 ns during implementation, 18 minutes with synthesis): **all timing
-constraints met** with **+0.377 ns** on the PC's clock, no failing endpoint
-out of 105,449, hold +0.012 ns, routing complete. 73.1K LUTs (54%), 36.8K
-registers, 150.5 block RAM tiles, 86 DSPs.
-
-| Clock | Period | Disks build | First booting build | BIOS loader build | Without the over-constraint |
-|---|---|---|---|---|---|
-| `main_clk` (the PC) | 15.625 ns | **+0.377 ns** (~65.6 MHz) | +0.327 ns | +0.303 ns | +0.016 ns |
-| `hr_clk` (HyperRAM) | 10.000 ns | +0.284 ns | +0.179 ns | +0.194 ns | +0.182 ns |
-| `hdmi_clk` | 13.468 ns | +1.707 ns | +2.032 ns | +1.599 ns | +1.854 ns |
-| `qnice_clk` | 20.000 ns | +0.561 ns | +0.635 ns | +1.198 ns | +0.999 ns |
-| `pc_audio_clk` | 40.723 ns | +3.308 ns | +7.496 ns | +8.900 ns | +7.557 ns |
-
-A build can meet every constraint and still not start the PC: the first CD-ROM
-build (2026-10-31) hung before the BIOS's POST 77, z486's watchdog reporting
-`Z386 STALL R=1 C=F000 E=0000FFF0` (the first fetch never answered), at every
-SDRAM clock phase and after a power cycle. The same sources with the drive
-switched off booted, and so did the next full build with it on (a different
-placement): something outside the timing analysis was marginal in that one
-placement. If a new build shows no POST 77, build again before suspecting the
-change.
-
-The first booting build (the SDRAM clock at 292.5 degrees) had +0.327 ns, out of
-97,745 endpoints, with 67.1K LUTs (50%), 33.8K registers and 141.5 block RAM
-tiles. The debug build before it (a full `impl strong` with the phase still at 180
-degrees) ended at +0.134 ns, short of the 0.3 ns target; the incremental run
-(`impl incr`, 99.97 % of cells and nets reused, 38 minutes with synthesis)
-reached it.
-
-Vivado stops optimizing a clock once it meets timing, so without help the
-64 MHz build ended at +0.016 ns, where the next build's variation could tip it
-over. `CORE/CORE-impl.xdc` (implementation only) adds 0.3 ns of setup
-uncertainty to `main_clk`: place, route and phys_opt aim for 15.325 ns
-(65.25 MHz) and reach it (+0.002 and +0.003 ns there in the two builds so
-far). `build_impl.tcl` takes the extra uncertainty out before the final
-checkpoint and the reports, so they judge against the real 64 MHz;
-`summary.txt` lists `main_clk` against both. The other clocks' slack moves
-with placement and stays clean.
-
-The slowest paths are still the CPU's, within a few ps of each other at the
-target: the prefetch pointer into the decoder's group ROM (18-22 logic
-levels), the address unit into the TLB (18) and into the data unit's
-registers (21-23), the data unit's write-back (30).
-
-The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
-with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
-X0Y1..X1Y2, rows 50..149):
-
-| `main_clk` (15.000 ns) | Without pblock | With pblock | Pblock, `impl strong` |
-|---|---|---|---|
-| Setup slack | -1.202 ns | -0.392 ns | **-0.249 ns** |
-| Est. Fmax | ~61.7 MHz | ~65.0 MHz | **~65.6 MHz** |
-| Failing endpoints | 1,848 | 508 | 317 |
-| Total negative slack | -826 ns | -83 ns | -28.6 ns |
-
-`impl strong` places with `-directive ExtraTimingOpt` (worse after placement,
--2.27 against -1.26 ns, better after routing, -1.16 against -1.56 ns) and adds a
-post-route `phys_opt_design -directive AggressiveExplore` after the strategy's
-`Explore` pass (-0.475 -> -0.249 ns).
-
-| | Used | Of the FPGA |
-|---|---|---|
-| LUTs | 66.4K | 50% |
-| Registers | 32.7K | 12% |
-| Block RAM | 140.5 tiles | 38% |
-| DSPs | 86 | 12% |
-
-In all of these runs every other clock, hold, routing and every clock
-crossing are clean.
-
-Without the pblock the CPU spread over six clock regions across the full chip
-width. With it, what still fails is a flat wall of CPU paths between -0.29 and
--0.39 ns: the data-cache address into the decoder's PLA ROM (18-19 logic
-levels), the segment unit into the TLB and into itself (19-26), the data
-unit's write-back (23-28). Routing is still 76-84 % of their delay; the x87
-multiplier no longer fails.
-
-From the 66.667 MHz `impl strong` result, 65 MHz would have had about
-+0.14 ns and 64 MHz about +0.38 ns; 64 MHz then met timing as above.
-
-Out of context, placed and routed:
-
-| Build | Target | Setup slack | Est. Fmax | LUTs | Block RAM | DSPs |
-|---|---|---|---|---|---|---|
-| CPU + x87 | 66 MHz | +0.228 ns | ~67 MHz | 39.8K (30%) | 26 tiles | 25 |
-| CPU + x87 | 85 MHz | -2.692 ns | ~69 MHz | 41.0K (31%) | 26 tiles | 25 |
-| `system.sv` | 66 MHz | +0.005 ns | ~66 MHz | 48.8K (36%) | 101 tiles (28%) | 26 |
-
-`system.sv` by block: CPU 40.2K LUTs, sound (OPL3/SB) 1.9K, VGA/ET4000 1.2K
-with 64 RAMB36 for the 256 KB of plane memory, floppy 1.1K; the rest is small.
-Hold failures in the out-of-context runs all start at input ports and exist
-only out of context.
-
-The slowest paths go through the CPU's address and segmentation logic (TLB,
-segment descriptor cache, data-cache hit). +0.005 ns at 66 MHz is within the
-build-to-build variation, so the real build needs margin: shorten those paths,
-over-constrain, or both.
+- [Design notes](doc/design.md): how the core is put together, part by part
+- [Disks](doc/disks.md): the floppy, IDE and CD-ROM drives and the SD card path
+- [SDRAM clock](doc/sdram-clock.md): how the SDRAM clock's phase was measured
+- [Building](doc/building.md): the repository's layout and how to build the core
+- [Results](doc/results.md): build and timing results
+- [M2M provenance](doc/m2m-provenance.md): the framework's origin
 
 ## Credits
 
