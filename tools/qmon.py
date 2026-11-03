@@ -42,6 +42,8 @@
 #                             acknowledged in place of the one the CPU took, and is lost)
 #   qmon.py pic               the PICs' IRR, ISR and masks, the IRQ lines, the 8042's state, the
 #                             INTAs acknowledged with another vector, the mouse (also in status)
+#   qmon.py bios              whether the system BIOS's copy has the mouse handler's sync check
+#                             (m2m-rom.asm's bios_patch.asm: z486_MiSTer's boot0.rom only)
 #   qmon.py c1351 [normal|flipx|flipy|flipxy] [swap|noswap]
 #                             the mouse on port 1: an Amiga mouse or a 1351 (pc_mouse.vhd), the
 #                             paddle values, and a 1351's axes reversed or swapped (default
@@ -281,6 +283,27 @@ def cd():
         print("%5d  %-12s %9d %9d (%s) %6d-%-6d %6d  %4d+%-2d %d" %
               (w[0] & 0xFF, kind, l32(4), l32(6), msf(l32(6)), l32(8), l32(10) - 1, l32(12),
                w[1], w[2], l32(14)))
+
+
+def bios():
+    import bios_patch
+    want = bios_patch.asm_values(bios_patch.ASM)[1]
+    poke(0xFFF4, 0x0004)                   # M2M$HYPERRAM: the ROM window (0xF0000 = 0x01F8)
+    got = []
+    for win in sorted({w for w, _, _ in want}):
+        offs = [o for w, o, _ in want if w == win]
+        poke(0xFFF5, win)
+        got += dump(0x8000 + min(offs), 0x8000 + max(offs))
+    pc_dev()
+    new = sum(g == w for g, (_, _, w) in zip(got, want))
+    if None in got:
+        print("no answer")
+    elif new == len(want):
+        print("system BIOS: the mouse handler's sync check is in (F000:5209 -> F000:E000)")
+    elif new == 0:
+        print("system BIOS: as loaded, no sync check (not z486_MiSTer's boot0.rom?)")
+    else:
+        print("system BIOS: %d of %d patched words as expected" % (new, len(want)))
 
 
 def xadc():
@@ -659,6 +682,8 @@ elif args and args[0] == "disks":
     disks()
 elif args and args[0] == "xadc":
     xadc()
+elif args and args[0] == "bios":
+    bios()
 elif args and args[0] == "iotrace":
     iotrace(args[1:])
 elif args and args[0] == "sbfix":

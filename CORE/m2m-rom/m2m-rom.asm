@@ -578,6 +578,8 @@ _PCS_VGA        MOVE    R8, R7                  ; R7: device handle
                 MOVE    PC_BIOS128_WIN, R12
                 RSUB    PC_ROM_LOAD, 1
                 RBRA    _PCS_RET, C
+                MOVE    PC_ROM_FILE, R8         ; z486_MiSTer's: the mouse
+                RSUB    BIOS_PATCH, 1           ; handler's sync check
 
                 ; the hard disk /z486/hdd.img, the CD-ROM /z486/cdrom.iso and
                 ; floppy drive A: /z486/floppy.img, if they are there (then
@@ -681,6 +683,7 @@ _PRL_1          MOVE    R2, R6                  ; R6: 4K window
 _PRL_2          MOVE    M2M$RAMROM_DATA, R5     ; R5: target address
                 MOVE    M2M$RAMROM_DATA, R7
                 ADD     0x1000, R7              ; R7: end of the 4K window
+                RSUB    BPT_CLR, 1              ; the file's sums (bios_patch.asm)
 _PRL_RD         MOVE    PC_ROM_FILE, R8
                 SYSCALL(f32_fread, 1)           ; R9: the low byte
                 CMP     FAT32$EOF, R10
@@ -701,6 +704,8 @@ _PRL_WR         MOVE    M2M$RAMROM_DEV, R8      ; (the FAT32 routines use
                 MOVE    M2M$RAMROM_4KWIN, R8
                 MOVE    R6, @R8
                 MOVE    R4, @R5++
+                MOVE    R4, R8
+                RSUB    BPT_ADD, 1
                 CMP     R5, R7                  ; end of the window?
                 RBRA    _PRL_RD, !Z
                 MOVE    M2M$RAMROM_DATA, R5     ; yes: the next one
@@ -732,6 +737,21 @@ ERR_PC_BOOT1    .ASCII_P "Cannot load the VGA BIOS\n"
                 .ASCII_W "/z486/boot1.rom (at most 128 KB).\n"
 ERR_PC_BOOT0    .ASCII_P "Cannot load the system BIOS\n"
                 .ASCII_W "/z486/boot0.rom (at most 128 KB).\n"
+
+; BPT_POKE (bios_patch.asm): writes the word R10 at word R9 of HyperRAM's 4K
+; window R8
+BPT_POKE        INCRB
+                MOVE    M2M$RAMROM_DEV, R0
+                MOVE    M2M$HYPERRAM, @R0
+                MOVE    M2M$RAMROM_4KWIN, R0
+                MOVE    R8, @R0
+                MOVE    M2M$RAMROM_DATA, R0
+                ADD     R9, R0
+                MOVE    R10, @R0
+                DECRB
+                RET
+
+#include "bios_patch.asm"
 
 ; ----------------------------------------------------------------------------
 ; Core specific callback functions: OSM selections
@@ -1098,6 +1118,7 @@ END_OF_ROM      .DW 0
 
 ; PREP_START's file handle for the BIOS ROMs
 PC_ROM_FILE     .BLOCK  FAT32$FDH_STRUCT_SIZE
+BPT_SUM         .BLOCK  2                       ; its sums (bios_patch.asm)
 
 ; DISK_AUTO_NAME's auto-mounted paths per unit (0: none), for DAN_FLUSH
 DAN_PEND        .BLOCK  4

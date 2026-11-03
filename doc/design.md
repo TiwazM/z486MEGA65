@@ -109,6 +109,24 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   simulates the keyboard and the mouse against z486's 8042 (`ps2.v`;
   `tb_pc_mouse` has a packet in the middle of F3, which fails without the
   quiet time), and the PIC patch below (`tb_pic.sv`).
+- The BIOS's mouse packets: the Bochs BIOS files the mouse's bytes by
+  position (its IRQ12 handler, F000:51B8; the position in EBDA 26h) and never
+  checks a packet's first byte, so one lost byte puts every packet after it
+  a byte off until the driver initialises the mouse again (INT 15h C205):
+  the pointer jumps between the screen edges. A program that resets the
+  mouse driver (INT 33h 0) while a packet is on its way loses the rest of
+  it: the driver's commands (C200 enable, C202 sample rate) drop it, as
+  they would on a real PC. The I/O trace showed both programs' resets and
+  the packets aligned on the 8042 (Phantasmagoria and EDIT, about one start
+  in five while the mouse moved). The firmware gives z486_MiSTer's
+  `boot0.rom` (64 KB, two checksums) the check other BIOSes and mouse
+  drivers have, in its HyperRAM copy before the PC starts: at F000:5209 the
+  handler calls F000:E000 (filler before the POST entry), which drops a byte
+  at position 0 without bit 3 (`CORE/m2m-rom/bios_patch.asm`). Another
+  BIOS file stays as it is. `tools/bios_patch.py` makes the patch from the
+  file and checks the original code; `CORE/m2m-rom/test/bios_run.sh` runs
+  the firmware's part in the QNICE emulator; `qmon.py bios` reads the
+  patched words back from the board.
 - Joystick: a joystick on port 2 is the PC's game port joystick at 201h
   (z486_MiSTer's `joystick.v`, as a 4-button joystick; the second joystick
   absent). The directions put the axes at their ends, fire is button 1. A
