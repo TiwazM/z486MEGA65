@@ -26,8 +26,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     sets take two or three of those steps in turn (an I/O trace while moving
     steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
     each step over the time to the next one would even it out.
-  - Joysticks that games count by timing (TIE Fighter does not see the stick;
-    MiSTer has "Count" modes for that).
+  - Joysticks that games count by timing (TIE Fighter does not see the stick
+    unless it is held to the upper left while the game starts, on ao486 on
+    MiSTer too; MiSTer has "Count" modes for that).
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known.

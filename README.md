@@ -128,7 +128,8 @@ printed on the MEGA65's keycaps:
 ## Known limits
 
 - A 486 at 64 MHz with a microcoded FPU: Pentium-era 3D games are slow.
-- Some games don't detect the joystick (TIE Fighter).
+- Some games don't detect the joystick. TIE Fighter does when the stick is
+  held to the upper left while it starts (as on ao486 on MiSTer).
 - The core fixes z486_MiSTer's `boot0.rom` as it loads it, so the mouse can't
   get stuck out of step. With another system BIOS, the pointer can start
   jumping between the screen edges when a program starts or quits while the
