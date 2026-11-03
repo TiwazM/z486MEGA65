@@ -52,7 +52,10 @@ PATCHES = {
     # Also the Sound Blaster's DMA requests (one that stays up is waiting on the DMA controller),
     # its IRQ, and a strobe the clock each of the two registers holds a new access (the I/O
     # trace in mega65.vhd logs some of them), and each sample the DSP takes by DMA: how far it
-    # jumps from the one before, and where in the block it is (the trace's jump log)
+    # jumps from the one before, and where in the block it is (the trace's jump log). And the
+    # PICs' registers, the IRQ lines, the 8042's state and the INTAs the PIC acknowledged with
+    # another vector than the CPU's (pic.v, pic_inta_bridge.sv, ps2.v below); inta_hold is the
+    # switch for the bridge's vector_hold
     "z486_MiSTer/src/system.sv": [
         ("    output     [31:0] cpu_cs_base,",
          "    output     [31:0] cpu_cs_base,\n"
@@ -66,7 +69,32 @@ PATCHES = {
          "    input             sb_take_starved,  // MEGA65: sound_dsp.v's dma_take_starved\n"
          "    output            dbg_sb_smp_stb,   // MEGA65: the Sound Blaster took a DMA output sample\n"
          "    output     [15:0] dbg_sb_smp_dif,   // MEGA65: its distance from the one before (left)\n"
-         "    output     [15:0] dbg_sb_smp_pos,   // MEGA65: its index in the DSP's block"),
+         "    output     [15:0] dbg_sb_smp_pos,   // MEGA65: its index in the DSP's block\n"
+         "    input             inta_hold,        // MEGA65: the PIC holds its vector from the first INTA\n"
+         "    output     [47:0] dbg_pic,          // MEGA65: IRR, ISR, IMR of the master, then the slave\n"
+         "    output     [15:0] dbg_irq,          // MEGA65: the IRQ lines into the PICs\n"
+         "    output     [15:0] dbg_ps2,          // MEGA65: the 8042's IRQs, output buffer, enables, states\n"
+         "    output     [15:0] dbg_ps2_fifo,     // MEGA65: the bytes in its mouse and keyboard FIFOs\n"
+         "    output     [15:0] dbg_inta_bad,     // MEGA65: INTAs the PIC acknowledged with another vector\n"
+         "    output     [15:0] dbg_inta_last,    // MEGA65: the last one: the CPU's vector, the PIC's"),
+        ("pic_inta_bridge inta_bridge (",
+         "wire pic_vector_hold;  // MEGA65 (z486_sources.py)\n"
+         "pic_inta_bridge inta_bridge ("),
+        ("    .cpu_inta_ready     (inta_ready)\n);",
+         "    .cpu_inta_ready     (inta_ready),\n"
+         "    .vector_hold_en     (inta_hold),         // MEGA65 (z486_sources.py)\n"
+         "    .vector_hold        (pic_vector_hold),\n"
+         "    .dbg_mismatches     (dbg_inta_bad),\n"
+         "    .dbg_mismatch_last  (dbg_inta_last)\n);"),
+        ("\t.irq_mouse         (irq_12)\n);",
+         "\t.irq_mouse         (irq_12),\n\n"
+         "\t.dbg_state         (dbg_ps2),           // MEGA65 (z486_sources.py)\n"
+         "\t.dbg_fifo          (dbg_ps2_fifo)\n);"),
+        ("\t.interrupt_input   (interrupt)\n);",
+         "\t.interrupt_input   (interrupt),\n\n"
+         "\t.vector_hold       (pic_vector_hold),   // MEGA65 (z486_sources.py)\n"
+         "\t.dbg_regs          (dbg_pic)\n);\n"
+         "assign dbg_irq = interrupt;"),
         ("\t.sbp               (sbp),",
          "\t.sbp               (sbp),\n\n"
          "\t.dma_take_starved  (sb_take_starved),  // MEGA65 (z486_sources.py)\n"
@@ -181,6 +209,118 @@ PATCHES = {
          "\telse                icw1_last <= init_icw1;\n"
          "end\n"
          "wire [7:0] edge_detect = interrupt_input & ~((icw1_last && ~init_icw1) ? 8'h00 : interrupt_last);"),
+        ("\tinput               interrupt_done\n);\n\nwire [7:0] mas_readdata;",
+         "\tinput               interrupt_done,\n\n"
+         "\tinput               vector_hold,  // MEGA65: the vectors stay as they are (z486_sources.py)\n"
+         "\toutput      [47:0]  dbg_regs      // MEGA65: IRR, ISR, IMR of the master, then the slave\n"
+         ");\n\nwire [7:0] mas_readdata;"),
+        ("\t.interrupt_done(interrupt_done)\n);",
+         "\t.interrupt_done(interrupt_done),\n\n"
+         "\t.vector_hold(vector_hold),\n"
+         "\t.dbg_regs(dbg_regs[47:24])\n);"),
+        ("\t.interrupt_done(sla_select & interrupt_done)\n);",
+         "\t.interrupt_done(sla_select & interrupt_done),\n\n"
+         "\t.vector_hold(vector_hold),\n"
+         "\t.dbg_regs(dbg_regs[23:0])\n);"),
+        ("\tinput            interrupt_done\n);",
+         "\tinput            interrupt_done,\n\n"
+         "\tinput            vector_hold,  // MEGA65 (z486_sources.py)\n"
+         "\toutput    [23:0] dbg_regs\n);"),
+        ("else if(irq || interrupt_do) slave_active <= irr_slave[irq_value];",
+         "else if((irq || interrupt_do) && ~vector_hold) slave_active <= irr_slave[irq_value];  // MEGA65: held"),
+        ("else if(irq || interrupt_do) interrupt_vector <= { interrupt_offset, irq_value };",
+         "else if((irq || interrupt_do) && ~vector_hold) interrupt_vector <= { interrupt_offset, irq_value };  // MEGA65: held"),
+        ("wire [7:0] interrupt_vector_bits = 8'h01 << interrupt_vector[2:0];",
+         "wire [7:0] interrupt_vector_bits = 8'h01 << interrupt_vector[2:0];\n\n"
+         "assign dbg_regs = {irr, isr, imr};  // MEGA65 (z486_sources.py)"),
+    ],
+    # pic_inta_bridge.sv, pic.v: the bridge gives the CPU the vector on its second INTA and pulses
+    # interrupt_done a clock later, and the 8259 acknowledges (IRR bit off, ISR bit on) the vector
+    # it holds then. Its vector register follows the highest request every clock, so a request
+    # that wins in that clock is acknowledged while the CPU runs the other one's handler: the CPU
+    # takes IRQ15 (the CD-ROM) or IRQ14, the slave acknowledges IRQ12 (the mouse), the disk's
+    # handler's EOI clears IRQ12's ISR bit, and the mouse's line, high until port 60h is read,
+    # never makes a new edge. The mouse is dead for good, and so is the keyboard, its bytes
+    # behind the mouse's in the 8042 (Wing Commander III, 2026-11-02: no access to ports 60h/64h
+    # for minutes, the mouse inhibited after 60 bytes, mid-stream). An 8259 fixes the vector at
+    # the first INTA; with vector_hold the vectors and the cascade's select stay as they are
+    # from the first INTA to the acknowledge. A switch (mega65.vhd, qmon.py intahold) so the
+    # same core runs both ways; the bridge counts the INTAs where the PIC acknowledged another
+    # vector than the CPU took (CORE/sim/tb_inta.sv)
+    "z486_MiSTer/src/pic_inta_bridge.sv": [
+        ("    output reg         cpu_inta_ready          // Ready signal during INTA\n);",
+         "    output reg         cpu_inta_ready,         // Ready signal during INTA\n\n"
+         "    input              vector_hold_en,         // MEGA65: hold the PIC's vector from the first INTA\n"
+         "    output             vector_hold,            // MEGA65: to the PIC (z486_sources.py)\n"
+         "    output reg  [15:0] dbg_mismatches,         // MEGA65: INTAs the PIC acknowledged with another vector\n"
+         "    output reg  [15:0] dbg_mismatch_last       // MEGA65: the last one: the CPU's vector, the PIC's\n"
+         ");"),
+        ("\nendmodule",
+         "\n// MEGA65: the PIC keeps its vector from the first INTA to its acknowledge, as an 8259 does;\n"
+         "// and the INTAs where the vector the CPU took is not the one the PIC acknowledges, the clock\n"
+         "// after (z486_sources.py)\n"
+         "assign vector_hold = vector_hold_en && state != S_IDLE;\n\n"
+         "always @(posedge clk) begin\n"
+         "    if (!reset_n) begin\n"
+         "        dbg_mismatches    <= 16'd0;\n"
+         "        dbg_mismatch_last <= 16'd0;\n"
+         "    end else if (pic_interrupt_done && cpu_inta_din[7:0] != pic_interrupt_vector) begin\n"
+         "        if (dbg_mismatches != 16'hFFFF)\n"
+         "            dbg_mismatches <= dbg_mismatches + 16'd1;\n"
+         "        dbg_mismatch_last <= {cpu_inta_din[7:0], pic_interrupt_vector};\n"
+         "    end\n"
+         "end\n\n"
+         "endmodule"),
+    ],
+    # ps2.v: status bit 5 said "mouse data" whenever the mouse's FIFO held a byte, also while the
+    # byte in the output buffer (port 60h) was a key; on an 8042 it says where that byte came
+    # from. A keyboard handler that leaves "mouse data" alone (SeaBIOS's does) left the key
+    # there, and IRQ1, high until it is read, made no new edge. And its state for the debug
+    # snapshot: bits 0/1 IRQ1/IRQ12, 2 the output buffer full, 3 with the mouse's byte, 4/5 the
+    # keyboard/mouse disabled, 6/7 their IRQs enabled (command byte), 11..8/15..12 the
+    # keyboard's/mouse's line state; the FIFOs' bytes, the mouse's in 14..8, the keyboard's 6..0.
+    # And its mouse FIFO, which an 8042 does not have (one output byte; a mouse drops what it
+    # has not sent when a command comes): a command to the mouse (D4) drops the bytes queued,
+    # also one in the output buffer, when its byte is written and again when it goes out
+    # (mouse_drop; by then a byte the mouse was still sending has arrived); while the mouse port is off (command byte bit 5, A7)
+    # and from a command's D4 byte until it has gone out (mouse_hold) they wait in the FIFO,
+    # not in the output buffer: the D4 byte turns the port on, and the PC reads the answer at
+    # once. Windows quitting writes command byte 75h
+    # (IRQ12 and the port off), sends D4 F4 and wants FA next; it read an old packet byte
+    # instead (I/O trace, 2026-11-02), left IRQ12 off, and the mouse's bytes, unread, held the
+    # keyboard's back for good
+    "z486_MiSTer/src/soc/ps2.v": [
+        ("\toutput                  ps2_mousedat_out   // Mouse data output (open-drain)\n);",
+         "\toutput                  ps2_mousedat_out,  // Mouse data output (open-drain)\n\n"
+         "\toutput       [15:0]     dbg_state,  // MEGA65: IRQs, output buffer, enables, states (z486_sources.py)\n"
+         "\toutput       [15:0]     dbg_fifo    // MEGA65: the bytes in the mouse's and the keyboard's FIFOs\n"
+         ");"),
+        ("        ~(mouse_fifo_empty),         // Bit 5: Mouse output buffer full",
+         "        status_mousebufferfull,      // Bit 5: MEGA65: the output buffer's byte is the mouse's"),
+        ("\nendmodule",
+         "\n// MEGA65: the state for the debug snapshot (z486_sources.py)\n"
+         "assign dbg_state = {mouse_state, keyb_state, allow_irq_mouse, allow_irq_keyb, disable_mouse,\n"
+         "                    disable_keyboard, status_mousebufferfull, status_outputbufferfull,\n"
+         "                    irq_mouse, irq_keyb};\n"
+         "assign dbg_fifo  = {1'b0, mouse_fifo_counter, 1'b0, keyb_fifo_counter};\n\n"
+         "endmodule"),
+        ("    else if(io_read_valid && io_address[2:0] == 3'd0 && status_mousebufferfull) irq_mouse <= 1'b0;",
+         "    else if(io_read_valid && io_address[2:0] == 3'd0 && status_mousebufferfull) irq_mouse <= 1'b0;\n"
+         "    else if(mouse_drop)                                                         irq_mouse <= 1'b0;  // MEGA65"),
+        ("    else if(outputbuffer_idle && ~(mouse_fifo_empty))   status_mousebufferfull <= 1'b1;  // Set when mouse data available",
+         "    else if(mouse_drop)                                 status_mousebufferfull <= 1'b0;  // MEGA65: a command drops the mouse's bytes\n"
+         "    else if(outputbuffer_idle && ~(mouse_fifo_empty) && ~(mouse_hold))      status_mousebufferfull <= 1'b1;  // MEGA65: not while held"),
+        ("    else if(outputbuffer_idle && (~(mouse_fifo_empty) || ~(keyb_fifo_empty)))   status_outputbufferfull <= 1'b1;  // Set when any data available",
+         "    else if(mouse_drop && status_mousebufferfull)                               status_outputbufferfull <= 1'b0;  // MEGA65\n"
+         "    else if(outputbuffer_idle && ((~(mouse_fifo_empty) && ~(mouse_hold)) || ~(keyb_fifo_empty)))   status_outputbufferfull <= 1'b1;  // MEGA65: no mouse data while held"),
+        ("    .sclr       (cmd_self_test),                                                //Clear on self-test",
+         "    .sclr       (cmd_self_test || mouse_drop),                                  //Clear on self-test; MEGA65: and a command to the mouse"),
+        ("// Mouse FIFO signals",
+         "// MEGA65: a byte to the mouse is written and goes out: what the mouse sent before is dropped;\n"
+         "// its bytes wait while its port is off and from a command's D4 byte until it went out (z486_sources.py)\n"
+         "wire mouse_drop = write_to_mouse || mouse_state == PS2_SEND_INHIBIT;\n"
+         "wire mouse_hold = disable_mouse || write_to_mouse || (status_inputbufferfull && input_for_mouse && ~(input_write_done));\n\n"
+         "// Mouse FIFO signals"),
     ],
 }
 

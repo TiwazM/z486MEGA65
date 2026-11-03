@@ -987,7 +987,7 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "8"
+CFG_SIG_VAL     .ASCII_W "9"
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -1106,13 +1106,13 @@ DAN_PEND        .BLOCK  4
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 39-line menu: 20 + 380 item characters + 1 + 5 x 39 (the line
-; arrays and the dependency array) + 1 + (3 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 805 words. The Shell checks it when the menu first opens
+; for this 46-line menu: 20 + 453 item characters + 1 + 5 x 46 (the line
+; arrays and the dependency array) + 1 + (4 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 939 words. The Shell checks it when the menu first opens
 ; (ERR_FATAL_HEAP1/2; with 768, the 38-line menu was 13 short: "Heap
-; corruption", error code 000D).
+; corruption", error code 000D; with 832, the 46-line one 107: 006B).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 832
+MENU_HEAP_SIZE  .EQU 960
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0

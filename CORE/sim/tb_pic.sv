@@ -33,6 +33,9 @@ pic dut (
     .interrupt_input(interrupt_input),
     .interrupt_do(interrupt_do), .interrupt_vector(interrupt_vector),
     .interrupt_done(interrupt_done)
+`ifndef UPSTREAM_PIC
+    , .vector_hold(1'b0), .dbg_regs()      // the MEGA65's ports (z486_sources.py)
+`endif
 );
 
 always #7.8125 clk = ~clk;

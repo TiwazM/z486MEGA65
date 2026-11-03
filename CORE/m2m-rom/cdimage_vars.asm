@@ -24,10 +24,13 @@ CDI_FSIZE       .BLOCK  2                       ; its bytes (WAVE: its data's),
 CDI_FSSIZE      .BLOCK  1                       ; its sector size (0: no track yet),
 CDI_FSECT       .BLOCK  2                       ; its sectors,
 CDI_FFLAGS      .BLOCK  1                       ; 2: big-endian audio
+CDI_RFB         .BLOCK  2                       ; its last track so far (CDI_REL): FB,
+CDI_RBY         .BLOCK  2                       ; FB's byte in the file,
+CDI_RSZ         .BLOCK  1                       ; its sector size (0: none yet)
 CDI_CV          .BLOCK  1                       ; CDI_CUR / CDI_PREV hold a track
 CDI_PV          .BLOCK  1
-CDI_CUR         .BLOCK  24                      ; CDR_SIZE
-CDI_PREV        .BLOCK  24
+CDI_CUR         .BLOCK  26                      ; CDR_SIZE
+CDI_PREV        .BLOCK  26
 CDI_T_START     .BLOCK  2                       ; CDI_FINAL's frames, in this order
 CDI_T_IDX1      .BLOCK  2
 CDI_T_FB        .BLOCK  2

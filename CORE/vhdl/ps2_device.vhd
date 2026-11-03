@@ -12,7 +12,10 @@
 -- clk_i / (2 * G_PS2_DIV): 64 MHz / 4000 = 16 kHz, inside PS/2's 10 to 16.7 kHz.
 --
 -- A command from the controller aborts nothing that is on the wire, but drops a byte that waits
--- (MiSTer clears its FIFO): the keyboard answers the command first.
+-- (MiSTer clears its FIFO): the keyboard answers the command first. In the clock the command comes
+-- out (rx_valid_o) no new byte is taken: its owner drops its queue then, and an old byte taken in
+-- that clock went out before the answer (a mouse's packet byte before FA: Windows, quitting, read
+-- it as the answer to F4, 2026-11-02).
 --
 -- Licensed under GPL v3
 ----------------------------------------------------------------------------------
@@ -68,7 +71,7 @@ architecture synthesis of ps2_device is
 
 begin
 
-   tx_ready_o <= not pend;
+   tx_ready_o <= not pend and not rx_valid_o;
    ps2_clk_o  <= clk_out;
    ps2_dat_o  <= dat_out;
    rx_data_o  <= rx_byte;
@@ -89,7 +92,7 @@ begin
          v_rise := tick_d = '0' and tick = '1';
          v_fall := tick_d = '1' and tick = '0';
 
-         if tx_valid_i = '1' and pend = '0' then
+         if tx_valid_i = '1' and pend = '0' and rx_valid_o = '0' then
             pend      <= '1';
             pend_data <= tx_data_i;
          end if;

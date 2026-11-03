@@ -109,6 +109,8 @@ module z486_mega65 #(
     input  wire        cache_off,          // z486's L1 caches off (every access uncached)
     input  wire        sb_take_starved,    // a new Sound Blaster DMA command takes over a starved
                                            // transfer at once (sound_dsp.v, z486_sources.py)
+    input  wire        inta_hold,          // the PIC holds its vector from the first INTA
+                                           // (pic.v, pic_inta_bridge.sv, z486_sources.py)
     output wire [31:0] l2_hits,
     output wire [31:0] l2_misses,
 
@@ -137,6 +139,12 @@ module z486_mega65 #(
     output wire        dbg_sb_smp_stb,     // the Sound Blaster took a DMA output sample:
     output wire [15:0] dbg_sb_smp_dif,     // its distance from the one before (left channel),
     output wire [15:0] dbg_sb_smp_pos,     // its index in the DSP's block
+    output wire [47:0] dbg_pic,            // the PICs: IRR, ISR, IMR of the master, the slave
+    output wire [15:0] dbg_irq,            // the IRQ lines into them
+    output wire [15:0] dbg_ps2,            // the 8042: IRQs, output buffer, enables, states
+    output wire [15:0] dbg_ps2_fifo,       // the bytes in its mouse and keyboard FIFOs
+    output wire [15:0] dbg_inta_bad,       // INTAs the PIC acknowledged with another vector
+    output wire [15:0] dbg_inta_last,      // the last one: the CPU's vector, the PIC's
 
     // CD audio (pc_cdrom.vhd's cd_audio, clk_sys, 44.1 kHz): mixed with the SB Pro mixer's CD
     // volume, as z486_mister.sv mixes cdda.v's
@@ -576,7 +584,14 @@ system #(
     .sb_take_starved     (sb_take_starved),
     .dbg_sb_smp_stb      (dbg_sb_smp_stb),
     .dbg_sb_smp_dif      (dbg_sb_smp_dif),
-    .dbg_sb_smp_pos      (dbg_sb_smp_pos)
+    .dbg_sb_smp_pos      (dbg_sb_smp_pos),
+    .inta_hold           (inta_hold),
+    .dbg_pic             (dbg_pic),
+    .dbg_irq             (dbg_irq),
+    .dbg_ps2             (dbg_ps2),
+    .dbg_ps2_fifo        (dbg_ps2_fifo),
+    .dbg_inta_bad        (dbg_inta_bad),
+    .dbg_inta_last       (dbg_inta_last)
 );
 
 // ------------------------------------------------------------------------------------------

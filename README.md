@@ -100,7 +100,14 @@ boots from it.
   Amiga mode, is the PC's PS/2 mouse (`CORE/vhdl/pc_mouse.vhd`): its
   quadrature lines as MegaMac decodes them, the left button on pin 6. The
   right button (pin 9) is invisible to the MEGA65's paddle circuit (Megamiga
-  measured it), so F13 stands in for it. The mouse answers the BIOS's and the
+  measured it, and the R6 is no different), so F13 stands in for it. For a
+  real right button, use a Commodore 1351 or a mouSTer in its C64 mode
+  (`c1351`, `mode=mouse` in its INI): its position on the paddle lines, the
+  right button on pin 1. The core finds a 1351 by itself (its paddle lines
+  read driven for 0.1 s) and goes back to Amiga mode half a second after
+  they read open. Its x is on POT X (pin 9), its y on POT Y (pin 5), as on a
+  C64; `qmon.py c1351` shows the mode and reverses or swaps axes that run the
+  wrong way. The mouse answers the BIOS's and the
   drivers' commands (reset, identify, sample rate, status, ...) like a
   standard PS/2 mouse, also when nothing is plugged in: the BIOS's mouse
   functions, which CuteMouse calls, wait for good for a mouse that does not
@@ -117,10 +124,13 @@ boots from it.
 - Joystick: a joystick on port 2 is the PC's game port joystick at 201h
   (z486_MiSTer's `joystick.v`, as a 4-button joystick; the second joystick
   absent). The directions put the axes at their ends, fire is button 1. A
-  second and third fire button on the paddle lines (pin 9 and pin 5, the C64
-  two- and three-button joysticks, which connect them to +5 V) are buttons 2
-  and 3; a button that grounds pin 9 (Amiga style) is invisible, like the
-  Amiga mouse's right button. `qmon.py status` shows what is held.
+  second and third fire button on the paddle lines (the C64 two- and
+  three-button joysticks, which connect them to +5 V) are buttons 2 and 3:
+  the second on pin 9 (POT X, as the C64GS's), or on pin 5 for sticks that
+  have it there ("Joystick fire 2" in the menu); the third on the other one.
+  A button that grounds pin 9 (Amiga style) is invisible, like the Amiga
+  mouse's right button. `qmon.py status` shows what is held, `qmon.py joy`
+  every change.
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
@@ -144,7 +154,7 @@ boots from it.
   runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
   BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
-  scanlines, help, "Reset the PC". An image mounted at start-up
+  scanlines, the joystick's fire 2 (pin 9 or pin 5), help, "Reset the PC". An image mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard

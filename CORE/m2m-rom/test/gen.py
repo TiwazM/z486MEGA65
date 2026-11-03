@@ -157,6 +157,22 @@ def cases():
                    code=OK, tracks=[("data.iso", "MODE1/2048", None, 0, 0, 0, False),
                                     ("music.wav", "AUDIO", 0, 1, 0, 0, False)]))
 
+    # one file of MODE1/2048 data and then 2352-byte audio (King's Quest VI's .bin, its .toc
+    # by cdrdao): the cue's frames are each the size of their own track. A PREGAP before
+    # track 2, INDEX 00 on track 3, a partial sector at the file's end, a second file after it
+    mixed = pattern(19, 5 * 2048) + pattern(20, 6 * 2352) + pattern(21, 4 * 2352 + 100)
+    cue = ('FILE "Mixed.bin" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n'
+           '  TRACK 02 AUDIO\n    PREGAP 00:00:02\n    INDEX 01 00:00:05\n'
+           '  TRACK 03 AUDIO\n    INDEX 00 00:00:11\n    INDEX 01 00:00:12\n'
+           'FILE "after.bin" BINARY\n  TRACK 04 AUDIO\n    INDEX 01 00:00:00\n')
+    cs.append(dict(dir="/MIXED", file="mixed.cue",
+                   files={"mixed.cue": cue.encode(), "Mixed.bin": mixed,
+                          "after.bin": pattern(22, 3 * 2352)},
+                   code=OK, tracks=[("Mixed.bin", "MODE1/2048", None, 0, 0, 0, False),
+                                    ("Mixed.bin", "AUDIO", None, 5, 2, 0, False),
+                                    ("Mixed.bin", "AUDIO", 11, 12, 0, 0, False),
+                                    ("after.bin", "AUDIO", None, 0, 0, 0, False)]))
+
     # big-endian audio
     cue = 'FILE "moto.bin" MOTOROLA\nTRACK 01 AUDIO\nINDEX 01 00:00:00\n'
     cs.append(dict(dir="/MOTO", file="moto.cue",
@@ -220,13 +236,28 @@ def layout(c, cb):
     for t in tracks:
         if t[0] not in order:
             order.append(t[0])
+    # each track's first frame in its file and that frame's byte: the frames of a file are
+    # each the size of the track they belong to (DOSBox; a .bin of MODE1/2048 data and then
+    # audio); a file's sectors run to its end in its last track's size
+    fbfs, rel, last = [], [], {}
+    for k, (name, mode, i0, i1, pre, post, be) in enumerate(tracks):
+        fbf = i1 if (k == 0 or i0 is None) else i0
+        ssize = MODES[mode][0]
+        if name in last:
+            pf, pb, ps = last[name]
+            b = pb + max(fbf - pf, 0) * ps
+        else:
+            b = fbf * ssize
+        fbfs.append(fbf)
+        rel.append(b)
+        last[name] = (fbf, b, ssize)
     vclus, vfiles, fbase, fsect = 0, [], {}, {}
     for name in order:
         size = len(c["files"][name])
         woff, dlen = wave.get(name, (0, size))
-        ssize = MODES[next(t[1] for t in tracks if t[0] == name)][0]
+        pf, pb, ps = last[name]
         fbase[name] = vclus * cb + woff
-        fsect[name] = dlen // ssize
+        fsect[name] = pf + max(dlen - pb, 0) // ps
         vfiles.append((name, vclus * cb))
         vclus += (size + cb - 1) // cb
     # frames
@@ -238,7 +269,7 @@ def layout(c, cb):
     for k, (name, mode, i0, i1, pre, post, be) in enumerate(tracks):
         ssize, off, ctl = MODES[mode]
         P = pre if k else 0
-        fbf = i1 if (k == 0 or i0 is None) else i0
+        fbf = fbfs[k]
         base = fstart[name] + S + P
         start = fstart[name] + S + fbf
         fb = start + P
@@ -250,7 +281,7 @@ def layout(c, cb):
             fe_file = fsect[name]
         fe = max(base + fe_file, fb)
         end = fe + post
-        byte = fbase[name] + fbf * ssize
+        byte = fbase[name] + rel[k]
         if k == 0:
             org = idx1
         flags = (1 if mode == "AUDIO" else 0) | (2 if be else 0)

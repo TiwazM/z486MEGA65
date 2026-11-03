@@ -4,7 +4,8 @@
 -- Testbench: the joystick-port mouse (pc_mouse.vhd, ps2_device.vhd) against the PC's keyboard
 -- controller (z486_MiSTer's ps2.v, an 8042) on its mouse port. The test plays the BIOS on ports
 -- 0x60/0x64 (D4: the next byte goes to the mouse), an Amiga mouse's quadrature lines and the
--- MEGA65's F13 key, and checks the bytes the PC reads. CORE/sim/run_ps2.sh runs it with
+-- MEGA65's F13 key, then a 1351 (a mouSTer's C64 mode) on the paddle lines, and checks the
+-- bytes the PC reads. CORE/sim/run_ps2.sh runs it with
 -- Vivado's xsim.
 --
 -- Licensed under GPL v3
@@ -32,6 +33,10 @@ architecture sim of tb_pc_mouse is
    -- the port's lines (pin 1 up = V, 2 down = H, 3 left = VQ, 4 right = HQ, 6 fire)
    signal j_up, j_down, j_left, j_right, j_fire : std_logic := '1';
    signal keys         : std_logic_vector(79 downto 0) := (others => '0');   -- '1' = pressed
+   -- the paddle lines as the framework gives them (inverted: an open line 0), the axis flips
+   signal pot_x, pot_y : std_logic_vector(7 downto 0) := x"00";
+   signal flip         : std_logic_vector(1 downto 0) := "00";
+   signal c1351        : std_logic;
    signal key_num      : integer range 0 to 79 := 0;
    signal key_pressed_n : std_logic;
 
@@ -103,7 +108,8 @@ begin
    i_mouse : entity work.pc_mouse
       generic map (
          G_CLK_HZ        => 6_400_000,   -- sample periods 10 times shorter
-         G_QUIET_MS      => G_QUIET      -- 5 ms here: the motion checks wait 20 ms
+         G_QUIET_MS      => G_QUIET,     -- 5 ms here: the motion checks wait 20 ms
+         G_DETECT_MS     => 100          -- 10 ms here
       )
       port map (
          clk_i           => clk,
@@ -113,6 +119,10 @@ begin
          left_n_i        => j_left,
          right_n_i       => j_right,
          fire_n_i        => j_fire,
+         pot_x_i         => pot_x,
+         pot_y_i         => pot_y,
+         flip_i          => flip,
+         c1351_o         => c1351,
          key_num_i       => key_num,
          key_pressed_n_i => key_pressed_n,
          tx_valid_o      => tx_valid,
@@ -295,6 +305,25 @@ begin
       -- n quadrature steps on a pair of lines, from where they are: fwd along the Gray code
       -- 11 -> 01 -> 00 -> 10 -> 11 (each a step "down" for pc_mouse's step(): right on the H
       -- pair, down on the V pair), else the other way round
+      -- a 1351 at position (x, y): SID values with the position in bits 6..1 and noise in bit
+      -- 0, inverted as the framework hands them over
+      procedure at1351(x, y : natural; noise : std_logic := '0') is
+      begin
+         pot_x <= not (std_logic_vector(to_unsigned(x mod 64, 7)) & noise);
+         pot_y <= not (std_logic_vector(to_unsigned(y mod 64, 7)) & noise);
+         wait for 3 us;
+      end procedure at1351;
+
+      procedure mode(what : string; want : std_logic) is
+      begin
+         if c1351 = want then
+            report "ok    " & what;
+         else
+            report "FAIL  " & what severity error;
+            errors <= errors + 1;
+         end if;
+      end procedure mode;
+
       procedure steps(signal a, b : inout std_logic; n : natural; fwd : boolean) is
          variable v_s : std_logic_vector(1 downto 0);
       begin
@@ -377,6 +406,60 @@ begin
       to_mouse(x"F5");  expect("disable F5", x"FA");
       steps(j_down, j_right, 4, true);
       nothing("motion after F5");
+
+      -- Windows quitting (I/O trace, 2026-11-02): packets wait unread in the 8042, the command
+      -- byte turns IRQ12 and the mouse port off (75h), then D4 F4: the answer is FA, not an old
+      -- packet byte (ps2.v as patched: a command to the mouse drops its queued bytes)
+      to_mouse(x"F4");  expect("enable F4", x"FA");
+      wait for 8 ms;
+      steps(j_down, j_right, 6, true);
+      wait for 3 ms;
+      io_wr(4, x"60");
+      wait for 2 us;
+      io_wr(0, x"75");
+      wait for 10 us;
+      to_mouse(x"F4");  expect("command byte 75h, then D4 F4 with packets waiting: FA", x"FA");
+
+      -- A 1351: driven paddle lines for G_DETECT_MS (10 ms here) make it one; its first reading
+      -- moves nothing, the next ones by their difference. Its lines idle high: pin 1 is its
+      -- right button (the Amiga steps above left it low)
+      j_up   <= '1';
+      j_left <= '1';
+      to_mouse(x"F4");  expect("enable F4", x"FA");
+      at1351(20, 40);
+      wait for 5 ms;
+      mode("1351: not yet after 5 ms", '0');
+      wait for 7 ms;
+      mode("1351: found after 10 ms", '1');
+      nothing("1351: its first reading");
+      at1351(25, 40);   expect_motion("1351: 5 right", 5, 0, "000");
+      at1351(25, 43);   expect_motion("1351: 3 up", 0, 3, "000");
+      at1351(21, 41);   expect_motion("1351: 4 left, 2 down", -4, -2, "000");
+      at1351(60, 41);   expect_motion("1351: 25 left (60 = 21 - 25 mod 64)", -25, 0, "000");
+      at1351(3, 41);    expect_motion("1351: 7 right across 63 -> 0", 7, 0, "000");
+      at1351(3, 41, '1');
+      nothing("1351: the noise bit");
+      steps(j_down, j_right, 4, true);
+      nothing("1351: the quadrature lines");
+      j_up <= '0';      expect_motion("1351: right button (pin 1)", 0, 0, "010");
+      j_up <= '1';      expect_motion("1351: right button up", 0, 0, "000");
+      j_fire <= '0';    expect_motion("1351: left button", 0, 0, "001");
+      j_fire <= '1';    expect_motion("1351: left button up", 0, 0, "000");
+      flip <= "01";
+      at1351(8, 41);    expect_motion("1351, x flipped: 5 left", -5, 0, "000");
+      flip <= "10";
+      at1351(8, 44);    expect_motion("1351, y flipped: 3 down", 0, -3, "000");
+      flip <= "00";
+      -- unplugged: open lines for five times as long, an Amiga mouse again
+      pot_x <= x"00";
+      pot_y <= x"00";
+      wait for 30 ms;
+      mode("1351: still after 30 ms open", '1');
+      wait for 25 ms;
+      mode("1351: gone after 50 ms open", '0');
+      nothing("1351 gone: no motion");
+      steps(j_down, j_right, 4, true);
+      expect_motion("Amiga again: 4 right", 4, 0, "000");
 
       if errors = 0 then
          report "PASS: all checks" severity note;

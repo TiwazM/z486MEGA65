@@ -13,7 +13,16 @@
 -- mac_mouse.vhd, with its directions, which were measured on the board). The framework hands
 -- the lines over raw (M2M-UPSTREAM raw-joyports). The right button shorts pin 9 to ground,
 -- which the MEGA65's paddle circuit cannot see (Megamiga, on an R3), so a held key stands in
--- for it: F13 (G_RMB_KEY), which the PC's keyboard does not use.
+-- for it: F13 (G_RMB_KEY), which the PC's keyboard does not use (on the R6 too: the right
+-- button reads as an open line on a game port's pin 9, qmon.py joy, 2026-11-02).
+--
+-- Or a Commodore 1351, or a mouSTer in its C64 mode (c1351): its position on the paddle lines
+-- (POT X, POT Y; bits 6..1 of the SID's value, its x and y mod 64), the left button on pin 6,
+-- the right one on pin 1 (up). The framework samples the paddles as a SID does (mouse_input.vhd)
+-- and hands them over inverted, an open line 0. Lines that read driven (a SID value under 254)
+-- for G_DETECT_MS make it a 1351, open for five times as long an Amiga mouse again; each new
+-- reading (settled after the framework's per-bit crossing) moves it by the difference to the
+-- last one, -32..31 an axis. flip_i reverses an axis (qmon.py c1351), should one run backwards.
 --
 -- The controller's commands: FF reset (FA AA 00), FE resend, F6 defaults, F5 disable, F4
 -- enable, F3 sample rate and E8 resolution (a byte follows), F2 identify (FA 00), F0 remote
@@ -42,7 +51,8 @@ entity pc_mouse is
    generic (
       G_CLK_HZ        : natural := 64_000_000;
       G_QUIET_MS      : natural := 300;            -- no packets this long after a PC byte
-      G_RMB_KEY       : natural := 70              -- F13 in M2M's key numbering
+      G_RMB_KEY       : natural := 70;             -- F13 in M2M's key numbering
+      G_DETECT_MS     : natural := 100             -- driven paddle lines this long: a 1351
    );
    port (
       clk_i           : in  std_logic;
@@ -54,6 +64,13 @@ entity pc_mouse is
       left_n_i        : in  std_logic;              -- pin 3: VQ
       right_n_i       : in  std_logic;              -- pin 4: HQ
       fire_n_i        : in  std_logic;              -- pin 6: the left button
+
+      -- the port's paddle lines as the framework gives them (inverted), a 1351's x and y:
+      -- POT X on pin 9, POT Y on pin 5 (mega65.vhd's main_m1351_x, _y)
+      pot_x_i         : in  std_logic_vector(7 downto 0) := x"00";
+      pot_y_i         : in  std_logic_vector(7 downto 0) := x"00";
+      flip_i          : in  std_logic_vector(1 downto 0) := "00";  -- a 1351's y, x reversed
+      c1351_o         : out std_logic;              -- a 1351 on the port
 
       -- the MEGA65 keyboard scan, for the right button's key
       key_num_i       : in  integer range 0 to 79;
@@ -102,6 +119,19 @@ architecture synthesis of pc_mouse is
    signal since      : unsigned(6 downto 0) := (others => '0');
    signal quiet      : natural range 0 to G_QUIET_MS := 0;           -- ms left without packets
 
+   -- a 1351 (p_1351): the paddle values, synchronised, settled, the last one taken; whether the
+   -- lines read driven and for how long; the motion of each new reading
+   signal px1, px2   : std_logic_vector(7 downto 0) := x"00";
+   signal py1, py2   : std_logic_vector(7 downto 0) := x"00";
+   signal pv_x, pv_y : std_logic_vector(7 downto 0) := x"00";
+   signal settle     : natural range 0 to 15 := 0;
+   signal driven     : std_logic := '0';
+   signal drv_ms     : natural range 0 to G_DETECT_MS := 0;
+   signal open_ms    : natural range 0 to 5 * G_DETECT_MS := 0;
+   signal c1351      : std_logic := '0';
+   signal p_stb      : std_logic := '0';
+   signal p_dx, p_dy : signed(5 downto 0) := (others => '0');
+
    type t_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
 
    -- +1 / -1 / 0 for a Gray-code step from p to n (00 -> 01 -> 11 -> 10 -> 00 counts up)
@@ -123,6 +153,17 @@ architecture synthesis of pc_mouse is
       end if;
    end function clamp;
 
+   -- v moved by d, kept within +/-511
+   function sat(v : signed(9 downto 0); d : signed(5 downto 0)) return signed is
+      variable t : signed(10 downto 0);
+   begin
+      t := resize(v, 11) + resize(d, 11);
+      if t > 511 then return to_signed(511, 10);
+      elsif t < -511 then return to_signed(-511, 10);
+      else return t(9 downto 0);
+      end if;
+   end function sat;
+
    function period_ms(r : std_logic_vector(7 downto 0)) return unsigned is
    begin
       case to_integer(unsigned(r)) is
@@ -141,7 +182,71 @@ begin
    tx_valid_o <= '1' when q_cnt /= 0 else '0';
    tx_data_o  <= q(to_integer(q_rd));
 
-   btn <= '0' & rmb & not s2(4);
+   btn     <= '0' & (rmb or (c1351 and not s2(0))) & not s2(4);   -- a 1351's right: pin 1
+   c1351_o <= c1351;
+
+   -- A 1351: the paddle values settle (the framework crosses them bit by bit), a new one moves
+   -- the mouse by the difference of bits 6..1 to the last one; the lines decide the mode
+   p_1351 : process (clk_i)
+      variable v_sx, v_sy : std_logic_vector(7 downto 0);
+   begin
+      if rising_edge(clk_i) then
+         p_stb <= '0';
+         px1 <= pot_x_i;
+         px2 <= px1;
+         py1 <= pot_y_i;
+         py2 <= py1;
+         if px1 /= px2 or py1 /= py2 then
+            settle <= 0;
+         elsif settle /= 15 then
+            settle <= settle + 1;
+         end if;
+
+         if settle = 8 and (px2 /= pv_x or py2 /= pv_y) then
+            pv_x  <= px2;
+            pv_y  <= py2;
+            v_sx  := not px2;                    -- the SID's values
+            v_sy  := not py2;
+            p_dx  <= signed(unsigned(v_sx(6 downto 1)) - unsigned(not pv_x(6 downto 1)));
+            p_dy  <= signed(unsigned(v_sy(6 downto 1)) - unsigned(not pv_y(6 downto 1)));
+            if flip_i(0) = '1' then
+               p_dx <= signed(unsigned(not pv_x(6 downto 1)) - unsigned(v_sx(6 downto 1)));
+            end if;
+            if flip_i(1) = '1' then
+               p_dy <= signed(unsigned(not pv_y(6 downto 1)) - unsigned(v_sy(6 downto 1)));
+            end if;
+            if unsigned(v_sx) < 254 or unsigned(v_sy) < 254 then
+               driven <= '1';
+               p_stb  <= c1351 and driven;       -- (not from or to open lines: no jump)
+            else
+               driven <= '0';
+            end if;
+         end if;
+
+         if ms_cnt = C_MS - 1 then
+            if driven = '1' then
+               open_ms <= 0;
+               if drv_ms /= G_DETECT_MS then
+                  drv_ms <= drv_ms + 1;
+               else
+                  c1351 <= '1';
+               end if;
+            else
+               drv_ms <= 0;
+               if open_ms /= 5 * G_DETECT_MS then
+                  open_ms <= open_ms + 1;
+               else
+                  c1351 <= '0';
+               end if;
+            end if;
+         end if;
+
+         if rst_i = '1' then
+            c1351  <= '0';
+            drv_ms <= 0;
+         end if;
+      end if;
+   end process p_1351;
 
    p_mouse : process (clk_i)
       variable v_b     : t_bytes;
@@ -190,10 +295,15 @@ begin
          v_v := s2(0) & s2(2);                -- V, VQ
          v_x := acc_x;
          v_y := acc_y;
-         if step(hq, v_h) = 1 and v_x > -511 then v_x := v_x - 1;
-         elsif step(hq, v_h) = -1 and v_x < 511 then v_x := v_x + 1; end if;
-         if step(vq, v_v) = 1 and v_y < 511 then v_y := v_y + 1;
-         elsif step(vq, v_v) = -1 and v_y > -511 then v_y := v_y - 1; end if;
+         if c1351 = '0' then
+            if step(hq, v_h) = 1 and v_x > -511 then v_x := v_x - 1;
+            elsif step(hq, v_h) = -1 and v_x < 511 then v_x := v_x + 1; end if;
+            if step(vq, v_v) = 1 and v_y < 511 then v_y := v_y + 1;
+            elsif step(vq, v_v) = -1 and v_y > -511 then v_y := v_y - 1; end if;
+         elsif p_stb = '1' then                  -- a 1351: its reading's motion, up to 511
+            v_x := sat(v_x, p_dx);
+            v_y := sat(v_y, p_dy);
+         end if;
          hq <= v_h;
          vq <= v_v;
 

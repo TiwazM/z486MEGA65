@@ -33,6 +33,19 @@
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
 #                             dma_take_starved, z486_sources.py; on after the core loads)
+#   qmon.py joy [secs]        port 2's joystick (the game port) over secs seconds (default
+#                             30): every change of its directions and buttons; fire 2 and 3
+#                             are its paddle lines (pins 9 and 5, or as the menu says)
+#   qmon.py intahold [on|off] the PIC holds its vector from the CPU's first INTA to its
+#                             acknowledge (pic_inta_bridge.sv's vector_hold, z486_sources.py;
+#                             on after the core loads; off, an IRQ that rises in between can be
+#                             acknowledged in place of the one the CPU took, and is lost)
+#   qmon.py pic               the PICs' IRR, ISR and masks, the IRQ lines, the 8042's state, the
+#                             INTAs acknowledged with another vector, the mouse (also in status)
+#   qmon.py c1351 [normal|flipx|flipy|flipxy] [swap|noswap]
+#                             the mouse on port 1: an Amiga mouse or a 1351 (pc_mouse.vhd), the
+#                             paddle values, and a 1351's axes reversed or swapped (default
+#                             normal, noswap: x on POT X, pin 9)
 #   qmon.py cd                the CD-ROM's disc (its track table, C_DEV_PC_CDTOC, written by
 #                             m2m-rom.asm's cdimage.asm) and its audio (pc_cdrom.vhd): the
 #                             status, the LBA heard, the FIFO's underruns and lowest fill
@@ -508,6 +521,102 @@ def sbfix(arg):
     print("Sound Blaster stalled-transfer fix: %s" % ("?" if v is None else "on" if v & 1 else "off"))
 
 
+# the game port's joystick (main_joy_dig, snapshot word 0x001C bits 9..2)
+JOY_NAMES = ("right", "left", "down", "up", "fire", "fire 2", "fire 3", "button 4")
+
+
+def joy_watch(secs):
+    # every change of port 2 over secs seconds: fire 2 and 3 are its paddle lines, pin 9 and
+    # pin 5 unless the menu says pin 5 for fire 2 (mega65.vhd p_main_joy)
+    pc_dev()
+    last, t0 = None, time.time()
+    while time.time() - t0 < secs:
+        v = dump(0x801C, 0x801C)[0]
+        if v is None:
+            continue
+        j = v >> 2 & 0xFF
+        if j != last:
+            held = [n for i, n in enumerate(JOY_NAMES) if j >> i & 1]
+            print("%6.1f s  %s" % (time.time() - t0, ", ".join(held) or "centred, no button"),
+                  flush=True)
+            last = j
+
+
+def mouse_line():
+    # port 1's mouse (pc_mouse.vhd): Amiga or 1351, and both ports' paddle lines as SID values
+    # (the framework hands them over inverted: an open line reads 255 here). POT X is pin 9: a
+    # 1351's x, the game port's fire 2 (unless the menu says pin 5)
+    w = dump(0x8038, 0x803A)
+    f = dump(0x800D, 0x800D)[0]
+    if None in w or f is None:
+        return "mouse: ?"
+    if f == 0xEEEE:                        # nothing there: a core from before the 1351
+        return "mouse: this core has no 1351 readout"
+    p1x, p1y, p2x, p2y = (255 - (w[0] & 0xFF), 255 - (w[0] >> 8), 255 - (w[1] & 0xFF),
+                          255 - (w[1] >> 8))
+    flips = [a for a, b in (("x", 1), ("y", 2)) if f & b]
+    return ("mouse (port 1): %s; 1351 axes reversed: %s%s\n"
+            "paddles (SID values): port 1 POT X (pin 9) %3d (position %2d), POT Y (pin 5) %3d "
+            "(position %2d); port 2 POT X %3d, POT Y %3d" %
+            ("a 1351 (both buttons)" if w[2] & 1 else "Amiga (F13 = right button)",
+             ", ".join(flips) or "none", "; x and y swapped" if f & 4 else "",
+             p1x, p1x >> 1 & 63, p1y, p1y >> 1 & 63, p2x, p2y))
+
+
+def c1351(args):
+    # a 1351's axes: normal, flipx, flipy, flipxy reverse them; swap, noswap
+    pc_dev()
+    flips = {"normal": 0, "flipx": 1, "flipy": 2, "flipxy": 3}
+    f = dump(0x800D, 0x800D)[0]
+    if f is not None and f != 0xEEEE and args:
+        v = f & 7
+        for a in args:
+            if a in flips:
+                v = (v & 4) | flips[a]
+            elif a in ("swap", "noswap"):
+                v = (v & 3) | (4 if a == "swap" else 0)
+        poke(0x800D, v)
+    print(mouse_line())
+
+
+def intahold(arg):
+    pc_dev()
+    if arg in ("on", "off"):
+        poke(0x800C, 1 if arg == "on" else 0)
+    v = dump(0x800C, 0x800C)[0]
+    print("PIC vector held from the first INTA: %s" % ("?" if v is None else "on" if v & 1 else "off"))
+
+
+def irqs(mask, base=0):
+    return ",".join(str(base + i) for i in range(8) if mask >> i & 1) or "-"
+
+
+def pic_8042():
+    # the second snapshot (mega65.vhd p_main_dbg, 0x0030..37): the PICs, the IRQ lines, the 8042
+    w = dump(0x8030, 0x8037)
+    if None in w:
+        return "PICs: ?"
+    m_irr, m_isr, s_irr, s_isr = w[0] & 0xFF, w[0] >> 8, w[1] & 0xFF, w[1] >> 8
+    m_imr, s_imr, lines = w[2] & 0xFF, w[2] >> 8, w[3]
+    k, f = w[4], w[5]
+    out = ["PIC master: IRR %s  ISR %s  masked %s   slave: IRR %s  ISR %s  masked %s" %
+           (irqs(m_irr), irqs(m_isr), irqs(m_imr), irqs(s_irr, 8), irqs(s_isr, 8), irqs(s_imr, 8)),
+           "IRQ lines up: %s" % (",".join(str(i) for i in range(16) if lines >> i & 1) or "-")]
+    buf = "empty" if not k & 4 else "a mouse byte" if k & 8 else "a key"
+    out.append("8042: output buffer %s, IRQ1 %d IRQ12 %d; keyboard %s (IRQ %s), mouse %s (IRQ %s); "
+               "FIFOs: keyboard %d, mouse %d bytes; line states kbd %d mouse %d" %
+               (buf, k & 1, k >> 1 & 1, "off" if k & 16 else "on", "on" if k & 64 else "off",
+                "off" if k & 32 else "on", "on" if k & 128 else "off", f & 0x7F, f >> 8 & 0x7F,
+                k >> 8 & 15, k >> 12 & 15))
+    for irq, pic_irr, pic_isr, bit in ((1, m_irr, m_isr, 1), (12, s_irr, s_isr, 4)):
+        if lines >> irq & 1 and not pic_irr >> bit & 1 and not pic_isr >> bit & 1:
+            out.append("  IRQ%d is up but neither requested nor in service: its edge is gone" % irq)
+    out.append("INTAs the PIC acknowledged with another vector than the CPU took: %d%s" %
+               (w[6], "  (the last: CPU %02Xh, PIC %02Xh)" % (w[7] >> 8, w[7] & 0xFF) if w[6] else ""))
+    out.append(mouse_line())
+    return "\n".join(out)
+
+
 def ide(n):
     pc_dev()
     poke(0xFFF5, 0x0002)                   # the IDE trace: device addresses 0x2000.., window 2
@@ -554,6 +663,15 @@ elif args and args[0] == "iotrace":
     iotrace(args[1:])
 elif args and args[0] == "sbfix":
     sbfix(args[1] if len(args) > 1 else "")
+elif args and args[0] == "joy":
+    joy_watch(float(args[1]) if len(args) > 1 else 30)
+elif args and args[0] == "c1351":
+    c1351(args[1:])
+elif args and args[0] == "intahold":
+    intahold(args[1] if len(args) > 1 else "")
+elif args and args[0] == "pic":
+    pc_dev()
+    print(pic_8042())
 elif args and args[0] == "cd":
     cd()
 elif args and args[0] == "ide":
@@ -566,11 +684,11 @@ elif args and args[0] == "status":
         print("last I/O read: port %04X -> %02X   last I/O write: port %04X <- %02X" %
               (s["io_rd"] >> 8, s["io_rd"] & 0xFF, s["io_wr"] >> 8, s["io_wr"] & 0xFF))
     if "joy" in s:
-        names = ("right", "left", "down", "up", "fire", "fire 2", "fire 3", "button 4")
-        held = [n for i, n in enumerate(names) if s["joy"] >> i & 1]
+        held = [n for i, n in enumerate(JOY_NAMES) if s["joy"] >> i & 1]
         print("joystick (port 2): %s   Sound Blaster DMA request: %s" %
               (", ".join(held) or "centred, no button",
                {0: "none", 1: "8-bit up", 2: "16-bit up", 3: "both up"}[s["sb_req"]]))
+    print(pic_8042())
     print(log(s["logs"]))
 elif args and args[0] == "boot":
     s = boot(int(args[1], 0), float(args[2]) if len(args) > 2 else 3.0)

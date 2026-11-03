@@ -10,8 +10,9 @@
 --   map, a clock crossing (avm_fifo) and a 64 -> 16 bit width reduction (avm_decrease)
 -- * the SVGA framebuffer shown by ascal from HyperRAM (M2M-UPSTREAM rtg-framebuffer)
 -- * the MEGA65 keyboard as a PS/2 keyboard (pc_keyboard.vhd, ps2_device.vhd)
--- * a mouse on joystick port 1 (an Amiga mouse, or a mouSTer in Amiga mode; F13 is the right
---   button) as a PS/2 mouse (pc_mouse.vhd, ps2_device.vhd)
+-- * a mouse on joystick port 1 (an Amiga mouse, or a mouSTer in Amiga mode, F13 the right
+--   button; or a 1351, or a mouSTer in C64 mode, with both buttons) as a PS/2 mouse
+--   (pc_mouse.vhd, ps2_device.vhd)
 -- * the management bus in hardware (pc_mgmt.vhd: CMOS, floppy, hard disk; pc_cdrom.vhd: the
 --   CD-ROM drive) and the disks from image files on the SD card (disk_sd.vhd, through the SD
 --   host controller's engine port): floppy drives A: and B:, the hard disk on the first IDE
@@ -354,7 +355,8 @@ constant C_MENU_FLT_SMOOTH    : natural := 22;  -- (21: Sharp, the default)
 constant C_MENU_FLT_PIXELS    : natural := 23;
 constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
 constant C_MENU_SL_50         : natural := 31;
-constant C_MENU_RESET         : natural := 36;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_JOY_P5        : natural := 38;  -- the game port's fire 2 on pin 5 (37: pin 9)
+constant C_MENU_RESET         : natural := 43;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -416,6 +418,12 @@ signal main_dbg_sb_cmd_wait   : std_logic;                       -- a DSP DMA co
 signal main_dbg_sb_smp_stb    : std_logic;                       -- a DSP DMA output sample:
 signal main_dbg_sb_smp_dif    : std_logic_vector(15 downto 0);   -- its jump from the last one
 signal main_dbg_sb_smp_pos    : std_logic_vector(15 downto 0);   -- its index in the block
+signal main_dbg_pic           : std_logic_vector(47 downto 0);   -- the PICs' IRR, ISR, IMR
+signal main_dbg_irq           : std_logic_vector(15 downto 0);   -- the IRQ lines into them
+signal main_dbg_ps2           : std_logic_vector(15 downto 0);   -- the 8042's state
+signal main_dbg_ps2_fifo      : std_logic_vector(15 downto 0);   -- its FIFOs' bytes
+signal main_dbg_inta_bad      : std_logic_vector(15 downto 0);   -- INTAs acknowledged otherwise
+signal main_dbg_inta_last     : std_logic_vector(15 downto 0);   -- the last: CPU's, PIC's vector
 
 -- The DMA and Sound Blaster I/O trace (p_main_iot)
 signal main_iot_div           : unsigned(5 downto 0) := (others => '0');
@@ -445,11 +453,13 @@ signal main_iot_jump          : std_logic_vector(7 downto 0) := (others => '0');
 signal main_iot_jpos          : std_logic_vector(15 downto 0) := (others => '0');
 -- 7..0 changed: start again, 8: stop at a 1 ms wait, 9: stop now, 10: the Sound Blaster's
 -- stalled-transfer fix off (sound_dsp.v's dma_take_starved), 11: stop when full, 19..12: the
--- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range)
-signal main_iot_arm           : std_logic_vector(19 downto 0);
-signal main_iot_arm_d         : std_logic_vector(19 downto 0) := (others => '0');
+-- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range), 20: the
+-- PIC's vector hold from the first INTA off (pic_inta_bridge.sv's vector_hold), 22..21: a 1351
+-- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x)
+signal main_iot_arm           : std_logic_vector(23 downto 0);
+signal main_iot_arm_d         : std_logic_vector(23 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(19 downto 0) := x"40000";
+signal qnice_iot_arm          : std_logic_vector(23 downto 0) := x"040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -463,6 +473,8 @@ signal main_dbg_post_last     : std_logic_vector(7 downto 0) := x"00";
 signal main_dbg_post_new      : std_logic;
 signal main_dbg_snap          : std_logic_vector(255 downto 0) := (others => '0');
 signal qnice_dbg_snap         : std_logic_vector(255 downto 0);
+signal main_dbg_snap2         : std_logic_vector(255 downto 0) := (others => '0');  -- PICs, 8042
+signal qnice_dbg_snap2        : std_logic_vector(255 downto 0);
 signal main_dbg_log_wr        : std_logic;
 signal main_dbg_log_entry     : std_logic_vector(11 downto 0);
 signal qnice_dbg_log_q        : std_logic_vector(11 downto 0);
@@ -513,6 +525,12 @@ signal main_kbd_dev_clk       : std_logic;     -- the keyboard's lines
 signal main_kbd_dev_dat       : std_logic;
 signal main_kbd_host_clk      : std_logic;     -- the 8042's lines
 signal main_kbd_host_dat      : std_logic;
+signal main_c1351             : std_logic;                       -- a 1351 on port 1
+-- the paddle lines as a 1351's x and y (port 1) and the game port's fire 2 and 3 (port 2)
+signal main_m1351_x           : std_logic_vector(7 downto 0);
+signal main_m1351_y           : std_logic_vector(7 downto 0);
+signal main_fire2_pot         : std_logic_vector(7 downto 0);
+signal main_fire3_pot         : std_logic_vector(7 downto 0);
 signal main_mouse_tx_valid    : std_logic;
 signal main_mouse_tx_data     : std_logic_vector(7 downto 0);
 signal main_mouse_tx_ready    : std_logic;
@@ -690,6 +708,13 @@ component z486_mega65 is
       dbg_sb_smp_stb     : out   std_logic;
       dbg_sb_smp_dif     : out   std_logic_vector(15 downto 0);
       dbg_sb_smp_pos     : out   std_logic_vector(15 downto 0);
+      inta_hold          : in    std_logic;
+      dbg_pic            : out   std_logic_vector(47 downto 0);
+      dbg_irq            : out   std_logic_vector(15 downto 0);
+      dbg_ps2            : out   std_logic_vector(15 downto 0);
+      dbg_ps2_fifo       : out   std_logic_vector(15 downto 0);
+      dbg_inta_bad       : out   std_logic_vector(15 downto 0);
+      dbg_inta_last      : out   std_logic_vector(15 downto 0);
       cd_l               : in    std_logic_vector(15 downto 0);
       cd_r               : in    std_logic_vector(15 downto 0)
    );
@@ -933,6 +958,13 @@ begin
          dbg_sb_smp_stb     => main_dbg_sb_smp_stb,
          dbg_sb_smp_dif     => main_dbg_sb_smp_dif,
          dbg_sb_smp_pos     => main_dbg_sb_smp_pos,
+         inta_hold          => not main_iot_arm(20),
+         dbg_pic            => main_dbg_pic,
+         dbg_irq            => main_dbg_irq,
+         dbg_ps2            => main_dbg_ps2,
+         dbg_ps2_fifo       => main_dbg_ps2_fifo,
+         dbg_inta_bad       => main_dbg_inta_bad,
+         dbg_inta_last      => main_dbg_inta_last,
          cd_l               => main_cd_l,
          cd_r               => main_cd_r
       ); -- i_z486
@@ -1063,22 +1095,32 @@ begin
       end if;
    end process p_main_turbo;
 
+   -- The paddle lines. The framework names them as the C64 does: POT X is pin 9, a 1351's x
+   -- (a mouSTer in C64 mode came out the right way round so, 2026-11-02); main_iot_arm(23)
+   -- (qmon.py c1351 swap) swaps them. The game port's second fire button is on pin 9, POT X,
+   -- as the C64GS's, or on pin 5 when the menu says so (C_MENU_JOY_P5: a two-button stick that
+   -- has it there, qmon.py joy, 2026-11-02); the third on the other line.
+   main_m1351_x   <= main_pot1_y_i when main_iot_arm(23) = '1' else main_pot1_x_i;
+   main_m1351_y   <= main_pot1_x_i when main_iot_arm(23) = '1' else main_pot1_y_i;
+   main_fire2_pot <= main_pot2_y_i when main_osm_control_i(C_MENU_JOY_P5) = '1' else main_pot2_x_i;
+   main_fire3_pot <= main_pot2_x_i when main_osm_control_i(C_MENU_JOY_P5) = '1' else main_pot2_y_i;
+
    -- A joystick on port 2 as the PC's game port joystick (201h). Fire is button 1; a second
-   -- and third fire button on the paddle lines (POT X, POT Y; the C64 two- and three-button
-   -- joysticks connect them to +5 V) are buttons 2 and 3. A pressed one reads near 255 here
+   -- and third fire button on the paddle lines (main_fire2_pot, main_fire3_pot: the C64 two-
+   -- and three-button joysticks connect them to +5 V) are buttons 2 and 3. A pressed one reads near 255 here
    -- (M2M inverts the paddle values), an open line near 0. The directions and fire come
    -- debounced, on main_clk, from M2M (the paddle values too).
    p_main_joy : process (main_clk)
    begin
       if rising_edge(main_clk) then
-         if unsigned(main_pot2_x_i) >= 192 then
+         if unsigned(main_fire2_pot) >= 192 then
             main_joy_b2 <= '1';
-         elsif unsigned(main_pot2_x_i) < 64 then
+         elsif unsigned(main_fire2_pot) < 64 then
             main_joy_b2 <= '0';
          end if;
-         if unsigned(main_pot2_y_i) >= 192 then
+         if unsigned(main_fire3_pot) >= 192 then
             main_joy_b3 <= '1';
-         elsif unsigned(main_pot2_y_i) < 64 then
+         elsif unsigned(main_fire3_pot) < 64 then
             main_joy_b3 <= '0';
          end if;
       end if;
@@ -1102,6 +1144,10 @@ begin
          left_n_i        => main_joy_1_left_n_i,
          right_n_i       => main_joy_1_right_n_i,
          fire_n_i        => main_joy_1_fire_n_i,
+         pot_x_i         => main_m1351_x,
+         pot_y_i         => main_m1351_y,
+         flip_i          => main_iot_arm(22 downto 21),
+         c1351_o         => main_c1351,
          key_num_i       => main_kb_key_num_i,
          key_pressed_n_i => main_kb_key_pressed_n_i,
          tx_valid_o      => main_mouse_tx_valid,
@@ -1163,6 +1209,18 @@ begin
                              "000000" & main_pc_reset & main_dbg_mem_busy & main_dbg_cpu_pe &
                              main_dbg_first_instr & main_dbg_vga_bad & main_dbg_vga_checked &
                              main_dbg_bios_loaded & main_dbg_boot_stage;
+            -- the PICs and the 8042 (z486_sources.py): master ISR:IRR, slave ISR:IRR, slave
+            -- IMR:master IMR, the IRQ lines, the 8042's state and FIFOs, the INTAs the PIC
+            -- acknowledged with another vector than the CPU took, the last one's two vectors;
+            -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd)
+            main_dbg_snap2 <= x"0000" & x"0000" & x"0000" & x"0000" & x"0000" &
+                              x"000" & "000" & main_c1351 &
+                              main_pot2_y_i & main_pot2_x_i & main_pot1_y_i & main_pot1_x_i &
+                              main_dbg_inta_last & main_dbg_inta_bad &
+                              main_dbg_ps2_fifo & main_dbg_ps2 & main_dbg_irq &
+                              main_dbg_pic(7 downto 0) & main_dbg_pic(31 downto 24) &
+                              main_dbg_pic(15 downto 8) & main_dbg_pic(23 downto 16) &
+                              main_dbg_pic(39 downto 32) & main_dbg_pic(47 downto 40);
          end if;
          if main_dbg_post_write = '1' then
             main_dbg_post_last <= main_dbg_post_code;
@@ -1430,7 +1488,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 20,
+         G_DATA_SIZE    => 24,
          G_REGISTER_SRC => false
       )
       port map (
@@ -1531,6 +1589,16 @@ begin
          dst_clk_i  => qnice_clk_i,
          dst_data_o => qnice_dbg_snap
       ); -- i_cdc_dbg_snap
+
+   i_cdc_dbg_snap2 : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 256
+      )
+      port map (
+         src_data_i => main_dbg_snap2,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_dbg_snap2
+      ); -- i_cdc_dbg_snap2
 
    -- One pixel clock enable for the picture and the OSM: the OSM canvas is the VGA's 640 wide
    video_ce_ovl_o <= video_ce_o;
@@ -1762,6 +1830,10 @@ begin
    --    0x0008..0B  read: the CD-ROM's audio (pc_cdrom.vhd's cd_stat_o), the high word first:
    --                the audio status | the LBA heard (23..16), its low word, the samples the
    --                FIFO did not have, the fewest words it held since the PLAY
+   --    0x000C      bit 0 = the PIC holds its vector from the CPU's first INTA to its
+   --                acknowledge (pic_inta_bridge.sv's vector_hold, z486_sources.py; default on)
+   --    0x000D      bit 0 = a 1351 mouse's x reversed, bit 1 its y (pc_mouse.vhd's flip_i);
+   --                bit 2 = its x and y swapped (main_m1351_x)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
@@ -1773,6 +1845,13 @@ begin
    --                from bit 0 of 0x001D: read byte, read port, write byte, write port
    --    0x0020..2B  read: the FPGA's temperature, VCCINT, VCCAUX and VCCBRAM now, their maxima,
    --                their minima since the configuration (xadc_mon.vhd)
+   --    0x0030..37  read: the second debug snapshot (p_main_dbg, the same moment): the master
+   --                PIC's ISR:IRR, the slave's ISR:IRR, the slave's IMR:the master's IMR, the
+   --                IRQ lines 15..0, the 8042's state and its FIFOs' bytes (ps2.v's dbg_state
+   --                and dbg_fifo, z486_sources.py), the INTAs the PIC acknowledged with another
+   --                vector than the CPU took since the PC's reset, the last one's (CPU:PIC);
+   --    0x0038..3A  the paddle values (as the framework gives them: inverted) of port 1, Y:X,
+   --                and port 2; bit 0 of 0x003A = a 1351 on port 1 (pc_mouse.vhd)
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    --    0x2000..2FFF read: the IDE trace (p_main_trace), event n at 0x2000 + 8 * (n mod 512):
    --                its sequence number, milliseconds, then the event (pc_mgmt.vhd) in four
@@ -1799,6 +1878,10 @@ begin
                qnice_iot_arm(10) <= not qnice_dev_data_i(0);
             elsif qnice_dev_addr_i = x"0000007" then
                qnice_iot_arm(19 downto 12) <= qnice_dev_data_i(7 downto 0);
+            elsif qnice_dev_addr_i = x"000000C" then
+               qnice_iot_arm(20) <= not qnice_dev_data_i(0);
+            elsif qnice_dev_addr_i = x"000000D" then
+               qnice_iot_arm(23 downto 21) <= qnice_dev_data_i(2 downto 0);
             end if;
          end if;
          if qnice_rst_i = '1' then
@@ -1849,9 +1932,13 @@ begin
       for k in 0 to 3 loop                     -- the CD-ROM's audio (pc_cdrom's cd_stat_o)
          put(v_blk0 and v_low = 8 + k, qnice_cd_stat(63 - 16 * k downto 48 - 16 * k));
       end loop;
+      put(v_blk0 and v_low = 12, x"000" & "000" & not qnice_iot_arm(20));
+      put(v_blk0 and v_low = 13, x"000" & "0" & qnice_iot_arm(23 downto 21));
       for k in 0 to 7 loop
          put(v_blk0 and v_low = 16 + k, qnice_dbg_snap(16 * k + 15 downto 16 * k));
          put(v_blk0 and v_low = 24 + k, qnice_dbg_snap(16 * k + 143 downto 16 * k + 128));
+         put(v_blk0 and v_low = 48 + k, qnice_dbg_snap2(16 * k + 15 downto 16 * k));
+         put(v_blk0 and v_low = 56 + k, qnice_dbg_snap2(16 * k + 143 downto 16 * k + 128));
       end loop;
       put(v_blk0 and v_low >= 32 and v_low <= 47, qnice_xadc);
       put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0001", "0000" & qnice_dbg_log_q);

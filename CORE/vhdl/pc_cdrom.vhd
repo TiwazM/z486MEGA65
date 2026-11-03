@@ -51,9 +51,10 @@
 --   * Audio: PLAY returns at once; the streamer (S_PL*) then fills cd_audio.vhd's FIFO between
 --     the PC's commands: when there is room for 7 sectors it asks for the bus and fills it up,
 --     sectors in no file as silence, up to the end the PLAY gave or a data track. READ SUB-
---     CHANNEL reports the sector being heard (cd_audio counts them). READ, SEEK, START STOP
---     UNIT (stop, eject), a new disc and a reset stop it, as on a real drive: games loaded
---     their data first, or stopped the music to read.
+--     CHANNEL reports the sector being heard (cd_audio counts them), or the one a SEEK went
+--     to (Media Player seeks to a track, reads where the drive is, then plays from there).
+--     READ, SEEK, START STOP UNIT (stop, eject), a new disc and a reset stop it, as on a real
+--     drive: games loaded their data first, or stopped the music to read.
 --
 -- ide.v's buffer is filled before the registers that announce a block (pc_mgmt's way, no fast
 -- reads), through register F after a write to register 6 (no bits: it changes nothing, but
@@ -721,6 +722,7 @@ begin
       variable v_n     : unsigned(7 downto 0);
       variable v_t     : unsigned(15 downto 0);
       variable v_in    : unsigned(11 downto 0);
+      variable v_seek  : boolean;                 -- a SEEK moved h_lba this clock
 
       -- CHECK CONDITION: the sense data, ERR and the sense key, the end
       procedure fail(k : std_logic_vector(3 downto 0); asc, ascq : std_logic_vector(7 downto 0)) is
@@ -832,6 +834,7 @@ begin
       end procedure ms_byte;
    begin
       if rising_edge(clk_i) then
+         v_seek       := false;
          mgmt_read_o  <= '0';
          mgmt_write_o <= '0';
          d_start      <= '0';
@@ -1411,11 +1414,17 @@ begin
                            state  <= S_LK;
                         end if;
 
-                     when x"2B" =>                   -- SEEK: stops play
-                        stop_play(C_AS_NONE);
-                        if m_present = '0' then
+                     when x"2B" =>                   -- SEEK: stops play; the head is there
+                        stop_play(C_AS_NONE);        -- (READ SUB-CHANNEL's position, PLAY's
+                        v_lba := unsigned(cdb(2)) & unsigned(cdb(3)) & unsigned(cdb(4)) &
+                                 unsigned(cdb(5));   -- FFh start: Media Player seeks to a
+                        if m_present = '0' then      -- track, reads where it is, plays there)
                            fail(x"2", x"3A", x"00");
+                        elsif v_lba >= m_cap then
+                           fail(x"5", x"21", x"00"); -- past the lead-out
                         else
+                           h_lba  <= v_lba;
+                           v_seek := true;
                            finish;
                         end if;
 
@@ -2110,7 +2119,7 @@ begin
          end case;
 
          -- the audio: the sector heard, the end, the FIFO's lowest, when the streamer goes
-         if pl_run = '1' and cd_heard = '1' then
+         if pl_run = '1' and cd_heard = '1' and not v_seek then
             h_lba <= h_lba + 1;
          end if;
          if pl_run = '1' and pl_done = '1' and cd_empty = '1' then

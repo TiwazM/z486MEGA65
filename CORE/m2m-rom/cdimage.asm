@@ -22,7 +22,9 @@
 ; The disc's layout is DOSBox's and MiSTer's: LBA 0 is track 1's INDEX 01;
 ; INDEX 00..01 is the track's pregap, data in its file; PREGAP and POSTGAP
 ; are silence in no file and move every later track; a track's sectors come
-; from its file's exact size.
+; from its file's exact size. One file may hold tracks of different sector
+; sizes (MODE1/2048 data, then 2352-byte audio): the cue's frames in it are
+; each the size of the track they belong to (CDI_REL, CDI_FEND).
 ;
 ; The release firmware has this in a code bank (m2m-rom.asm, FAR_CALL); the
 ; QNICE emulator test (CORE/m2m-rom/test/) has it flat. The includer gives
@@ -84,7 +86,8 @@ CDR_FSTART      .EQU    17                      ; its file's first frame
 CDR_FBASE       .EQU    19                      ; its file's virtual byte
 CDR_FSECT       .EQU    21                      ; its file's sectors
 CDR_FID         .EQU    23
-CDR_SIZE        .EQU    24
+CDR_FREL        .EQU    24                      ; its first frame's byte in its file
+CDR_SIZE        .EQU    26
 
 ; ----------------------------------------------------------------------------
 ; CD_PREP
@@ -879,6 +882,8 @@ _CPA_GAP        MOVE    CDI_CV, R0
 _CPA_EOF        RSUB    CDI_DONE, 1
                 CMP     0, R8
                 RBRA    _CPA_RET, !Z
+                RSUB    CDI_FEND, 1             ; the last file's frames
+                XOR     R8, R8
                 MOVE    CDI_PV, R0
                 CMP     0, @R0
                 RBRA    _CPA_RET, Z             ; (R8 = 0)
@@ -925,12 +930,15 @@ CDI_FILE        INCRB
                 MOVE    CDI_FID, R0             ; after the last file
                 CMP     0, @R0
                 RBRA    _CDF_FIRST, Z
+                RSUB    CDI_FEND, 1
                 MOVE    CDI_FSTART, R1
                 MOVE    CDI_FSECT, R2
                 ADD     @R2++, @R1++
                 ADDC    @R2, @R1
 _CDF_FIRST      ADD     1, @R0
                 MOVE    CDI_FSSIZE, R0
+                MOVE    0, @R0
+                MOVE    CDI_RSZ, R0             ; no track of it yet (CDI_REL)
                 MOVE    0, @R0
                 MOVE    CDI_FSECT, R0
                 MOVE    0, @R0++
@@ -1124,6 +1132,7 @@ CDI_DONE        INCRB
                 ADD     CDR_HAS1, R2
                 CMP     0, @R2
                 RBRA    _CDD_ECUE, Z            ; no INDEX 01
+                RSUB    CDI_REL, 1              ; its byte in its file
                 MOVE    CDI_PV, R2
                 CMP     0, @R2
                 RBRA    _CDD_NOPREV, Z
@@ -1183,6 +1192,123 @@ _CDD_ECUE       MOVE    CDI_E_CUE, R8
                 RET
 
 ; ----------------------------------------------------------------------------
+; CDI_REL: the current track (CDI_CUR, all its lines read) gets the byte in its
+; file of its first frame there, FB (INDEX 00, or 01; track 1: always INDEX
+; 01): the frames from the FB of the track before it in the same file are
+; that track's sectors, the first track of a file counts its own. As DOSBox:
+; a .bin with MODE1/2048 data and then 2352-byte audio (KQ6's).
+;   FREL = RBY + (FB - RFB) * RSZ, or FB * its own size; then RFB = FB,
+;   RBY = FREL, RSZ = its size
+; ----------------------------------------------------------------------------
+
+CDI_REL         INCRB
+                MOVE    CDI_CUR, R7
+                MOVE    R7, R2                  ; R1:R0 = FB
+                ADD     CDR_IDX1, R2
+                MOVE    CDI_PV, R3
+                CMP     0, @R3
+                RBRA    _CDRL_FB, Z             ; track 1: INDEX 01
+                MOVE    R7, R3
+                ADD     CDR_HAS0, R3
+                CMP     0, @R3
+                RBRA    _CDRL_FB, Z
+                MOVE    R7, R2
+                ADD     CDR_IDX0, R2
+_CDRL_FB        MOVE    @R2++, R0
+                MOVE    @R2, R1
+
+                MOVE    R0, R2                  ; R3:R2: the frames before FB,
+                MOVE    R1, R3
+                MOVE    R7, R4                  ; R4: their size,
+                ADD     CDR_SSIZE, R4
+                MOVE    @R4, R4
+                XOR     R5, R5                  ; R6:R5: the byte they start at
+                XOR     R6, R6
+                MOVE    CDI_RSZ, R8
+                CMP     0, @R8
+                RBRA    _CDRL_MUL, Z            ; (its file's first track)
+                MOVE    @R8, R4
+                MOVE    CDI_RFB, R8
+                SUB     @R8++, R2
+                SUBC    @R8, R3
+                MOVE    R3, R8                  ; FB before RFB (a bad cue): none
+                AND     0x8000, R8
+                RBRA    _CDRL_POS, Z
+                XOR     R2, R2
+                XOR     R3, R3
+_CDRL_POS       MOVE    CDI_RBY, R8
+                MOVE    @R8++, R5
+                MOVE    @R8, R6
+_CDRL_MUL       MOVE    R3, R8                  ; R11:R10 = R3:R2 * R4 + R6:R5
+                MOVE    R4, R9
+                RSUB    MTH$MULU, 1
+                MOVE    R10, R3                 ; (the high word's low word)
+                MOVE    R2, R8
+                MOVE    R4, R9
+                RSUB    MTH$MULU, 1
+                ADD     R3, R11
+                ADD     R5, R10
+                ADDC    R6, R11
+
+                MOVE    R7, R8                  ; FREL, RBY, RFB, RSZ
+                ADD     CDR_FREL, R8
+                MOVE    R10, @R8++
+                MOVE    R11, @R8
+                MOVE    CDI_RBY, R8
+                MOVE    R10, @R8++
+                MOVE    R11, @R8
+                MOVE    CDI_RFB, R8
+                MOVE    R0, @R8++
+                MOVE    R1, @R8
+                MOVE    R7, R8
+                ADD     CDR_SSIZE, R8
+                MOVE    CDI_RSZ, R9
+                MOVE    @R8, @R9
+                DECRB
+                RET
+
+; ----------------------------------------------------------------------------
+; CDI_FEND: the current file's sectors, from its last track (CDI_REL's RFB,
+; RBY, RSZ): RFB + (FSIZE - RBY) / RSZ, at least RFB; into CDI_FSECT and the
+; track before (CDI_PREV, that last track). A file without tracks keeps its
+; own. All registers kept but R8..R11
+; ----------------------------------------------------------------------------
+
+CDI_FEND        INCRB
+                MOVE    CDI_RSZ, R0
+                CMP     0, @R0
+                RBRA    _CDFE_RET, Z
+                MOVE    CDI_FSIZE, R1           ; R9:R8 = FSIZE - RBY
+                MOVE    @R1++, R8
+                MOVE    @R1, R9
+                MOVE    CDI_RBY, R1
+                SUB     @R1++, R8
+                SUBC    @R1, R9
+                MOVE    R9, R2                  ; past the file's end: none
+                AND     0x8000, R2
+                RBRA    _CDFE_DIV, Z
+                XOR     R8, R8
+                XOR     R9, R9
+_CDFE_DIV       MOVE    @R0, R10                ; / RSZ
+                XOR     R11, R11
+                RSUB    MTH$DIVU32, 1
+                MOVE    CDI_RFB, R1             ; + RFB
+                ADD     @R1++, R8
+                ADDC    @R1, R9
+                MOVE    CDI_FSECT, R1
+                MOVE    R8, @R1++
+                MOVE    R9, @R1
+                MOVE    CDI_PV, R1
+                CMP     0, @R1
+                RBRA    _CDFE_RET, Z
+                MOVE    CDI_PREV, R1
+                ADD     CDR_FSECT, R1
+                MOVE    R8, @R1++
+                MOVE    R9, @R1
+_CDFE_RET       DECRB
+                RET
+
+; ----------------------------------------------------------------------------
 ; CDI_FINAL: track R8 (a CDR_ record) into the table as the next track, its
 ; file data up to frame R10:R9 of its file. Output: R8 = 0 or CDI_E_CUE
 ; (over 99 tracks)
@@ -1193,7 +1319,7 @@ _CDD_ECUE       MOVE    CDI_E_CUE, R8
 ;   idx1  = base + INDEX 01 + PREGAP
 ;   fe    = base + R10:R9 + PREGAP (at least fb)
 ;   end   = fe + POSTGAP
-;   byte  = its file's virtual byte + FB * sector size
+;   byte  = its file's virtual byte + FB's byte in its file (CDI_REL)
 ; LBA = frame - track 1's INDEX 01 frame
 ; ----------------------------------------------------------------------------
 
@@ -1283,18 +1409,11 @@ _CDFI_FESET     MOVE    CDI_T_FE, R4
                 MOVE    R5, @R4++
                 MOVE    R6, @R4
 
-                ; byte = FBASE + FB * SSIZE
+                ; byte = FBASE + FREL (FB's byte in its file, CDI_REL)
                 MOVE    R7, R4
-                ADD     CDR_SSIZE, R4
-                MOVE    @R4, R4                 ; R4: the sector size
-                MOVE    R1, R8
-                MOVE    R4, R9
-                RSUB    MTH$MULU, 1
-                MOVE    R10, R2                 ; R2: FB hi * size (low word)
-                MOVE    R0, R8
-                MOVE    R4, R9
-                RSUB    MTH$MULU, 1               ; R11:R10 = FB lo * size
-                ADD     R2, R11
+                ADD     CDR_FREL, R4
+                MOVE    @R4++, R10
+                MOVE    @R4, R11
                 MOVE    R7, R4
                 ADD     CDR_FBASE, R4
                 ADD     @R4++, R10

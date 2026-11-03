@@ -211,17 +211,24 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    31    50%                   C_MENU_SL_50
 --    32    ----
 --    33    Back to main menu
---    34  ----
---    35  Help
---    36  Reset the PC            C_MENU_RESET
---    37  ----
---    38  Close Menu
+--    34  Joystick fire 2: %s     submenu: the game port's second fire button
+--    35    Joystick fire 2       headline
+--    36    ----
+--    37    Pin 9                 (default) POT X, as the C64GS's second button
+--    38    Pin 5                 C_MENU_JOY_P5: POT Y, as some sticks have it
+--    39    ----
+--    40    Back to main menu
+--    41  ----
+--    42  Help
+--    43  Reset the PC            C_MENU_RESET
+--    44  ----
+--    45  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change.
-constant OPTM_SIZE         : natural := 39;
+constant OPTM_SIZE         : natural := 46;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 15;   -- the main menu's lines (0-7, 18, 26, 34-38)
+constant OPTM_DY           : natural := 16;   -- the main menu's lines (0-7, 18, 26, 34, 41-45)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -258,6 +265,13 @@ constant OPTM_ITEMS        : string :=
    " 50%\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
+   " Joystick fire 2: %s\n"   &
+   " Joystick fire 2\n"       &
+   "\n"                       &
+   " Pin 9\n"                 &
+   " Pin 5\n"                 &
+   "\n"                       &
+   " Back to main menu\n"     &
    "\n"                       &
    " Help\n"                  &
    " Reset the PC\n"          &
@@ -273,6 +287,7 @@ constant OPTM_G_HDD        : integer := 5;
 constant OPTM_G_FILTER     : integer := 6;
 constant OPTM_G_SCAN       : integer := 7;
 constant OPTM_G_CD         : integer := 8;
+constant OPTM_G_JOY        : integer := 9;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -310,11 +325,18 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_SCAN,                              -- 31 50%
                                              OPTM_G_LINE,                              -- 32
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 33 Back
-                                             OPTM_G_LINE,                              -- 34
-                                             OPTM_G_HELP,                              -- 35 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 36 Reset the PC
-                                             OPTM_G_LINE,                              -- 37
-                                             OPTM_G_CLOSE                              -- 38 Close Menu
+                                             OPTM_G_SUBMENU,                           -- 34 Joystick fire 2: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 35 Joystick fire 2
+                                             OPTM_G_LINE,                              -- 36
+                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 37 Pin 9
+                                             OPTM_G_JOY,                               -- 38 Pin 5
+                                             OPTM_G_LINE,                              -- 39
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 40 Back
+                                             OPTM_G_LINE,                              -- 41
+                                             OPTM_G_HELP,                              -- 42 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 43 Reset the PC
+                                             OPTM_G_LINE,                              -- 44
+                                             OPTM_G_CLOSE                              -- 45 Close Menu
                                            );
 
 begin

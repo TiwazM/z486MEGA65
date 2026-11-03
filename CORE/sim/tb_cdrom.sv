@@ -503,6 +503,7 @@ module tb_cdrom #(
 
     // READ SUB-CHANNEL, format 1, LBA or MSF: status, track, index, absolute, relative
     reg [7:0] q_st, q_ctl, q_trk, q_idx;
+    reg [23:0] sk_end;                     // SEEK's test: PLAY's end as M:S:F
     reg [31:0] q_abs, q_rel;
     task automatic subq(input bit m);
         set_cdb(8'h42, m ? 8'h02 : 8'h00, 8'h40, 8'h01, 0, 0, 0, 0, 16, 0, 0, 0);
@@ -819,6 +820,28 @@ module tb_cdrom #(
         set_cdb(8'h4b, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0);
         packet(16'hfffe);
         expect_end("RESUME, nothing paused", 5);
+
+        // SEEK: the drive is there now (Windows' Media Player seeks to a track, asks where the
+        // drive is, then plays from there: FF:FF:FF); past the lead-out: out of range
+        set_cdb(8'h2b, 0, 0, 0, 300 >> 8, 300 & 255, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("SEEK 300");
+        subq(0);
+        check(q_st == 8'h15 && q_trk == 2 && q_abs == 300,
+              $sformatf("  READ SUB-CHANNEL: %02x, track %0d, at %0d", q_st, q_trk, q_abs));
+        a0 = naud;
+        sk_end = msf(305 + 150);
+        set_cdb(8'h47, 0, 0, 8'hff, 8'hff, 8'hff, sk_end[23:16], sk_end[15:8], sk_end[7:0], 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("PLAY AUDIO MSF from where it is (FF:FF:FF) to 304");
+        wait_status(8'h13, 400);
+        check(q_st == 8'h13, $sformatf("  done: audio status %02x", q_st));
+        check_audio(a0, 300, 305, "  the samples, 300-304");
+        set_cdb(8'h2b, 0, LEAD >> 24, (LEAD >> 16) & 255, (LEAD >> 8) & 255, LEAD & 255, 0, 0, 0, 0, 0, 0);
+        packet(16'hfffe);
+        expect_end("SEEK to the lead-out", 5);
+        sense(key, asc);
+        check(asc == 8'h21, $sformatf("  REQUEST SENSE: %0x/%02x", key, asc));
 
         // STOP; a READ stops play too
         play(300, 390);
