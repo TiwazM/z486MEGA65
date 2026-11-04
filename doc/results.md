@@ -66,6 +66,7 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | v0.1-preview (`impl incr`) | +0.436 ns | 83,232 | 44,162 | 258.5 tiles | 70 |
 | Direct loads, `impl incr` from v0.1-preview | -0.533 ns (607 failing) | 83,704 | 44,315 | 258.5 | 70 |
 | Direct loads and stores, `impl strong` | **+0.318 ns** (+0.018 at the target) | 82,904 | 44,399 | 258 | 70 |
+| Plus overlap and the shorter retire (z486 74acd11), `impl strong` | **+0.544 ns** (+0.244 at the target) | 84,951 | 44,695 | 258 | 70 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
 incremental run reused 96.5 % of v0.1-preview's cells and squeezed the new
@@ -74,6 +75,10 @@ their delay (the prefetch pointer into the group ROM, the x87 multiplier, the
 TLB into OPR_R, the segment limit). A fresh `impl strong` placed it all with
 room; its slowest paths are the load forwarding into the data unit's
 registers, the x87 multiplier (+0.332 ns) and the TLB into the address unit.
+With the overlap (2,000 more LUTs, in x87_control) the build came out
+better still: no x87 path among the slowest, which are the data unit's
+write-back, the prefetch pointer into the group ROM and the microcode ROM's
+address.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
