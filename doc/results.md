@@ -68,6 +68,7 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | Direct loads and stores, `impl strong` | **+0.318 ns** (+0.018 at the target) | 82,904 | 44,399 | 258 | 70 |
 | Plus overlap and the shorter retire (z486 74acd11), `impl strong` | **+0.544 ns** (+0.244 at the target) | 84,951 | 44,695 | 258 | 70 |
 | Plus exp/log on the polynomial engine (z486 2d424f5), `impl strong` | **+0.326 ns** (+0.026 at the target) | 84,744 | 44,262 | 255 | 67 |
+| Plus fast FRNDINT, FSCALE and WAIT (z486 dc48781), `impl strong` | **+0.528 ns** (+0.228 at the target) | 86,285 | 44,238 | 255 | 67 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
 incremental run reused 96.5 % of v0.1-preview's cells and squeezed the new
@@ -82,7 +83,10 @@ write-back, the prefetch pointer into the group ROM and the microcode ROM's
 address. Exp/log on the engine freed the log/exp table's 3 block RAM tiles
 and 3 DSPs (its interpolation); its slowest paths are the TLB into the data
 cache's PLRU bits and the load forwarding, none in the x87
-(`z486-R6-fpu2.cor`).
+(`z486-R6-fpu2.cor`). Fast FRNDINT, FSCALE and WAIT added 1,500 LUTs and
+met timing with more room; its slowest paths are the data unit's write-back
+into ESI and the TLB into the segment descriptor cache, none in the x87
+(`z486-R6-fpu3.cor`).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
