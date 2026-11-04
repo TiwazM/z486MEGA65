@@ -854,6 +854,36 @@ t_fyl2x:                                                /* 1 * log2(3.3), poppin
 
 t_fninit: LOOP32 fninit
 
+t_fscale:  FCOPY8 f64_2p5, fscale                       /* 2.5 * 2^2, ST1 the original */
+
+t_fwait:                                                /* the x87 idle */
+        fninit
+        LOOP32  fwait
+
+        .macro  WAITED insn:vararg                      /* 16-bit compiler style: WAIT before each */
+        mov     bp, [count]
+2:      .rept   32
+        fwait
+        \insn
+        .endr
+        dec     bp
+        jnz     2b
+        fninit
+        ret
+        .endm
+
+t_wfmul:
+        fninit
+        fld1
+        fld1
+        WAITED  fmul st, st(1)
+
+t_wfadd64:
+        fninit
+        fld1
+        mov     si, offset f64_e6
+        WAITED  fadd qword ptr [si]
+
 /* routine, passes N, copies K per pass, a 486's clocks per copy (0: none), name, flags
    (1: needs the FPU, 2: needs the 64 KB) */
         .balign 2
@@ -928,6 +958,10 @@ tests:
         .word   t_f2xm1,    213,  8, 147, n_f2xm1,   1
         .word   t_fyl2x,    151,  8, 207, n_fyl2x,   1
         .word   t_fninit,   460, 32,  17, n_fninit,  1
+        .word   t_fscale,   845,  8,  37, n_fscale,  1
+        .word   t_fwait,   7800, 32,   1, n_fwait,   1
+        .word   t_wfmul,    460, 32,  17, n_wfmul,   1
+        .word   t_wfadd64,  868, 32,   9, n_wfadd64, 1
         .word   0
 
 n_loop:  .asciz "dec bp + jnz (the test loop)"
@@ -1001,6 +1035,10 @@ n_fpatan:  .asciz "fpatan (fld st, fld1, fstp)"
 n_f2xm1:   .asciz "f2xm1 (fld st, fstp st)"
 n_fyl2x:   .asciz "fyl2x (fld1, fld st1, fstp)"
 n_fninit:  .asciz "fninit"
+n_fscale:  .asciz "fscale (fld st, fstp st)"
+n_fwait:   .asciz "fwait (x87 idle)"
+n_wfmul:   .asciz "fwait + fmul st, st(1)"
+n_wfadd64: .asciz "fwait + fadd m64"
 
 msg_head:  .ascii "CPUSPEED: clocks per instruction in real mode at $"
 msg_head2: .ascii " MHz (PIT counter 2)\r\n"
