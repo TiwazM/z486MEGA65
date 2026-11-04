@@ -21,6 +21,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Later:**
   - a complete x87 FPU; FPU rows in the CPU speed test (FADD, FDIV, FLD/FSTP,
     FISTP, conversions); perhaps a Voodoo 1.
+  - An HDMI mode at the PC's own 70 Hz (720×400 at 70 Hz, which most
+    monitors take): native mode keeps the PC's picture size but runs at 60 Hz,
+    so the scaler drops about one frame in seven, and fast animation judders
+    (King's Quest VI's boat scene: frames seem to play out of order).
+  - King's Quest VI's intro movie: the lower part of the picture sometimes
+    shows an older frame than the top (tearing), worse in some runs and
+    builds than in others. Ruled out: the CD reads (the same sectors, sizes
+    and pace on `hand` and v0.1-preview, IDE trace; KQ6's read pattern is
+    byte-exact in `tb_cdrom`), the Sound Blaster switches, and video memory
+    speed (Dr. Hardware: 35.7 MB/s). The 70 Hz mode above may cure it.
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
@@ -29,6 +39,10 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
+  - Softer pops at the end of game speech (King's Quest VI): z486's DSP
+    holds its last sample when a transfer ends and drops to 0 when the driver
+    pauses the DMA (`sound_dsp.v`), a step that goes to HDMI as it is; a real
+    card's output capacitors round it off. A DC filter in the mix would.
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known.

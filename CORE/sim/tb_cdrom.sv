@@ -725,6 +725,12 @@ module tb_cdrom #(
         // between two of them)
         cd_read(0, 700, 2, 16'h0300, 3);
         check(blocks == 6, $sformatf("  %0d blocks", blocks));
+        // King's Quest VI's intro movie through MSCDEX: a sector (limit 2048), then the next
+        // four (limit 8192), each READ from where the last one's SD run ended (IDE trace)
+        for (k = 0; k < 6; k++) begin
+            cd_read(0, 1000 + 5 * k, 1, 16'h0800);
+            cd_read(0, 1001 + 5 * k, 4, 16'h2000);
+        end
 
         // ---------------------------------------------------------------------------------------
         // the mixed disc: a new table, the unit mounted again (a new generation)

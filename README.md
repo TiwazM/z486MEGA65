@@ -57,8 +57,9 @@ The current version is **v0.1-preview** (see
 
 On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
 SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
-Guest, Ultima Underworld 1 and 2, and Quake (slowly: about 6 fps in `timedemo
-demo1`).
+Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
+of Monkey Island (CD, with its CD music), and Quake (slowly: about 6 fps in
+`timedemo demo1`).
 
 Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
