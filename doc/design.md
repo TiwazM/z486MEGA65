@@ -36,6 +36,20 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     sets take two or three of those steps in turn (an I/O trace while moving
     steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
     each step over the time to the next one would even it out.
+  - An Amiga mouse's right and middle buttons (pins 9 and 5) where the
+    mouse can drive the lines: a pull-up to +5 V in the mouse or an adapter
+    (AExp: about 2 kΩ from pin 7), or a mouSTer with firmware 3.23.5313 or
+    newer and `activepotlines=true` in `[mouse]`. Released, the paddle line
+    reads driven (a SID value near 0); pressed, open (255). Take a line as
+    a button only once it has read released (MegaST does the same), else a
+    mouse without the pull-up holds the button down; F13 stays. Such a
+    mouse probably freezes the pointer today: its driven lines look like a
+    1351's (`pc_mouse.vhd`, driven = under 254) and the quadrature is no
+    longer counted. Count only mid-range values (4..251, as the MEGA65's
+    own `mouse_input.vhdl` does) as a 1351's, and a step on pins 2-4 (which
+    a 1351 never pulls) as an Amiga mouse at once. Read pin 9 unswapped
+    (`qmon.py c1351 swap`). Measure first: `qmon.py mouse` with such a
+    mouse, for the thresholds (a weak pull-up may read mid-range).
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
