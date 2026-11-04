@@ -112,10 +112,12 @@ the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
 - `VTEST.COM`: the SVGA video memory through VESA's bank window, conventional
   RAM, XMS and reads through DOS (`CDPAT.BIN` on the CD; `VTEST W` writes it),
   with the timer at 10 kHz and Sound Blaster DMA running, as during a game.
-- `CPUSPEED.COM [MHz]`: the CPU's clocks per instruction in real mode (about
-  30 kinds, the PIT's counter 2 as the clock), beside a 486's, and the MHz a
-  speed test that times each one would report (64 unless given). A row well
-  under 64 is an instruction z486 takes longer for than a 486.
+- `CPUSPEED.COM [MHz] [F]`: the CPU's clocks per instruction in real mode (about
+  30 integer kinds and 37 of the FPU, the PIT's counter 2 as the clock), beside a
+  486's, and the MHz a speed test that times each one would report (64 unless
+  given). A row well under 64 is an instruction z486 takes longer for than a
+  486. `F` shows only the FPU's rows; all of them are more than a screen
+  (`CPUSPEED > SPEED.TXT`).
 
 `tools/floppy-packer.html`, a page that runs in any browser without a server,
 packs files into a FAT12 floppy image of any of the five sizes, with DOS's

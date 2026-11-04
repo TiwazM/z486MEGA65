@@ -19,8 +19,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Keyboard and mouse:** MEGA65 keyboard and joystick-port mouse as PS/2
   devices, after PCXT-EGA-MEGA65's `keyboard.vhd` and `m65_mouse_ps2.vhd`.
 - **Later:**
-  - a complete x87 FPU; FPU rows in the CPU speed test (FADD, FDIV, FLD/FSTP,
-    FISTP, conversions); perhaps a Voodoo 1.
+  - The x87's speed and accuracy ([x87](x87.md): what it costs per
+    instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
   - An HDMI mode at the PC's own 70 Hz (720×400 at 70 Hz, which most
     monitors take): native mode keeps the PC's picture size but runs at 60 Hz,
     so the scaler drops about one frame in seven, and fast animation judders
