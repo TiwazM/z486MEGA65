@@ -67,6 +67,7 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | Direct loads, `impl incr` from v0.1-preview | -0.533 ns (607 failing) | 83,704 | 44,315 | 258.5 | 70 |
 | Direct loads and stores, `impl strong` | **+0.318 ns** (+0.018 at the target) | 82,904 | 44,399 | 258 | 70 |
 | Plus overlap and the shorter retire (z486 74acd11), `impl strong` | **+0.544 ns** (+0.244 at the target) | 84,951 | 44,695 | 258 | 70 |
+| Plus exp/log on the polynomial engine (z486 2d424f5), `impl strong` | **+0.326 ns** (+0.026 at the target) | 84,744 | 44,262 | 255 | 67 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
 incremental run reused 96.5 % of v0.1-preview's cells and squeezed the new
@@ -78,7 +79,10 @@ registers, the x87 multiplier (+0.332 ns) and the TLB into the address unit.
 With the overlap (2,000 more LUTs, in x87_control) the build came out
 better still: no x87 path among the slowest, which are the data unit's
 write-back, the prefetch pointer into the group ROM and the microcode ROM's
-address.
+address. Exp/log on the engine freed the log/exp table's 3 block RAM tiles
+and 3 DSPs (its interpolation); its slowest paths are the TLB into the data
+cache's PLRU bits and the load forwarding, none in the x87
+(`z486-R6-fpu2.cor`).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
