@@ -63,7 +63,8 @@ of Monkey Island (CD, with its CD music), and Quake (slowly: about 6 fps in
 
 Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
-Blaster option it hangs.
+Blaster option it hangs. Wing Commander III runs best without EMM386
+(`HIMEM.SYS` only): with it, a video can hang the game on a black screen.
 
 ## Getting started
 
