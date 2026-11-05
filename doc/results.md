@@ -69,7 +69,7 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | Plus overlap and the shorter retire (z486 74acd11), `impl strong` | **+0.544 ns** (+0.244 at the target) | 84,951 | 44,695 | 258 | 70 |
 | Plus exp/log on the polynomial engine (z486 2d424f5), `impl strong` | **+0.326 ns** (+0.026 at the target) | 84,744 | 44,262 | 255 | 67 |
 | Plus fast FRNDINT, FSCALE and WAIT (z486 dc48781), `impl strong`: never booted | +0.528 ns (+0.228 at the target) | 86,285 | 44,238 | 255 | 67 |
-| The same, `impl strong incr` from the exp/log build (99.3 % of nets reused) | +0.305 ns (+0.005 at the target) | 86,195 | 44,260 | 255 | 67 |
+| The same, `impl strong incr` from the exp/log build (99.3 % of nets reused): boots | +0.305 ns (+0.005 at the target) | 86,195 | 44,260 | 255 | 67 |
 | The same, `impl` (the strategy's Explore placer): boots | **+0.607 ns** (+0.307 at the target) | 85,661 | 44,207 | 255 | 67 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
@@ -98,8 +98,8 @@ scratch with the Explore directive they boot on the board
 (`z486-R6-fpu3c.cor`, the most slack of these builds; its slowest paths are
 the load forwarding into the data unit's registers, the TLB into the address
 unit and the prefetch pointer into the group ROM, none in the x87). The
-incremental build from the exp/log placement (`z486-R6-fpu3b.cor`) is not
-tried yet. So a build that shows no POST 77 gets another placement before
+incremental build from the exp/log placement (`z486-R6-fpu3b.cor`) boots
+too. So a build that shows no POST 77 gets another placement before
 anyone suspects the change; both layouts that failed (`z486-R6-cdrom.bit`,
 `z486-R6-fpu3.bit`) are kept to try on a second MEGA65.
 
