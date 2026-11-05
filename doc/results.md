@@ -68,7 +68,9 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | Direct loads and stores, `impl strong` | **+0.318 ns** (+0.018 at the target) | 82,904 | 44,399 | 258 | 70 |
 | Plus overlap and the shorter retire (z486 74acd11), `impl strong` | **+0.544 ns** (+0.244 at the target) | 84,951 | 44,695 | 258 | 70 |
 | Plus exp/log on the polynomial engine (z486 2d424f5), `impl strong` | **+0.326 ns** (+0.026 at the target) | 84,744 | 44,262 | 255 | 67 |
-| Plus fast FRNDINT, FSCALE and WAIT (z486 dc48781), `impl strong` | **+0.528 ns** (+0.228 at the target) | 86,285 | 44,238 | 255 | 67 |
+| Plus fast FRNDINT, FSCALE and WAIT (z486 dc48781), `impl strong`: never booted | +0.528 ns (+0.228 at the target) | 86,285 | 44,238 | 255 | 67 |
+| The same, `impl strong incr` from the exp/log build (99.3 % of nets reused) | +0.305 ns (+0.005 at the target) | 86,195 | 44,260 | 255 | 67 |
+| The same, `impl` (the strategy's Explore placer): boots | **+0.607 ns** (+0.307 at the target) | 85,661 | 44,207 | 255 | 67 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
 incremental run reused 96.5 % of v0.1-preview's cells and squeezed the new
@@ -83,10 +85,23 @@ write-back, the prefetch pointer into the group ROM and the microcode ROM's
 address. Exp/log on the engine freed the log/exp table's 3 block RAM tiles
 and 3 DSPs (its interpolation); its slowest paths are the TLB into the data
 cache's PLRU bits and the load forwarding, none in the x87
-(`z486-R6-fpu2.cor`). Fast FRNDINT, FSCALE and WAIT added 1,500 LUTs and
-met timing with more room; its slowest paths are the data unit's write-back
-into ESI and the TLB into the segment descriptor cache, none in the x87
-(`z486-R6-fpu3.cor`).
+(`z486-R6-fpu2.cor`).
+
+Fast FRNDINT, FSCALE and WAIT added about 1,500 LUTs. Their first build met
+every constraint and did not start the PC, like the first CD-ROM build: the
+CPU left the BIOS before POST 77 and ran leftover code in low memory (CS 0392,
+0082, 0006...), in 10 of 11 boots at the usual SDRAM clock phase, with the L2
+cache on or off (the one that got past POST 77 came during a phase sweep,
+where -160..+160 all did; the next boot at 0 failed again). The same sources
+boot FreeDOS in z486_MiSTer's whole-PC Verilator model, and placed again from
+scratch with the Explore directive they boot on the board
+(`z486-R6-fpu3c.cor`, the most slack of these builds; its slowest paths are
+the load forwarding into the data unit's registers, the TLB into the address
+unit and the prefetch pointer into the group ROM, none in the x87). The
+incremental build from the exp/log placement (`z486-R6-fpu3b.cor`) is not
+tried yet. So a build that shows no POST 77 gets another placement before
+anyone suspects the change; both layouts that failed (`z486-R6-cdrom.bit`,
+`z486-R6-fpu3.bit`) are kept to try on a second MEGA65.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
