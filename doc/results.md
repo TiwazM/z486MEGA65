@@ -71,6 +71,8 @@ The x87's direct loads and stores (`fpu` branch, z486 026ae5b, 2026-11-04;
 | Plus fast FRNDINT, FSCALE and WAIT (z486 dc48781), `impl strong`: never booted | +0.528 ns (+0.228 at the target) | 86,285 | 44,238 | 255 | 67 |
 | The same, `impl strong incr` from the exp/log build (99.3 % of nets reused): boots | +0.305 ns (+0.005 at the target) | 86,195 | 44,260 | 255 | 67 |
 | The same, `impl` (the strategy's Explore placer): boots | **+0.607 ns** (+0.307 at the target) | 85,661 | 44,207 | 255 | 67 |
+| Plus faster stores (z486 fe56218), `impl strong`: boots | **+0.379 ns** (+0.079 at the target) | 86,048 | 44,383 | 255 | 67 |
+| The same, `impl strong incr` from fpu3c (89 % of cells reused) | +0.317 ns (+0.017 at the target) | 85,957 | 44,329 | 255 | 67 |
 
 The microcode ROM's 3072 words fit the block RAMs its 2560 had. The
 incremental run reused 96.5 % of v0.1-preview's cells and squeezed the new
@@ -100,8 +102,15 @@ the load forwarding into the data unit's registers, the TLB into the address
 unit and the prefetch pointer into the group ROM, none in the x87). The
 incremental build from the exp/log placement (`z486-R6-fpu3b.cor`) boots
 too. So a build that shows no POST 77 gets another placement before
-anyone suspects the change; both layouts that failed (`z486-R6-cdrom.bit`,
-`z486-R6-fpu3.bit`) are kept to try on a second MEGA65.
+anyone suspects the change. fpu3's layout fails the same way on a second
+MEGA65, where fpu3c boots: a flaw of the layout that the timing analysis does
+not see, not a weak spot of the first board. Both layouts that failed
+(`z486-R6-cdrom.bit`, `z486-R6-fpu3.bit`) are kept to look for it.
+
+The faster stores (`z486-R6-fpu4.cor`) closed with 0.38 ns to spare, their
+slowest paths the CPU's (the load forwarding into ECX, the TLB into the
+segment descriptor cache), and boot on the board; `z486-R6-fpu4b.cor` is the
+same sources placed from fpu3c's layout, a spare.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
