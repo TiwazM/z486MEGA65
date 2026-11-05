@@ -115,7 +115,8 @@ same sources placed from fpu3c's layout, a spare.
 The one-step add (`z486-R6-fpu5.cor`, z486 dbc5fe1; its barrel shift and
 leading-zero count are about 330 more LUTs) closed with 0.30 ns to spare on
 main_clk, its slowest paths the TLB into the TLB's own registers and into
-the address unit, none in the x87. Not on the board yet.
+the address unit, none in the x87. It boots on the board (8347 Softstones in
+Dr. Hardware, from fpu4's 7950).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
