@@ -112,6 +112,11 @@ slowest paths the CPU's (the load forwarding into ECX, the TLB into the
 segment descriptor cache), and boot on the board; `z486-R6-fpu4b.cor` is the
 same sources placed from fpu3c's layout, a spare.
 
+The one-step add (`z486-R6-fpu5.cor`, z486 dbc5fe1; its barrel shift and
+leading-zero count are about 330 more LUTs) closed with 0.30 ns to spare on
+main_clk, its slowest paths the TLB into the TLB's own registers and into
+the address unit, none in the x87. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
