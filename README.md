@@ -19,13 +19,15 @@ The current version is **v0.1-preview** (see
 **Video**
 - Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included)
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
-  resolution
+  resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
+  as a VGA card sends them)
 - Scaling filters (Sharp, Smooth, Pixels) and optional scanlines (25 % or 50 %)
 - No tearing on HDMI (the scaler keeps three frames)
-- VGA out for analog monitors: set the menu's "Refresh" to "Original (VGA)" for
-  the PC's own timing (DOS text at 70 Hz), with the sync polarity a VGA card
-  gives, so the monitor recognises each mode; "60 Hz (HDMI)", the default,
-  retimes every mode to 60 Hz, which suits HDMI
+- VGA out: the HDMI picture, menu included, on the same steady clock, so LCDs
+  sample it cleanly. For an analog monitor or a CRT, set HDMI to "Native" and
+  "Refresh" to "Original (VGA)": DOS text then comes as 720x400 and 320x200 as
+  640x400 at 70 Hz, SVGA at 60 Hz, as from a VGA card. "60 Hz (HDMI)", the
+  default, retimes every mode to 60 Hz, which suits HDMI
 
 **Sound**
 - Sound Blaster 16 with OPL3 FM music
@@ -62,13 +64,22 @@ The current version is **v0.1-preview** (see
 On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
 SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
 Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
-of Monkey Island (CD, with its CD music), and Quake (slowly: about 6 fps in
-`timedemo demo1`).
+of Monkey Island (CD, with its CD music), and Quake (slowly: 7.8 fps in
+`timedemo demo1`; 486Quake, a build tuned for 486s, 8.5 fps).
 
 Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
 Blaster option it hangs. Wing Commander III runs best without EMM386
 (`HIMEM.SYS` only): with it, a video can hang the game on a black screen.
+King's Quest VI's intro movie tears (the lower part of the picture an older
+frame) and judders in the boat scene with the game's own VGA driver: the VGA
+driver from a later Sierra game (the Gabriel Knight demo's), a known fix for
+KQ6, cures both.
+DOS Quake (and 486Quake) always finds the joystick on port 2 (the MEGA65
+can't tell a released stick from an empty port) and stops after "Playing
+registered version." to calibrate it, with its prompts on a console that
+isn't on screen yet: press fire on port 2 at each step, or Esc to skip it,
+or start Quake with `-nojoy`.
 
 ## Getting started
 

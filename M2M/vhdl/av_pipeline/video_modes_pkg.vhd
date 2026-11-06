@@ -252,6 +252,47 @@ package video_modes_pkg is
       V_POL       => '0'         -- CVT-RB's (positive H, negative V)
    );
 
+   -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): a VGA card's 400-line modes at 70 Hz,
+   -- for a core whose own picture runs at 70 Hz (a PC's text and 320x200 modes), shown at its
+   -- own rate instead of converted to 60 Hz. The IBM VGA's timings (31.47 kHz, negative H,
+   -- positive V: how a VGA monitor tells 400 lines from 350 and 480); 720x400 @ 70 Hz is an
+   -- EDID "established timing" every VGA-era monitor lists. Not CEA modes: TVs may refuse them.
+   constant C_VGA_640_400_70 : video_modes_t := (
+      CLK_KHZ     => 25179,      -- 25.179 MHz (25.175)
+      CLK_SEL     => "100",
+      CEA_CTA_VIC => 0,          -- not a CEA mode
+      ASPECT      => "01",       -- aspect ratio: 01=4:3, 10=16:9
+      PIXEL_REP   => '0',        -- no pixel repetition
+      H_PIXELS    => 640,        -- horizontal display width in pixels
+      V_PIXELS    => 400,        -- vertical display width in rows
+      H_FP        => 16,         -- horizontal front porch width in pixels
+      H_PULSE     => 96,         -- horizontal sync pulse width in pixels
+      H_BP        => 48,         -- horizontal back porch width in pixels
+      V_FP        => 12,         -- vertical front porch width in rows
+      V_PULSE     => 2,          -- vertical sync pulse width in rows
+      V_BP        => 35,         -- vertical back porch width in rows
+      H_POL       => '0',        -- horizontal sync pulse polarity (1 = positive, 0 = negative)
+      V_POL       => '1'         -- vertical sync pulse polarity (1 = positive, 0 = negative)
+   );
+
+   constant C_VGA_720_400_70 : video_modes_t := (
+      CLK_KHZ     => 28333,      -- 28.333 MHz (28.322)
+      CLK_SEL     => "101",
+      CEA_CTA_VIC => 0,          -- not a CEA mode
+      ASPECT      => "01",       -- aspect ratio: 01=4:3, 10=16:9
+      PIXEL_REP   => '0',        -- no pixel repetition
+      H_PIXELS    => 720,        -- horizontal display width in pixels
+      V_PIXELS    => 400,        -- vertical display width in rows
+      H_FP        => 18,         -- horizontal front porch width in pixels
+      H_PULSE     => 108,        -- horizontal sync pulse width in pixels
+      H_BP        => 54,         -- horizontal back porch width in pixels
+      V_FP        => 12,         -- vertical front porch width in rows
+      V_PULSE     => 2,          -- vertical sync pulse width in rows
+      V_BP        => 35,         -- vertical back porch width in rows
+      H_POL       => '0',        -- horizontal sync pulse polarity (1 = positive, 0 = negative)
+      V_POL       => '1'         -- vertical sync pulse polarity (1 = positive, 0 = negative)
+   );
+
    type video_modes_vector is array(natural range<>) of video_modes_t;
 
    type video_mode_type is (
@@ -266,7 +307,10 @@ package video_modes_pkg is
       C_VIDEO_SVGA_1024_60  ,  -- VESA 1024x768    @ 60 Hz
       C_VIDEO_HDMI_1080_30  ,  -- HDMI 1920x1080   @ 30 Hz
       -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31)
-      C_VIDEO_SVGA_1280_60     -- 1280x1024        @ 59.79 Hz, reduced blanking
+      C_VIDEO_SVGA_1280_60  ,  -- 1280x1024        @ 59.79 Hz, reduced blanking
+      -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06)
+      C_VIDEO_VGA_640_70    ,  -- VGA  640x400     @ 70.09 Hz
+      C_VIDEO_VGA_720_70       -- VGA  720x400     @ 70.11 Hz
    );
 
    pure function video_mode_to_slv(video_mode : video_mode_type) return std_logic_vector;
@@ -290,6 +334,8 @@ package body video_modes_pkg is
          when C_VIDEO_SVGA_1024_60  => return "0111";   -- M2M-UPSTREAM rtg-native-modes
          when C_VIDEO_HDMI_1080_30  => return "1000";   -- M2M-UPSTREAM rtg-native-modes
          when C_VIDEO_SVGA_1280_60  => return "1001";   -- M2M-UPSTREAM sxga-mode
+         when C_VIDEO_VGA_640_70    => return "1010";   -- M2M-UPSTREAM vga70
+         when C_VIDEO_VGA_720_70    => return "1011";   -- M2M-UPSTREAM vga70
       end case;
    end function video_mode_to_slv;
 
@@ -306,6 +352,8 @@ package body video_modes_pkg is
          when "0111" => return C_VIDEO_SVGA_1024_60;    -- M2M-UPSTREAM rtg-native-modes
          when "1000" => return C_VIDEO_HDMI_1080_30;    -- M2M-UPSTREAM rtg-native-modes
          when "1001" => return C_VIDEO_SVGA_1280_60;    -- M2M-UPSTREAM sxga-mode
+         when "1010" => return C_VIDEO_VGA_640_70;      -- M2M-UPSTREAM vga70
+         when "1011" => return C_VIDEO_VGA_720_70;      -- M2M-UPSTREAM vga70
          when others => return C_VIDEO_HDMI_16_9_50;
       end case;
    end function slv_to_video_mode;

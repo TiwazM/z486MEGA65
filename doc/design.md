@@ -21,20 +21,6 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Later:**
   - The x87's speed and accuracy ([x87](x87.md): what it costs per
     instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
-  - An HDMI mode at the PC's own 70 Hz (720×400 at 70 Hz, which most
-    monitors take), for the menu's "Refresh: Original (VGA)": then the PC
-    runs DOS text at 70 Hz and the 60 Hz HDMI drops about one frame in seven.
-    With the default "60 Hz (HDMI)" (z486's `video_f60`, on since the first
-    build) the PC itself runs at 60 Hz, so the scaler drops nothing: King's
-    Quest VI's judder in its boat scene (frames seem to play out of order),
-    first put down to dropped 70 Hz frames, has another cause, not found yet.
-  - King's Quest VI's intro movie: the lower part of the picture sometimes
-    shows an older frame than the top (tearing), worse in some runs and
-    builds than in others. Ruled out: the CD reads (the same sectors, sizes
-    and pace on `hand` and v0.1-preview, IDE trace; KQ6's read pattern is
-    byte-exact in `tb_cdrom`), the Sound Blaster switches, and video memory
-    speed (Dr. Hardware: 35.7 MB/s). Not the 70-to-60 Hz conversion either:
-    the PC runs at 60 Hz by default (`video_f60`).
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
@@ -57,7 +43,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
-  - Softer pops at the end of game speech (King's Quest VI): z486's DSP
+  - Softer pops at the end of game speech (King's Quest VI, and other games
+    whose drivers end a sound the same way): z486's DSP
     holds its last sample when a transfer ends and drops to 0 when the driver
     pauses the DMA (`sound_dsp.v`), a step that goes to HDMI as it is; a real
     card's output capacitors round it off. A DC filter in the mix would.
@@ -228,8 +215,24 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   mode, as a real VGA monitor does. On an R6 with a 1280x1024 monitor the DOS
   prompt came out as 720x480 and The 7th Guest's VESA screens as 640x480,
   switching by themselves. The HDMI modes all exist already; the
-  PC's frames go out at the HDMI mode's 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
-  resolution: the picture is 1280x960 between bars and the monitor scales
+  PC's frames go out at the HDMI mode's 60 Hz (ascal's triple buffering).
+  With "Refresh: Original (VGA)" the PC runs its 400- and 350-line modes at
+  70 Hz, and native mode follows with a VGA card's own 640x400 or 720x400 at
+  70 Hz (M2M-UPSTREAM vga70: new modes in `video_modes_pkg.vhd`; `mega65.vhd`
+  counts main_clk's clocks from one vblank to the next and calls a frame
+  shorter than 1/65 s "70 Hz", held for the same eight frames as the size),
+  instead of 640x480 or 720x480 at 60 Hz, which dropped one PC frame in
+  seven. 720x400 at 70 Hz is an EDID established timing, so VGA-era monitors
+  list it; TVs may refuse both. The PC's and the HDMI's 70 Hz come from
+  different clocks, so the scaler still repeats or drops a frame about once a
+  minute. 640x400 uses the HDMI clock's 25.175 MHz entry and 720x400 a new
+  28.333 MHz one (28.322 MHz on a VGA card, +0.04 %) in place of 27.027 MHz,
+  which no mode used. Both unused entries had the NO_COUNT bit set on the
+  serialiser clock's divider, which made it the VCO's 881 or 1081 MHz
+  instead of five times the pixel clock: `CORE/sim/run_video_clock.sh`
+  programs every entry into Vivado's MMCME2_ADV model and measures both
+  clocks (all eight right now; the six the modes used already were).
+  1280x1024 is a 5:4 monitor's own resolution: the picture is 1280x960 between bars and the monitor scales
   nothing, where 480p or 720p are scaled twice (by the core and by the
   monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
   CVT-RB) at 90 MHz: VESA's DMT timing needs 108 MHz, at which the HDMI
@@ -259,10 +262,26 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   a shimmer, edges cut off) and its auto adjust could not fix it. The menu's
   "Refresh" now chooses: "60 Hz (HDMI)" (the default, as before) or
   "Original (VGA)" (`video_f60` off: the VGA's own timing, DOS text at 70 Hz),
-  and the connector carries the polarity the PC wrote to 3C2h (M2M-UPSTREAM
+  and the connector carried the polarity the PC wrote to 3C2h (M2M-UPSTREAM
   vga-polarity: `mega65.vhd` takes the bits from the PC's I/O writes,
-  `analog_pipeline.vhd` turns the connector's syncs; inside the framework
-  they stay active-high). Not on the board yet.
+  `analog_pipeline.vhd` turned the connector's syncs). On the board
+  (`z486-R6-vgasdb`) the Dell and an Eizo both took it as 70 Hz text, and
+  both still shimmered, flickered and cut the first column. The analog
+  pipeline runs on the PC's video clock, main_clk's 64 MHz, with z486's
+  clock enable: a 28.322 MHz pixel lasts 2 or 3 of its clocks (31.3 or 46.9
+  ns, not 35.3), so every pixel edge, and the syncs, land up to 15.6 ns (half
+  a pixel) off, differently on each line. A CRT barely shows it; an LCD
+  samples each pixel at a fixed time after the sync, sometimes on an edge.
+  So the connector now shows the HDMI picture (M2M-UPSTREAM vga-from-hdmi,
+  `digital_pipeline.vhd`): the scaler's output with the menu on it, on the
+  HDMI clock (an MMCM's), black outside the picture, the syncs in the mode's
+  polarity, the DAC clocked by the HDMI clock (`pblock_vga` in
+  `MEGA65-R6.xdc` keeps the output registers by the pins). In native mode
+  with "Original (VGA)" that is what a VGA card sends (720x400 or 640x400 at
+  70 Hz; 640x480, 800x600 and 1024x768 at 60 Hz; their polarities) on a
+  steady clock; in the other HDMI modes the VGA connector carries those
+  (720p, 480p, ...). The analog pipeline's VGA outputs are unused. Not on
+  the board yet.
 - L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
   between the CPU's memory port and the SDRAM, as on a 486 board:
   direct-mapped, 16-byte lines, write-through. A line fill that hits is

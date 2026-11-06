@@ -151,6 +151,17 @@ every other clock met: the most margin since the pblock. Its slowest path is
 the TLB into the segment limit. Not on the board yet; a fresh layout, so the
 first test is that the PC starts at all.
 
+70 Hz native HDMI, the VGA connector fed from the HDMI picture and the menu's
+"Joystick: Off" (`z486-R6-vga70b.cor`, on top of vgasdb): placed from vgasdb's
+layout (`impl strong incr`) only 96 % of the nets could be kept (the VGA pins'
+signals now come from the HDMI side), the router stuck on one congested node
+and went from +0.1 to -2.4 ns in its rip-up iterations; stopped after 2 h 13 min.
+Placed fresh (`impl`, Explore; 85,848 LUTs, 43,350 registers, 253 block RAM
+tiles, 66 DSPs: the analog pipeline's VGA path is gone) it closes with 0.447
+ns to spare at 64 MHz and 0.147 ns at the implementation target, hdmi_clk
++0.744 ns at 90 MHz, hold +0.036 ns, every clock met. Its slowest path is the
+prefetch pointer into the decoder's group ROM. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):

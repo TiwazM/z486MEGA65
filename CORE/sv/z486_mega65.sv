@@ -99,6 +99,7 @@ module z486_mega65 #(
     // The game port (201h): joystick 1, digital, active high (MiSTer's layout: 0 right, 1 left,
     // 2 down, 3 up, 4..7 buttons 1..4); a 4-button joystick, joystick 2 absent
     input  wire  [7:0] joy_dig,
+    input  wire        joy_off,            // joystick 1 absent too: the game port reads FFh
 
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
     input  wire        video_f60,          // every VGA mode retimed to 60 Hz (MiSTer's default);
@@ -376,7 +377,8 @@ system #(
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
     .floppy_wp           (2'b00),
-    .joystick_dis        (2'b10),          // joystick 2 absent: its axes and buttons read 1
+    .joystick_dis        ({1'b1, joy_off}), // joystick 2 absent (its axes and buttons read 1),
+                                            // joystick 1 too with the menu's "Joystick: Off"
     .joystick_dig_1      ({6'd0, joy_dig}),
     .joystick_dig_2      (14'd0),
     .joystick_ana_1      (16'd0),          // no stick movement: the axes follow the directions

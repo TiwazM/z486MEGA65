@@ -360,7 +360,8 @@ constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
 constant C_MENU_SL_50         : natural := 31;
 constant C_MENU_RF_ORIG       : natural := 38;  -- the VGA's own refresh (37: 60 Hz, the default)
 constant C_MENU_JOY_P5        : natural := 45;  -- the game port's fire 2 on pin 5 (44: pin 9)
-constant C_MENU_RESET         : natural := 50;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_JOY_OFF       : natural := 46;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 51;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -510,8 +511,11 @@ signal main_nat_lines         : unsigned(11 downto 0) := (others => '0');
 signal main_nat_w             : unsigned(11 downto 0) := (others => '0');
 signal main_nat_h             : unsigned(11 downto 0) := (others => '0');
 signal main_nat_same          : natural range 0 to 7 := 0;
-signal main_nat_size          : std_logic_vector(23 downto 0) := (others => '0');
-signal qnice_nat_size         : std_logic_vector(23 downto 0);
+signal main_nat_size          : std_logic_vector(24 downto 0) := (others => '0');  -- 70 Hz, w, h
+signal main_nat_per           : unsigned(20 downto 0) := (others => '0');          -- clocks this frame
+signal main_nat_slow          : std_logic := '0';     -- this frame is longer than 1/65 s
+signal main_nat_f             : std_logic := '0';     -- the last frame was shorter
+signal qnice_nat_size         : std_logic_vector(24 downto 0);
 signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
 signal qnice_nat_on           : std_logic := '0';
 signal qnice_nat_w            : natural range 0 to 4095 := 640;
@@ -683,6 +687,7 @@ component z486_mega65 is
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
       joy_dig            : in    std_logic_vector(7 downto 0);
+      joy_off            : in    std_logic;
       cpu_slow           : in    std_logic;
       video_f60          : in    std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
@@ -930,6 +935,10 @@ begin
          ps2_mouse_clk_in   => main_mouse_dev_clk,
          ps2_mouse_data_in  => main_mouse_dev_dat,
          joy_dig            => main_joy_dig,
+         -- "Joystick: Off": the game port without a stick, as a PC with none plugged in (the
+         -- MEGA65 can't tell a released digital stick from an empty port, and DOS Quake, finding
+         -- one, stops to calibrate it with its prompts off screen)
+         joy_off            => main_osm_control_i(C_MENU_JOY_OFF),
          cpu_slow           => main_cpu_slow,
          -- the menu's "Refresh": 60 Hz (the default) or the VGA's own timing, which analog
          -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
@@ -1543,13 +1552,24 @@ begin
    -- Native (M2M-UPSTREAM native): the PC's picture size as ascal sees it: the pixels (ce) of
    -- the widest line's display enable, the lines of a frame; the SVGA framebuffer's size while
    -- ascal shows it. A size counts once it held for eight frames (mode changes pass through
-   -- odd frames).
+   -- odd frames). Bit 24: the frames are shorter than 1/65 s (main_clk's clocks from one
+   -- vblank to the next), as a VGA's 400- and 350-line modes at 70 Hz with "Refresh: Original
+   -- (VGA)"; with "60 Hz (HDMI)" (video_f60) every mode runs at 60 Hz. Held for the same eight
+   -- frames as the size.
    p_main_native : process (main_clk)
+      constant C_PER_65HZ : natural := 984615;   -- 64 MHz / 65 Hz
       variable v_de : std_logic;
       variable v_w  : unsigned(11 downto 0);
       variable v_l  : unsigned(11 downto 0);
+      variable v_f  : std_logic;
    begin
       if rising_edge(main_clk) then
+         if main_nat_per /= (main_nat_per'range => '1') then
+            main_nat_per <= main_nat_per + 1;
+         end if;
+         if main_nat_per = C_PER_65HZ then
+            main_nat_slow <= '1';
+         end if;
          if video_ce_o = '1' then
             v_de := not (video_hblank_o or video_vblank_o);
             v_w  := main_nat_wmax;
@@ -1566,17 +1586,21 @@ begin
                main_nat_cnt <= (others => '0');
             end if;
             if video_vblank_o = '1' and main_nat_vb_d = '0' then   -- a frame ended
-               if v_w = main_nat_w and v_l = main_nat_h then
+               v_f := not main_nat_slow;
+               if v_w = main_nat_w and v_l = main_nat_h and v_f = main_nat_f then
                   if main_nat_same = 7 then
-                     main_nat_size <= std_logic_vector(v_w & v_l);
+                     main_nat_size <= v_f & std_logic_vector(v_w & v_l);
                   else
                      main_nat_same <= main_nat_same + 1;
                   end if;
                else
                   main_nat_same <= 0;
                end if;
-               main_nat_w <= v_w;
-               main_nat_h <= v_l;
+               main_nat_w    <= v_w;
+               main_nat_h    <= v_l;
+               main_nat_f    <= v_f;
+               main_nat_per  <= (others => '0');
+               main_nat_slow <= '0';
                v_w := (others => '0');
                v_l := (others => '0');
             end if;
@@ -1584,14 +1608,14 @@ begin
             main_nat_lines <= v_l;
          end if;
          if main_fb_en = '1' then
-            main_nat_size <= fb_hsize_o & fb_vsize_o;
+            main_nat_size <= '0' & fb_hsize_o & fb_vsize_o;
          end if;
       end if;
    end process p_main_native;
 
    i_cdc_native : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE => 24
+         G_DATA_SIZE => 25
       )
       port map (
          src_data_i => main_nat_size,
@@ -1756,6 +1780,10 @@ begin
 
    -- Native: the smallest HDMI mode the PC's picture fits into at its own size: 640x480 at
    -- 60 Hz for 640x480 and 640x400, 720x480 for 720x400 text, 800x600 and 1024x768 for SVGA.
+   -- A 400- or 350-line picture at 70 Hz ("Refresh: Original (VGA)") gets a VGA card's own
+   -- 640x400 or 720x400 at 70 Hz (M2M-UPSTREAM vga70), so that HDMI, and VGA, which shows the
+   -- HDMI picture, keep its rate; the scaler repeats or drops a frame about once a minute (the
+   -- PC's 70.09 Hz and the HDMI clock's 70.09/70.11 Hz come from different clocks).
    -- The core gives 320/360-pixel lines without the VGA's pixel doubling and 200-line modes
    -- without line doubling: those come doubled (320x200 as 640x400). The scaler copies pixels
    -- into a window of that size in the middle; the monitor scales. Nothing sensible yet (the
@@ -1783,6 +1811,10 @@ begin
          if v_w < 256 or v_h < 160 then
             qnice_nat_mode <= C_VIDEO_HDMI_640_60;
             qnice_nat_on   <= '0';
+         elsif v_tw <= 640 and v_th <= 400 and qnice_nat_size(24) = '1' then
+            qnice_nat_mode <= C_VIDEO_VGA_640_70;
+         elsif v_tw <= 720 and v_th <= 400 and qnice_nat_size(24) = '1' then
+            qnice_nat_mode <= C_VIDEO_VGA_720_70;
          elsif v_tw <= 640 and v_th <= 480 then
             qnice_nat_mode <= C_VIDEO_HDMI_640_60;
          elsif v_tw <= 720 and v_th <= 480 then

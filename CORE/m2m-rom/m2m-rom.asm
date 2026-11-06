@@ -1007,7 +1007,7 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "10"                   ; 10: the "Refresh" submenu (53 lines)
+CFG_SIG_VAL     .ASCII_W "11"                   ; 11: the joystick's "Off" (54 lines)
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -1127,9 +1127,10 @@ DAN_PEND        .BLOCK  4
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 53-line menu: 20 + 534 item characters + 1 + 5 x 53 (the line
+; for this 54-line menu: 20 + 548 item characters + 1 + 5 x 54 (the line
 ; arrays and the dependency array) + 1 + (5 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1081 words. The Shell checks it when the menu first opens
+; 26 (SCR$OSM_O_DX) = 1100 words (the 53-line one before the joystick's "Off":
+; 1081). The Shell checks it when the menu first opens
 ; (ERR_FATAL_HEAP1/2; with 768, the 38-line menu was 13 short: "Heap
 ; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
 ; 46-line one needed 939 of 960, before the "Refresh" submenu).

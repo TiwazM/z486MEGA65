@@ -76,6 +76,14 @@ entity digital_pipeline is
       tmds_clk_p_o             : out std_logic;
       tmds_clk_n_o             : out std_logic;
 
+      -- M2M-UPSTREAM vga-from-hdmi: the HDMI picture for the VGA DAC (ADV7125), on the HDMI clock
+      vga_red_o                : out std_logic_vector(7 downto 0);
+      vga_green_o              : out std_logic_vector(7 downto 0);
+      vga_blue_o               : out std_logic_vector(7 downto 0);
+      vga_hs_o                 : out std_logic;
+      vga_vs_o                 : out std_logic;
+      vdac_clk_o               : out std_logic;
+
       -- Connect to QNICE and Video RAM
       hdmi_dvi_i               : in  std_logic;
       hdmi_video_mode_i        : in  video_mode_type;
@@ -247,7 +255,10 @@ begin
 
    -- M2M-UPSTREAM rtg-native-modes (Megamiga 2026-10-15): entries 7 and 8
    -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): entry 9
-   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(9) when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else
+   -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): entries 10 and 11
+   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(11) when hdmi_video_mode_i = C_VIDEO_VGA_720_70   else
+                      G_VIDEO_MODE_VECTOR(10) when hdmi_video_mode_i = C_VIDEO_VGA_640_70   else
+                      G_VIDEO_MODE_VECTOR(9) when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else
                       G_VIDEO_MODE_VECTOR(8) when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else
                       G_VIDEO_MODE_VECTOR(7) when hdmi_video_mode_i = C_VIDEO_SVGA_1024_60  else
                       G_VIDEO_MODE_VECTOR(6) when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
@@ -723,6 +734,55 @@ begin
          tmds         => hdmi_tmds
       ); -- i_vga_to_hdmi
 
+
+   -- M2M-UPSTREAM vga-from-hdmi (z486 for MEGA65, 2026-11-06): the VGA connector shows the HDMI
+   -- picture (scaled, the menu on it), not the core's own video. The core's video comes on
+   -- video_clk with a clock enable: z486's 25.175/28.322 MHz pixels on a 64 MHz clock last 2 or 3
+   -- of its clocks, their edges and the syncs up to 15.6 ns (half a pixel) off, so an LCD
+   -- sampling at a steady pixel clock shimmers and cuts columns. The HDMI picture is on a clean
+   -- MMCM clock in a standard mode (with the vga70 modes: a VGA card's own 400-line timings).
+   -- As the analog pipeline did: out on the clock's falling edge, the DAC clocked by its rising
+   -- edge; syncs in the mode's polarity (ascal's are active high, as vga_to_hdmi takes
+   -- them); black outside the picture (the monitor's black level). The registers stay together
+   -- (pblock_vga in MEGA65-R6.xdc places them next to the VGA pins).
+   VGA_OUT_HDMI : block
+      signal r_red   : std_logic_vector(7 downto 0);
+      signal r_green : std_logic_vector(7 downto 0);
+      signal r_blue  : std_logic_vector(7 downto 0);
+      signal r_hs    : std_logic;
+      signal r_vs    : std_logic;
+   begin
+      -- a full clock from the overlay to here (next to the pins), then half a clock to the pins
+      p_vga_reg : process (hdmi_clk_i)
+      begin
+         if rising_edge(hdmi_clk_i) then
+            if hdmi_osm_de = '1' then
+               r_red   <= hdmi_osm_red;
+               r_green <= hdmi_osm_green;
+               r_blue  <= hdmi_osm_blue;
+            else
+               r_red   <= (others => '0');
+               r_green <= (others => '0');
+               r_blue  <= (others => '0');
+            end if;
+            r_hs <= hdmi_osm_hs xnor hdmi_video_mode.H_POL;
+            r_vs <= hdmi_osm_vs xnor hdmi_video_mode.V_POL;
+         end if;
+      end process p_vga_reg;
+
+      p_vga_out : process (hdmi_clk_i)
+      begin
+         if falling_edge(hdmi_clk_i) then
+            vga_red_o   <= r_red;
+            vga_green_o <= r_green;
+            vga_blue_o  <= r_blue;
+            vga_hs_o    <= r_hs;
+            vga_vs_o    <= r_vs;
+         end if;
+      end process p_vga_out;
+   end block VGA_OUT_HDMI;
+
+   vdac_clk_o <= hdmi_clk_i;
 
    ---------------------------------------------------------------------------------------------
    -- tmds_clk (HDMI)
