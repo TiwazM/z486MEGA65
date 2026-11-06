@@ -118,6 +118,11 @@ main_clk, its slowest paths the TLB into the TLB's own registers and into
 the address unit, none in the x87. It boots on the board (8347 Softstones in
 Dr. Hardware, from fpu4's 7950).
 
+16-bit CALL and RET on the hardwired paths (`z486-R6-fpu6.cor`, z486 7e189be,
+about 575 more LUTs) closed with 0.35 ns to spare on main_clk, its slowest
+paths the microcode ROM's output into the address unit and the segment
+registers, none of the RET's. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
