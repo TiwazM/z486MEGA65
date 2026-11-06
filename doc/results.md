@@ -141,6 +141,16 @@ other clock met. Its slowest paths are the data unit's shift into the TLB and
 the prefetch pointer into the group ROM. It boots on the board: Hardstones
 26,987 (fpu6 26,985), Softstones 8347 and Quake 7.8 fps (both as fpu5).
 
+The VGA connector's sync polarity, the "Refresh" menu line and the SD slot fix
+(c0ccc59, on top of fpu7b) missed by 0.100 ns at the real 64 MHz placed from
+fpu7b's layout (`impl strong incr`, 99.97 % reused; 11 CPU endpoints, none of
+the new logic's). Placed fresh (`z486-R6-vgasdb.cor`, `impl`, Explore; 87,218
+LUTs, 44,459 registers, 255 block RAM tiles, 67 DSPs) they close with 0.482 ns
+to spare at 64 MHz and 0.182 ns at the implementation target, hold +0.051 ns,
+every other clock met: the most margin since the pblock. Its slowest path is
+the TLB into the segment limit. Not on the board yet; a fresh layout, so the
+first test is that the PC starts at all.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):

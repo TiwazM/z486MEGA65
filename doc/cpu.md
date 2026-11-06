@@ -87,17 +87,18 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
   straight after it (Jcc either way, LAHF, PUSHF, ADC, SETcc; bytes, words,
   dwords) with the operands in the cache.
 
-  | Loop | Before | After | 486 |
-  |---|---:|---:|---:|
-  | CMP r,m | 3 | **1.1** | 2 |
-  | CMP r,m + Jcc not taken | 4.25 | **3.25** | 3 |
-  | CMP r,m + ADD r,r | 4.5 | **3.5** | 3 |
+  | Loop | Before | After | On the board | 486 |
+  |---|---:|---:|---:|---:|
+  | CMP r,m | 3 | **1.1** | 1.09 | 2 |
+  | CMP r,m + Jcc not taken | 4.25 | **3.25** | 3.06 | 3 |
+  | CMP r,m + ADD r,r | 4.5 | **3.5** | 3.00 | 3 |
 
-  On the board (`z486-R6-fpu7b`) neither Dr. Hardware (26,987 Hardstones,
-  from 26,985) nor Quake (7.8 fps) moves: neither leans on CMP r,m.
-  `CPUSPEED` has the three loops above as rows (`cmp ax, [si]`, with
-  `jne` and with `add dx, bx`), and `cmp [si], ax` (CMP m,r, not on the
-  new path) beside them as a control.
+  On the board: `CPUSPEED` on `z486-R6-fpu7b` (`cmp ax, [si]`, with `jne`
+  and with `add dx, bx`); `cmp [si], ax` beside them, CMP m,r and not on
+  the new path, stays at 3.00, and every other row is as on fpu6. Dr.
+  Hardware (26,987 Hardstones, from 26,985), Quake (7.8 fps) and Wing
+  Commander III's setup (CPU speed 13) don't move: none of them leans on
+  CMP r,m.
 
 ## What to do, in order
 
