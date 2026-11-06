@@ -49,6 +49,13 @@ An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
 mkfile -n 2g hdd.img
 ```
 
+On Windows, in PowerShell (or `fsutil file createnew hdd.img 2147483648` in a
+Command Prompt, which may need "Run as administrator"):
+
+```powershell
+$f = [System.IO.File]::Create("$PWD\hdd.img"); $f.SetLength(2GB); $f.Close()
+```
+
 Copy it to the card as `/z486/hdd.img`, boot FreeDOS's boot floppy from A:,
 and let the installer partition and format C: (it restarts the PC in between)
 and install, swapping the floppies through the menu's "Floppy A:" line. To

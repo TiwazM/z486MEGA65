@@ -90,6 +90,35 @@ this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
 
+For an empty hard disk, make a 2 GB file of zeros and copy it to the card as
+`/z486/hdd.img`. On Windows, in PowerShell:
+
+```powershell
+$f = [System.IO.File]::Create("$PWD\hdd.img"); $f.SetLength(2GB); $f.Close()
+```
+
+or in a Command Prompt (`fsutil` may need "Run as administrator"):
+
+```bat
+fsutil file createnew hdd.img 2147483648
+```
+
+On macOS:
+
+```bash
+mkfile -n 2g hdd.img
+```
+
+On Linux:
+
+```bash
+truncate -s 2G hdd.img
+```
+
+Then boot a DOS install floppy from A: (FreeDOS's, for example) and let it
+partition and format C:. A FAT32 card can't hold a file of 4 GB or more, so
+keep the image below that. More in [Disks](doc/disks.md).
+
 3. Press HELP for the menu, to mount images and pick the HDMI mode.
 
 ## Keyboard
