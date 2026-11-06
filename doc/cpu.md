@@ -66,7 +66,11 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
   captures) of every stack instruction pass as before; `call_ret16` and
   `v86_call_ret16` test the edges (SP and IP wrapping at 64K, RET imm16, odd
   SPs, the RET that faults, deeper than the return stack, a changed return
-  address, single-stepping). Not built for the board yet.
+  address, single-stepping).
+
+  On the board (`z486-R6-fpu6`) Dr. Hardware's Hardstones barely move,
+  26,985 from 26,912 (+0.3 %): its integer test hardly calls. Code that
+  calls a lot (compiled C, the BIOS) gains more.
 
 ## What to do, in order
 
