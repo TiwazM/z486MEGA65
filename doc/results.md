@@ -128,7 +128,18 @@ CMP r,m as a direct ALU load (`z486-R6-fpu7.cor`, z486 533b8a1, on top of
 fpu6; about 625 more LUTs) closed with 0.30 ns to spare on main_clk (0.002 ns
 at the implementation target), its slowest paths a memory-load commit into
 the general registers (whose write now skips a CMP), then the x87
-multiplier (+0.517 ns). Not on the board yet.
+multiplier (+0.517 ns). It never started the PC: POST 00, the CPU stuck in
+the BIOS's copy helpers (F000:004C and 0068) with the SDRAM busy, no frames
+out, while fpu6 booted on the same board right after. Another flawed layout,
+as fpu3's: `z486-R6-fpu7.bit` is kept with the other two.
+
+The same sources placed from fpu6's layout (`z486-R6-fpu7b.cor`, `impl strong
+incr`, 99.97 % of cells reused; 87,750 LUTs, 44,435 registers, 255 block RAM
+tiles, 67 DSPs) close with 0.136 ns to spare at the real 64 MHz, 0.164 ns
+short of the implementation target (12 endpoints), hold +0.036 ns, every
+other clock met. Its slowest paths are the data unit's shift into the TLB and
+the prefetch pointer into the group ROM. It boots on the board: Hardstones
+26,987 (fpu6 26,985), Softstones 8347 and Quake 7.8 fps (both as fpu5).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
