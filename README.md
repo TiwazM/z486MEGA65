@@ -57,7 +57,10 @@ The current version is **v0.1-preview** (see
 **Core**
 - Menu on HELP: disks, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
   joystick, reset; settings are saved to the SD card
-- The reset button and Ctrl+Alt+Del restart the PC cleanly
+- The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
+  from the MEGA65's again
+- The drive LED shows the PC's disk accesses: amber for the hard disk and the
+  CD-ROM, green for the floppies
 
 ## Tested
 

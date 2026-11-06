@@ -160,7 +160,10 @@ Placed fresh (`impl`, Explore; 85,848 LUTs, 43,350 registers, 253 block RAM
 tiles, 66 DSPs: the analog pipeline's VGA path is gone) it closes with 0.447
 ns to spare at 64 MHz and 0.147 ns at the implementation target, hdmi_clk
 +0.744 ns at 90 MHz, hold +0.036 ns, every clock met. Its slowest path is the
-prefetch pointer into the decoder's group ROM. Not on the board yet.
+prefetch pointer into the decoder's group ROM. On the board it boots; VGA on a
+Dell P1917S is 720x400 at 70 Hz with clean text (no shimmer, the first column
+whole), HDMI 70 Hz in DOS too, and "Joystick: Off" lets DOS Quake start without
+its calibration.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions

@@ -33,6 +33,9 @@
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
 #                             dma_take_starved, z486_sources.py; on after the core loads)
+#   qmon.py sbsoft [on|off]   the Sound Blaster DSP's output stage (z486_mega65.sv's sb_soft:
+#                             its output glides to 0 when it stops or mutes; on after the
+#                             core loads), for listening both ways
 #   qmon.py joy [secs]        port 2's joystick (the game port) over secs seconds (default
 #                             30): every change of its directions and buttons; fire 2 and 3
 #                             are its paddle lines (pins 9 and 5, or as the menu says)
@@ -532,8 +535,20 @@ def iotrace(opts):
             print(head + "--- the DSP started a new DMA command it held back for %d us" % port)
         elif kind == 6:
             print(head + "--- the DSP has held a new DMA command back for 1 ms")
+        elif kind == 7 and w[3] >> 12 & 1:
+            print(head + "--- DSP output jump of %3d/256: %s" %
+                  (val, ("a DMA sample", "held at 0 (speaker off in SB Pro mode, or 80h)",
+                         "a direct output or ADPCM", "?")[w[3] >> 8 & 3]))
         elif kind == 7:
             print(head + "--- sample jump of %3d/256 at sample %d of the block" % (val, port))
+
+
+def sbsoft(arg):
+    pc_dev()
+    if arg in ("on", "off"):
+        poke(0x800E, 1 if arg == "on" else 0)
+    v = dump(0x800E, 0x800E)[0]
+    print("Sound Blaster DSP output stage: %s" % ("?" if v is None else "on" if v & 1 else "off"))
 
 
 def sbfix(arg):
@@ -688,6 +703,8 @@ elif args and args[0] == "iotrace":
     iotrace(args[1:])
 elif args and args[0] == "sbfix":
     sbfix(args[1] if len(args) > 1 else "")
+elif args and args[0] == "sbsoft":
+    sbsoft(args[1] if len(args) > 1 else "")
 elif args and args[0] == "joy":
     joy_watch(float(args[1]) if len(args) > 1 else 30)
 elif args and args[0] == "c1351":

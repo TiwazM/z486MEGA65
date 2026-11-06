@@ -70,6 +70,11 @@ PATCHES = {
          "    output            dbg_sb_smp_stb,   // MEGA65: the Sound Blaster took a DMA output sample\n"
          "    output     [15:0] dbg_sb_smp_dif,   // MEGA65: its distance from the one before (left)\n"
          "    output     [15:0] dbg_sb_smp_pos,   // MEGA65: its index in the DSP's block\n"
+         "    output            dbg_sb_out_stb,   // MEGA65: the DSP's output (left) changed\n"
+         "    output     [15:0] dbg_sb_out_dif,   // MEGA65: by how much\n"
+         "    output      [1:0] dbg_sb_out_why,   // MEGA65: 0 a DMA sample, 1 held at 0, 2 direct/ADPCM\n"
+         "    output            sample_sb_new,    // MEGA65: toggles with each DSP output sample (clk_audio)\n"
+         "    output            sample_sb_mute,   // MEGA65: the DSP holds its output at 0 (clk_audio)\n"
          "    input             inta_hold,        // MEGA65: the PIC holds its vector from the first INTA\n"
          "    output     [47:0] dbg_pic,          // MEGA65: IRR, ISR, IMR of the master, then the slave\n"
          "    output     [15:0] dbg_irq,          // MEGA65: the IRQ lines into the PICs\n"
@@ -101,7 +106,12 @@ PATCHES = {
          "\t.dbg_cmd_wait      (dbg_sb_cmd_wait),\n"
          "\t.dbg_smp_stb       (dbg_sb_smp_stb),\n"
          "\t.dbg_smp_dif       (dbg_sb_smp_dif),\n"
-         "\t.dbg_smp_pos       (dbg_sb_smp_pos),"),
+         "\t.dbg_smp_pos       (dbg_sb_smp_pos),\n"
+         "\t.dbg_out_stb       (dbg_sb_out_stb),\n"
+         "\t.dbg_out_dif       (dbg_sb_out_dif),\n"
+         "\t.dbg_out_why       (dbg_sb_out_why),\n"
+         "\t.sample_sb_new     (sample_sb_new),\n"
+         "\t.sample_sb_mute    (sample_sb_mute),"),
         ("// IO Bus Adapter (z486 IO cycles to byte-sequential peripheral bus)",
          "// MEGA65: the last I/O read and write (z486_sources.py)\n"
          "reg dbg_io_rd_d;\n"
@@ -149,7 +159,12 @@ PATCHES = {
          "\toutput            dbg_cmd_wait,      // MEGA65: a new DMA command waits for the old block\n"
          "\toutput reg        dbg_smp_stb,       // MEGA65: a DMA output sample (the I/O trace's jump log)\n"
          "\toutput reg [15:0] dbg_smp_dif,       // MEGA65: its distance from the one before (left)\n"
-         "\toutput reg [15:0] dbg_smp_pos,       // MEGA65: its index in the block"),
+         "\toutput reg [15:0] dbg_smp_pos,       // MEGA65: its index in the block\n"
+         "\toutput reg        dbg_out_stb,       // MEGA65: the output (left) changed (the I/O trace)\n"
+         "\toutput reg [15:0] dbg_out_dif,       // MEGA65: by how much\n"
+         "\toutput reg  [1:0] dbg_out_why,       // MEGA65: 0 a DMA sample, 1 held at 0, 2 direct/ADPCM\n"
+         "\toutput reg        out_new_tgl,       // MEGA65: toggles with each sample the DSP outputs\n"
+         "\toutput            out_mute,          // MEGA65: the output held at 0 (speaker off in SB Pro mode, 80h)"),
         ("wire dma_restart_possible = ~tr0 || (",
          "// MEGA65: sample periods the DMA request has gone unanswered, up to 2 (z486_sources.py)\n"
          "reg [1:0] dma_starved;\n"
@@ -183,6 +198,27 @@ PATCHES = {
          "\tend\n"
          "end\n\n"
          "// Attenuation should not be needed"),
+        ("\tend\nend\n\n//------------------------------------------------------------------------------\n\nendmodule",
+         "\tend\nend\n\n"
+         "// MEGA65: the output's changes and their cause (the I/O trace), a toggle with each sample\n"
+         "// the DSP outputs and its hold at 0, for z486_mega65.sv's output stage (z486_sources.py)\n"
+         "wire out_zero = (~speaker_on & sbp) | pause_active;\n"
+         "wire out_dma  = sample_output && adpcm_type == ADPCM_NONE;\n"
+         "wire out_dir  = cmd_direct_output | adpcm_active | (~adpcm_reference_awaiting & adpcm_reference_output);\n"
+         "assign out_mute = out_zero;\n"
+         "reg  [1:0]  dbg_out_cause;\n"
+         "reg  [15:0] dbg_out_last;\n"
+         "wire [16:0] dbg_out_sub = {sample_value_l[15], sample_value_l} - {dbg_out_last[15], dbg_out_last};\n"
+         "always @(posedge clk) begin\n"
+         "\tdbg_out_cause <= out_zero ? 2'd1 : out_dma ? 2'd0 : 2'd2;\n"
+         "\tdbg_out_last  <= sample_value_l;\n"
+         "\tdbg_out_stb   <= sample_value_l != dbg_out_last;\n"
+         "\tdbg_out_dif   <= dbg_out_sub[16] ? 16'd0 - dbg_out_sub[15:0] : dbg_out_sub[15:0];\n"
+         "\tdbg_out_why   <= dbg_out_cause;\n"
+         "\tif(!rst_n)                              out_new_tgl <= 1'b0;\n"
+         "\telse if(~out_zero && (out_dma || out_dir)) out_new_tgl <= ~out_new_tgl;\n"
+         "end\n\n"
+         "//------------------------------------------------------------------------------\n\nendmodule"),
     ],
     "z486_MiSTer/src/soc/sound/sound.v": [
         ("\tinput      [27:0] clock_rate\n",
@@ -190,7 +226,12 @@ PATCHES = {
          "\toutput            dbg_cmd_wait,\n"
          "\toutput            dbg_smp_stb,\n"
          "\toutput     [15:0] dbg_smp_dif,\n"
-         "\toutput     [15:0] dbg_smp_pos,\n\n"
+         "\toutput     [15:0] dbg_smp_pos,\n"
+         "\toutput            dbg_out_stb,\n"
+         "\toutput     [15:0] dbg_out_dif,\n"
+         "\toutput      [1:0] dbg_out_why,\n"
+         "\toutput            sample_sb_new,     // MEGA65: toggles with each DSP output sample (clk_audio)\n"
+         "\toutput            sample_sb_mute,    // MEGA65: the DSP holds its output at 0 (clk_audio)\n\n"
          "\tinput      [27:0] clock_rate\n"),
         ("\t.sbp_stereo_ff_rst (sbp_stereo_ff_rst),",
          "\t.sbp_stereo_ff_rst (sbp_stereo_ff_rst),\n"
@@ -198,7 +239,22 @@ PATCHES = {
          "\t.dbg_cmd_wait      (dbg_cmd_wait),\n"
          "\t.dbg_smp_stb       (dbg_smp_stb),\n"
          "\t.dbg_smp_dif       (dbg_smp_dif),\n"
-         "\t.dbg_smp_pos       (dbg_smp_pos),"),
+         "\t.dbg_smp_pos       (dbg_smp_pos),\n"
+         "\t.dbg_out_stb       (dbg_out_stb),\n"
+         "\t.dbg_out_dif       (dbg_out_dif),\n"
+         "\t.dbg_out_why       (dbg_out_why),\n"
+         "\t.out_new_tgl       (dsp_new_tgl),\n"
+         "\t.out_mute          (dsp_mute),"),
+        ("wire [15:0] dsp_value_l, dsp_value_r;",
+         "wire [15:0] dsp_value_l, dsp_value_r;\n"
+         "wire        dsp_new_tgl, dsp_mute;   // MEGA65 (z486_sources.py)"),
+        ("\t.DATA_WIDTH(16*2 + 9*2)\n) audio_cdc (\n\t.clk_in(clk),\n\t.clk_out(clk_audio),\n"
+         "\t.data_in({dsp_value_l, dsp_value_r, cms_l, cms_r}),\n"
+         "\t.data_out({sample_sb_l, sample_sb_r, sample_cms_l, sample_cms_r})",
+         "\t.DATA_WIDTH(16*2 + 9*2 + 2)          // MEGA65: + the DSP's sample toggle and hold at 0\n"
+         ") audio_cdc (\n\t.clk_in(clk),\n\t.clk_out(clk_audio),\n"
+         "\t.data_in({dsp_value_l, dsp_value_r, cms_l, cms_r, dsp_new_tgl, dsp_mute}),\n"
+         "\t.data_out({sample_sb_l, sample_sb_r, sample_cms_l, sample_cms_r, sample_sb_new, sample_sb_mute})"),
     ],
     "z486_MiSTer/src/soc/pic.v": [
         ("wire [7:0] edge_detect = interrupt_input & ~interrupt_last;",

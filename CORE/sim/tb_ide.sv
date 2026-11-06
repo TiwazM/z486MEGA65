@@ -110,13 +110,14 @@ module tb_ide #(
     wire [7:0] buf_wd, buf_rd;
     wire buf_bad, sd_req_fresh;
     wire [159:0] mnt;
-    wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
+    reg  [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
+    reg         rtc_sync = 1'b0;   // the PC restarts (mega65.vhd p_main_rtc_sync)
 
     pc_mgmt #(.G_CLK_HZ(6400000)) mgmt (
         .clk_i(clk), .rst_i(!reset_n),
         .mgmt_address_o(mgmt_address), .mgmt_read_o(mgmt_read), .mgmt_write_o(mgmt_write),
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
-        .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
+        .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .rtc_sync_i(rtc_sync), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
         .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh), .sd_done_i(sd_done), .sd_err_i(sd_err),
         .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
@@ -515,6 +516,25 @@ module tb_ide #(
                            (ck_bad > 0 && ck_fixed == ck_bad && ck_fresh == ck_bad),
               $sformatf("ring checksums: %0d copies matched, %0d did not, %0d right when fresh from the card (%0d fresh reads)",
                         ck_good, ck_bad, ck_fixed, ck_fresh));
+        // The CMOS clock from the RTC word (pc_mgmt at its start). A new RTC time without the
+        // framework's toggle is not copied; a PC restart (rtc_sync) copies it.
+        begin
+            reg [7:0] mi, hr, dy, mo, yr;
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h10, 8'h30, 8'h12, 8'h34},
+                  $sformatf("CMOS clock from the RTC at the start: 20%02x-%02x-%02x %02x:%02x", yr, mo, dy, hr, mi));
+            rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h11, 8'h06, 8'h23, 8'h59, 8'h00};
+            repeat (2000) @(posedge clk);
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h10, 8'h30, 8'h12, 8'h34},
+                  "  a new RTC time without the framework's toggle: not copied");
+            @(negedge clk) rtc_sync = 1'b1;
+            @(negedge clk) rtc_sync = 1'b0;
+            repeat (2000) @(posedge clk);
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h11, 8'h06, 8'h23, 8'h59},
+                  $sformatf("  after a PC restart (rtc_sync): 20%02x-%02x-%02x %02x:%02x", yr, mo, dy, hr, mi));
+        end
         if (errors == 0) $display("PASS: all checks");
         else $display("FAILED: %0d checks", errors);
         $finish;

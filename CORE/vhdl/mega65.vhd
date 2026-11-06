@@ -376,6 +376,10 @@ signal video_clk              : std_logic;
 signal video_rst              : std_logic;
 signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
+signal main_pc_reset_d        : std_logic := '0';
+signal main_led_hd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;   -- drive LED hold
+signal main_led_fd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;
+signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS time again
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
 signal main_joy_dig           : std_logic_vector(7 downto 0);    -- the game port's joystick
@@ -424,6 +428,9 @@ signal main_dbg_sb_cmd_wait   : std_logic;                       -- a DSP DMA co
 signal main_dbg_sb_smp_stb    : std_logic;                       -- a DSP DMA output sample:
 signal main_dbg_sb_smp_dif    : std_logic_vector(15 downto 0);   -- its jump from the last one
 signal main_dbg_sb_smp_pos    : std_logic_vector(15 downto 0);   -- its index in the block
+signal main_dbg_sb_out_stb    : std_logic;                       -- the DSP's output changed:
+signal main_dbg_sb_out_dif    : std_logic_vector(15 downto 0);   -- by how much,
+signal main_dbg_sb_out_why    : std_logic_vector(1 downto 0);    -- for what
 signal main_dbg_pic           : std_logic_vector(47 downto 0);   -- the PICs' IRR, ISR, IMR
 signal main_dbg_irq           : std_logic_vector(15 downto 0);   -- the IRQ lines into them
 signal main_dbg_ps2           : std_logic_vector(15 downto 0);   -- the 8042's state
@@ -457,15 +464,19 @@ signal main_iot_clong_p       : std_logic := '0';
 signal main_iot_jump_p        : std_logic := '0';
 signal main_iot_jump          : std_logic_vector(7 downto 0) := (others => '0');
 signal main_iot_jpos          : std_logic_vector(15 downto 0) := (others => '0');
+signal main_iot_ojump_p       : std_logic := '0';                 -- the DSP's output jumped:
+signal main_iot_ojump         : std_logic_vector(7 downto 0) := (others => '0');  -- by this,
+signal main_iot_owhy          : std_logic_vector(1 downto 0) := (others => '0');  -- for this
 -- 7..0 changed: start again, 8: stop at a 1 ms wait, 9: stop now, 10: the Sound Blaster's
 -- stalled-transfer fix off (sound_dsp.v's dma_take_starved), 11: stop when full, 19..12: the
 -- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range), 20: the
 -- PIC's vector hold from the first INTA off (pic_inta_bridge.sv's vector_hold), 22..21: a 1351
--- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x)
-signal main_iot_arm           : std_logic_vector(23 downto 0);
-signal main_iot_arm_d         : std_logic_vector(23 downto 0) := (others => '0');
+-- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x),
+-- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft)
+signal main_iot_arm           : std_logic_vector(24 downto 0);
+signal main_iot_arm_d         : std_logic_vector(24 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(23 downto 0) := x"040000";
+signal qnice_iot_arm          : std_logic_vector(24 downto 0) := '0' & x"040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -719,6 +730,10 @@ component z486_mega65 is
       dbg_sb_smp_stb     : out   std_logic;
       dbg_sb_smp_dif     : out   std_logic_vector(15 downto 0);
       dbg_sb_smp_pos     : out   std_logic_vector(15 downto 0);
+      dbg_sb_out_stb     : out   std_logic;
+      dbg_sb_out_dif     : out   std_logic_vector(15 downto 0);
+      dbg_sb_out_why     : out   std_logic_vector(1 downto 0);
+      sb_soft            : in    std_logic;
       inta_hold          : in    std_logic;
       dbg_pic            : out   std_logic_vector(47 downto 0);
       dbg_irq            : out   std_logic_vector(15 downto 0);
@@ -859,11 +874,59 @@ begin
    main_pc_reset <= main_rst or main_hr_rst or main_reset_m2m_i or main_reset_core_i or
                     not main_pc_roms_ok(0);
 
-   -- Power LED: green; blue while the reset button is held long. Drive LED: off (no drives yet).
+   -- The PC's CMOS clock again from the MEGA65's RTC whenever the PC restarts (pc_mgmt.vhd): the
+   -- reset button and "Reset the PC" (main_pc_reset rises), and the keyboard controller's reset
+   -- (port 64h <- FEh: Bochs' BIOS does Ctrl+Alt+Del so, and Windows restarts so). On a PC the
+   -- CMOS clock is the RTC; here the PC's runs on from whatever it was set to, so a wrong time at
+   -- power-on (the framework's first RTC read, 2026-11-06) stayed until the core restarted.
+   p_main_rtc_sync : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         main_pc_reset_d <= main_pc_reset;
+         main_rtc_sync   <= '0';
+         if main_pc_reset = '1' and main_pc_reset_d = '0' then
+            main_rtc_sync <= '1';
+         end if;
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr = x"0064FE" then
+            main_rtc_sync <= '1';
+         end if;
+      end if;
+   end process p_main_rtc_sync;
+
+   -- Power LED: green; blue while the reset button is held long.
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
-   main_drive_led_o     <= '0';
-   main_drive_led_col_o <= x"00FF00";
+
+   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line:
+   -- amber while the hard disk or the CD-ROM drive has a command or a block in hand (ide.v asks
+   -- pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), green for the floppy
+   -- drives (the floppy wins when both). Each access keeps it lit for 40 ms at least, so that a
+   -- one-sector access still shows.
+   p_main_drive_led : process (main_clk)
+      constant C_HOLD : natural := CORE_CLK_SPEED / 25;      -- 40 ms
+      variable v_hd   : boolean;
+      variable v_fd   : boolean;
+   begin
+      if rising_edge(main_clk) then
+         v_hd := main_ide0_request /= "000" or main_ide1_request /= "000" or
+                 (main_disk_req = '1' and main_disk_req_unit(1) = '1');      -- units 2, 3
+         v_fd := main_fdd_request /= "00" or
+                 (main_disk_req = '1' and main_disk_req_unit(1) = '0');      -- units 0, 1
+         if v_hd then
+            main_led_hd <= C_HOLD;
+         elsif main_led_hd /= 0 then
+            main_led_hd <= main_led_hd - 1;
+         end if;
+         if v_fd then
+            main_led_fd <= C_HOLD;
+         elsif main_led_fd /= 0 then
+            main_led_fd <= main_led_fd - 1;
+         end if;
+      end if;
+   end process p_main_drive_led;
+
+   main_drive_led_o     <= '1' when main_led_hd /= 0 or main_led_fd /= 0 else '0';
+   main_drive_led_col_o <= x"00FF00" when main_led_fd /= 0 else x"FF8000";
 
    i_z486 : z486_mega65
       generic map (
@@ -977,6 +1040,10 @@ begin
          dbg_sb_smp_stb     => main_dbg_sb_smp_stb,
          dbg_sb_smp_dif     => main_dbg_sb_smp_dif,
          dbg_sb_smp_pos     => main_dbg_sb_smp_pos,
+         dbg_sb_out_stb     => main_dbg_sb_out_stb,
+         dbg_sb_out_dif     => main_dbg_sb_out_dif,
+         dbg_sb_out_why     => main_dbg_sb_out_why,
+         sb_soft            => not main_iot_arm(24),   -- the DSP's output stage (default on)
          inta_hold          => not main_iot_arm(20),
          dbg_pic            => main_dbg_pic,
          dbg_irq            => main_dbg_irq,
@@ -1006,6 +1073,7 @@ begin
          ide_request_i     => main_ide0_request,
          ide1_request_i    => main_ide1_request,
          rtc_i             => main_rtc_i,
+         rtc_sync_i        => main_rtc_sync,
          mnt_i             => qnice_disk_mnt,
          sd_req_o          => main_disk_req,
          sd_req_wr_o       => main_disk_req_wr,
@@ -1337,7 +1405,10 @@ begin
    --   kind 6  a new DMA command has been held back for 1 ms
    --   kind 7  a DMA output sample jumped from the one before (left channel) by the threshold
    --           or more (main_iot_arm(19..12), in 256ths; bits 7..0 the jump in 256ths, 31..16
-   --           its index in the DSP's block: a late buffer half jumps at index 0)
+   --           its index in the DSP's block: a late buffer half jumps at index 0); with bit 12
+   --           set, the DSP's output itself jumped so (before z486_mega65.sv's output stage),
+   --           bits 9..8 why: 0 a DMA sample, 1 the DSP holds it at 0 (speaker off in SB Pro
+   --           mode, 80h), 2 a direct output or ADPCM
    -- QNICE can also stop it (main_iot_arm(9)), or start it to stop when full (main_iot_arm(11):
    -- the first 1024 entries instead of the last).
    -- Bits 63..32 the time, 31..16 the port, 15..13 the kind, 7..0 the byte.
@@ -1408,6 +1479,12 @@ begin
             main_iot_jump   <= main_dbg_sb_smp_dif(15 downto 8);
             main_iot_jpos   <= main_dbg_sb_smp_pos;
          end if;
+         if main_dbg_sb_out_stb = '1' and
+            unsigned(main_dbg_sb_out_dif(15 downto 8)) >= unsigned(main_iot_arm(19 downto 12)) then
+            main_iot_ojump_p <= '1';
+            main_iot_ojump   <= main_dbg_sb_out_dif(15 downto 8);
+            main_iot_owhy    <= main_dbg_sb_out_why;
+         end if;
 
          main_iot_we <= '0';
          -- stopping when full: the 1024th entry may be on its way (main_iot_we)
@@ -1453,6 +1530,11 @@ begin
                                   main_iot_jump;
                main_iot_we     <= '1';
                main_iot_jump_p <= '0';
+            elsif main_iot_ojump_p = '1' then
+               main_iot_entry   <= std_logic_vector(main_iot_us) & x"0000" & "111" & "100" &
+                                   main_iot_owhy & main_iot_ojump;
+               main_iot_we      <= '1';
+               main_iot_ojump_p <= '0';
             end if;
          end if;
          if main_iot_we = '1' then
@@ -1507,7 +1589,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 24,
+         G_DATA_SIZE    => 25,
          G_REGISTER_SRC => false
       )
       port map (
@@ -1896,6 +1978,8 @@ begin
    --                acknowledge (pic_inta_bridge.sv's vector_hold, z486_sources.py; default on)
    --    0x000D      bit 0 = a 1351 mouse's x reversed, bit 1 its y (pc_mouse.vhd's flip_i);
    --                bit 2 = its x and y swapped (main_m1351_x)
+   --    0x000E      bit 0 = the Sound Blaster DSP's output stage (z486_mega65.sv's sb_soft:
+   --                its output glides to 0 when it stops or holds it at 0; default on)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
@@ -1944,6 +2028,8 @@ begin
                qnice_iot_arm(20) <= not qnice_dev_data_i(0);
             elsif qnice_dev_addr_i = x"000000D" then
                qnice_iot_arm(23 downto 21) <= qnice_dev_data_i(2 downto 0);
+            elsif qnice_dev_addr_i = x"000000E" then
+               qnice_iot_arm(24) <= not qnice_dev_data_i(0);
             end if;
          end if;
          if qnice_rst_i = '1' then
@@ -1996,6 +2082,7 @@ begin
       end loop;
       put(v_blk0 and v_low = 12, x"000" & "000" & not qnice_iot_arm(20));
       put(v_blk0 and v_low = 13, x"000" & "0" & qnice_iot_arm(23 downto 21));
+      put(v_blk0 and v_low = 14, x"000" & "000" & not qnice_iot_arm(24));
       for k in 0 to 7 loop
          put(v_blk0 and v_low = 16 + k, qnice_dbg_snap(16 * k + 15 downto 16 * k));
          put(v_blk0 and v_low = 24 + k, qnice_dbg_snap(16 * k + 143 downto 16 * k + 128));

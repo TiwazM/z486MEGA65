@@ -8,7 +8,8 @@
 --
 --   * At power-up, while the PC is still held in reset: the CMOS configuration (x86_init:
 --     equipment, 640 KB base memory, century, LBA translation), the date and time from the
---     MEGA65's RTC (again once, when the RTC has been read: rtc_i(64) toggles), both floppy
+--     MEGA65's RTC (again once, when the RTC has been read: rtc_i(64) toggles; and again
+--     whenever the PC restarts, rtc_sync_i: its CMOS clock was the RTC on a PC), both floppy
 --     drives empty with 1.44 MB geometry (fdd_set), no hard disk. The CMOS's drive types (10h
 --     the floppies, by their images' sizes, 12h/19h the hard disk: F0h/2Fh, type 47) and the
 --     checksum of 10h-2Dh are written again whenever a disk comes or goes (rtc.v corrects
@@ -73,6 +74,7 @@ entity pc_mgmt is
       ide1_request_i    : in  std_logic_vector(2 downto 0);  -- the second channel's (the CD-ROM)
 
       rtc_i             : in  std_logic_vector(64 downto 0); -- the framework's (BCD)
+      rtc_sync_i        : in  std_logic := '0';  -- pulse: the PC restarts, copy the time again
 
       -- the units as disk_sd mounted them (QNICE clock; disk_sd.vhd's mnt_o)
       mnt_i             : in  std_logic_vector(159 downto 0);
@@ -311,9 +313,10 @@ architecture synthesis of pc_mgmt is
    signal h_gen       : std_logic_vector(3 downto 0) := (others => '0');
    signal h_total     : unsigned(31 downto 0) := (others => '0');
 
-   -- the time again once the RTC has been read
+   -- the time again once the RTC has been read, and whenever the PC restarts
    signal rtc_tgl     : std_logic := '0';
    signal rtc_again   : std_logic := '1';
+   signal rtc_now     : std_logic := '0';
 
    -- the floppy request being served
    signal r_wr        : std_logic := '0';
@@ -670,8 +673,11 @@ begin
                   b_addr <= C_FDD & x"00";
                   state  <= S_BUS_R;
                   ret    <= S_REQ_GOT;
-               elsif rtc_again = '1' and rtc_i(64) /= rtc_tgl then
-                  rtc_again <= '0';
+               elsif rtc_now = '1' or (rtc_again = '1' and rtc_i(64) /= rtc_tgl) then
+                  if rtc_i(64) /= rtc_tgl then
+                     rtc_again <= '0';                -- the RTC's first read is in: done
+                  end if;
+                  rtc_now   <= '0';
                   idx       <= 0;
                   time_ret  <= S_IDLE;
                   state     <= S_TIME;
@@ -1215,6 +1221,10 @@ begin
 
          if state = S_IDLE then
             cnt <= 0;
+         end if;
+
+         if rtc_sync_i = '1' then
+            rtc_now <= '1';
          end if;
 
          if rst_i = '1' then

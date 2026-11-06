@@ -142,6 +142,10 @@ module z486_mega65 #(
     output wire        dbg_sb_smp_stb,     // the Sound Blaster took a DMA output sample:
     output wire [15:0] dbg_sb_smp_dif,     // its distance from the one before (left channel),
     output wire [15:0] dbg_sb_smp_pos,     // its index in the DSP's block
+    output wire        dbg_sb_out_stb,     // the DSP's output (left) changed (before sb_soft's
+    output wire [15:0] dbg_sb_out_dif,     // stage): by how much, and why (0 a DMA sample,
+    output wire  [1:0] dbg_sb_out_why,     // 1 held at 0, 2 direct output or ADPCM)
+    input  wire        sb_soft,            // the DSP's output stage on (main clock)
     output wire [47:0] dbg_pic,            // the PICs: IRR, ISR, IMR of the master, the slave
     output wire [15:0] dbg_irq,            // the IRQ lines into them
     output wire [15:0] dbg_ps2,            // the 8042: IRQs, output buffer, enables, states
@@ -340,6 +344,8 @@ wire  [8:0] sample_cms_l;
 wire  [8:0] sample_cms_r;
 wire [15:0] sample_sb_l;
 wire [15:0] sample_sb_r;
+wire        sample_sb_new;     // toggles with each sample the DSP outputs (clk_audio)
+wire        sample_sb_mute;    // the DSP holds its output at 0 (clk_audio)
 wire [15:0] sample_opl_l;
 wire [15:0] sample_opl_r;
 wire        speaker_out;
@@ -543,6 +549,8 @@ system #(
     .sample_cms_r        (sample_cms_r),
     .sample_sb_l         (sample_sb_l),
     .sample_sb_r         (sample_sb_r),
+    .sample_sb_new       (sample_sb_new),
+    .sample_sb_mute      (sample_sb_mute),
     .sample_opl_l        (sample_opl_l),
     .sample_opl_r        (sample_opl_r),
     .sound_fm_mode       (1'b1),           // OPL3
@@ -587,6 +595,9 @@ system #(
     .dbg_sb_smp_stb      (dbg_sb_smp_stb),
     .dbg_sb_smp_dif      (dbg_sb_smp_dif),
     .dbg_sb_smp_pos      (dbg_sb_smp_pos),
+    .dbg_sb_out_stb      (dbg_sb_out_stb),
+    .dbg_sb_out_dif      (dbg_sb_out_dif),
+    .dbg_sb_out_why      (dbg_sb_out_why),
     .inta_hold           (inta_hold),
     .dbg_pic             (dbg_pic),
     .dbg_irq             (dbg_irq),
@@ -707,6 +718,28 @@ always @(posedge clk_audio) begin
     spk_out <= spk >> ~vol_spk;
 end
 
+// The Sound Blaster DSP's output stage (sb_soft.sv): the DSP's samples as they are while it
+// plays; its held level glides to 0 when it stops or mutes (a pop otherwise)
+wire        sb_soft_audio;
+wire [15:0] sbs_l, sbs_r;
+
+synchronizer sb_soft_sync (
+    .clk(clk_audio),
+    .in (sb_soft),
+    .out(sb_soft_audio)
+);
+
+sb_soft sb_soft_inst (
+    .clk   (clk_audio),
+    .on    (sb_soft_audio),
+    .in_l  (sample_sb_l),
+    .in_r  (sample_sb_r),
+    .newt  (sample_sb_new),
+    .mute  (sample_sb_mute),
+    .out_l (sbs_l),
+    .out_r (sbs_r)
+);
+
 reg  [15:0] mix_dry_l;
 reg  [15:0] mix_dry_r;
 reg  [16:0] mix_tmp_l;
@@ -725,7 +758,7 @@ sb_volume #(
                   vol_midi_l,   vol_midi_r,
                   vol_cd_l,     vol_cd_r}),
     .samples_in ({mix_dry_l,    mix_dry_r,
-                  sample_sb_l,  sample_sb_r,
+                  sbs_l,        sbs_r,             // the DSP through its output stage
                   sample_opl_l, sample_opl_r,
                   cdda_l,       cdda_r}),
     .samples_out({master_l, master_r,

@@ -233,6 +233,38 @@ architecture synthesis of rtc_master is
   constant C_COUNT_DOWN_MAX : natural := cond_select(C_SIM, 1_000, 1_000_000);
   signal count_down : natural range 0 to C_COUNT_DOWN_MAX;
 
+  -- M2M-UPSTREAM rtc-verify (z486 for MEGA65, 2026-11-06): a read is good only when every field
+  -- is BCD and in range (rtc after post_read: 7..0 hundredths, 15..8 seconds, 23..16 minutes,
+  -- 31..24 hours, 39..32 day of month, 47..40 month, 55..48 year, 63..56 day of week). Straight
+  -- after power-on an R6 read gave day 00, month 06, year B1 / E1 and time 00:00:00, twice; the
+  -- check below (day and month both 00) let it through, and the core started on it.
+  pure function bcd_ok(v : std_logic_vector(7 downto 0); lo : natural; hi : natural) return boolean is
+  begin
+    if v(7 downto 4) > X"9" or v(3 downto 0) > X"9" then
+      return false;
+    end if;
+    return to_integer(v(7 downto 4)) * 10 + to_integer(v(3 downto 0)) >= lo and
+           to_integer(v(7 downto 4)) * 10 + to_integer(v(3 downto 0)) <= hi;
+  end function bcd_ok;
+
+  pure function rtc_ok(v : std_logic_vector(63 downto 0)) return boolean is
+  begin
+    return bcd_ok(v( 7 downto  0), 0, 99) and    -- hundredths
+           bcd_ok(v(15 downto  8), 0, 59) and    -- seconds
+           bcd_ok(v(23 downto 16), 0, 59) and    -- minutes
+           bcd_ok(v(31 downto 24), 0, 23) and    -- hours
+           bcd_ok(v(39 downto 32), 1, 31) and    -- day of month
+           bcd_ok(v(47 downto 40), 1, 12) and    -- month
+           bcd_ok(v(55 downto 48), 0, 99) and    -- year
+           v(63 downto 56) <= X"06";             -- day of week
+  end function rtc_ok;
+
+  -- after this many bad reads (2 s), 2000-01-01 00:00:00, a Saturday (day of week 5), instead of
+  -- retrying for ever on a board whose RTC never answers sensibly
+  constant C_RETRIES   : natural := 100;
+  constant C_RTC_EMPTY : std_logic_vector(63 downto 0) := X"05_00_01_01_00_00_00_00";
+  signal retries       : natural range 0 to C_RETRIES;
+
 begin
 
   rtc_busy_o <= '0' when state = IDLE_ST else '1';
@@ -251,6 +283,7 @@ begin
       case state is
         when RESET_ST =>
           if rst_i = '0' then
+            retries     <= 0;
             action_idx  <= 0;
             action      <= C_ACTION_LIST_READ(0);
             next_action <= '0';
@@ -258,6 +291,7 @@ begin
           end if;
 
         when IDLE_ST =>
+          retries <= 0;
           if rtc_read_i = '1' then
             action_idx  <= 0;
             action      <= C_ACTION_LIST_READ(0);
@@ -347,9 +381,14 @@ begin
         when VERIFY_ST =>
           -- Occasionally, reading from RTC fails. To detect this, we check the DayOfMonth
           -- MonthOfYear. If these two fields are zero, then the read from RTC has failed.
-          if rtc(47 downto 32) = X"0000" then
-            if count_down = 0 then
+          -- M2M-UPSTREAM rtc-verify: every field (rtc_ok), retried every 20 ms until good
+          if not rtc_ok(rtc) then
+            if count_down = 0 and retries = C_RETRIES then
+              rtc   <= C_RTC_EMPTY;
+              state <= IDLE_ST;
+            elsif count_down = 0 then
               -- Reading from RTC did not work. Try again.
+              retries     <= retries + 1;
               action_idx  <= 0;
               action      <= C_ACTION_LIST_READ(0);
               next_action <= '0';

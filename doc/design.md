@@ -43,11 +43,6 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
-  - Softer pops at the end of game speech (King's Quest VI, and other games
-    whose drivers end a sound the same way): z486's DSP
-    holds its last sample when a transfer ends and drops to 0 when the driver
-    pauses the DMA (`sound_dsp.v`), a step that goes to HDMI as it is; a real
-    card's output capacitors round it off. A DC filter in the mix would.
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known.
@@ -174,7 +169,11 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
-  (equipment, base memory, checksum, the date and time from the MEGA65's RTC);
+  (equipment, base memory, checksum, the date and time from the MEGA65's RTC,
+  again when the RTC's first read arrives and whenever the PC restarts: the reset
+  button, "Reset the PC", and the keyboard controller's reset, port 64h <- FEh,
+  which Bochs' BIOS uses for Ctrl+Alt+Del and Windows for a restart; the PC's
+  CMOS clock otherwise runs on from whatever it was set to);
   then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
   requests) and the hard disk, the master of the first IDE channel (`ide.v`:
   IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
@@ -280,7 +279,32 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   with "Original (VGA)" that is what a VGA card sends (720x400 or 640x400 at
   70 Hz; 640x480, 800x600 and 1024x768 at 60 Hz; their polarities) on a
   steady clock; in the other HDMI modes the VGA connector carries those
-  (720p, 480p, ...). The analog pipeline's VGA outputs are unused. Not on
+  (720p, 480p, ...). The analog pipeline's VGA outputs are unused. On the
+  board (`z486-R6-vga70b`) the Dell shows DOS text as 720x400 at 70 Hz, clean,
+  the first column whole; HDMI is at 70 Hz in DOS too.
+- The MEGA65's clock: the framework reads the RTC once when it starts and
+  keeps a running copy, which the core copies into the PC's CMOS. Straight
+  after power-on, on an R6, that read came back as junk twice (day 00, month
+  06, year B1/E1, time 00:00) while a read a minute later was right, and
+  `rtc_master.vhd`'s check (day and month both 00) let it through: DOS started
+  at midnight. Every field is checked now (BCD, in range), a bad read is tried
+  again every 20 ms, and after 100 (2 s) it starts from 2000-01-01
+  (M2M-UPSTREAM rtc-verify; `CORE/sim/run_rtc_master.sh` feeds it that junk).
+- Drive LED (`mega65.vhd`): the PC's disk accesses, as a case LED shows a
+  drive's activity line: amber while the hard disk or the CD-ROM drive has a
+  command or a block in hand, green for the floppies, at least 40 ms each.
+- Sound Blaster pops: z486's DSP holds its last sample when it stops (a DMA
+  pause, the end of a transfer) and drops to 0 when it mutes (speaker off in
+  SB Pro mode, the 80h silence), so a level a sound ends on stays until the
+  next sound jumps away from it, or a mute steps from it (King's Quest VI's
+  speech: the driver pauses with D0h after the last block; the end of a WAV in
+  an editor). The I/O trace now also logs the DSP's own output jumps and why
+  (`qmon.py iotrace`), and an output stage (`CORE/sv/sb_soft.sv`, before the
+  mix) passes samples as they are while the DSP plays, lets a level held 20 ms
+  glide to 0 (21 ms time constant) and fades a mute (2.7 ms). DOOM's stream,
+  back-to-back effects with gaps under 20 ms, a sharp attack and a 10 ms pause
+  come out sample for sample unchanged (`CORE/sim/run_sb_soft.sh`);
+  `qmon.py sbsoft off` turns it off on the board, to listen both ways. Not on
   the board yet.
 - L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
   between the CPU's memory port and the SDRAM, as on a 486 board:
