@@ -101,6 +101,8 @@ module z486_mega65 #(
     input  wire  [7:0] joy_dig,
 
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
+    input  wire        video_f60,          // every VGA mode retimed to 60 Hz (MiSTer's default);
+                                           // 0 = the VGA's own timing (the menu's "Refresh")
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
     // The L2 cache (guest_l2.sv; clk_sys): on (a 0 -> 1 empties it first), and its line fills
@@ -353,8 +355,6 @@ wire  [4:0] vol_line_l;
 wire  [4:0] vol_line_r;
 wire  [1:0] vol_spk;
 wire  [4:0] vol_en;
-
-wire        video_f60 = 1'b1;           // MiSTer's default: VGA timing forced to 60 Hz
 
 system #(
     .SYS_FREQ(CLK_HZ),

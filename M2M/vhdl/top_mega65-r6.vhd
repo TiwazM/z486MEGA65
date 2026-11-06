@@ -314,6 +314,7 @@ architecture synthesis of mega65_r6 is
    signal video_hblank           : std_logic;
    signal video_vblank           : std_logic;
    signal video_fl               : std_logic;   -- M2M-UPSTREAM interlace (AExp 2026-07-04)
+   signal video_vga_pol          : std_logic_vector(1 downto 0);   -- M2M-UPSTREAM vga-polarity
    -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): core -> ascal framebuffer mode
    signal fb_ena                 : std_logic;
    signal fb_hsize, fb_vsize     : std_logic_vector(11 downto 0);
@@ -729,6 +730,7 @@ begin
       video_hblank_i          => video_hblank,
       video_vblank_i          => video_vblank,
       video_fl_i              => video_fl,     -- M2M-UPSTREAM interlace (AExp 2026-07-04)
+      video_vga_pol_i         => video_vga_pol,  -- M2M-UPSTREAM vga-polarity
       -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09)
       fb_ena_i                => fb_ena,
       fb_hsize_i              => fb_hsize,
@@ -920,6 +922,7 @@ begin
          video_hblank_o          => video_hblank,
          video_vblank_o          => video_vblank,
          video_fl_o              => video_fl,  -- M2M-UPSTREAM interlace (AExp 2026-07-04)
+         video_vga_pol_o         => video_vga_pol,  -- M2M-UPSTREAM vga-polarity
          -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09)
          fb_ena_o                => fb_ena,
          fb_hsize_o              => fb_hsize,

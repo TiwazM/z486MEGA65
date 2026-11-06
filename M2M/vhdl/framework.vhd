@@ -149,6 +149,10 @@ port (
    -- M2M-UPSTREAM interlace (AExp 2026-07-04): interlace field flag from the core,
    -- feeds ascal's weave deinterlacer; the default keeps progressive-only cores unchanged
    video_fl_i              : in    std_logic := '0';
+   -- M2M-UPSTREAM vga-polarity (z486 2026-11-06): the VGA connector's sync polarity (bit 0
+   -- HSYNC, bit 1 VSYNC; 1 = negative), as a PC's VGA card tells an analog monitor its mode's
+   -- lines; video_hs_i/video_vs_i stay active-high. The default keeps other cores unchanged.
+   video_vga_pol_i         : in    std_logic_vector(1 downto 0) := "00";
    -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): ascal's framebuffer mode, driven
    -- by the core (an RTG graphics card: the scaler shows a framebuffer in HyperRAM instead
    -- of the core's video). Slowly changing values from the core clock domain - ascal
@@ -970,6 +974,7 @@ begin
          video_hblank_i          => video_hblank_i,
          video_vblank_i          => video_vblank_i,
          video_fl_i              => video_fl_i,  -- M2M-UPSTREAM interlace (AExp 2026-07-04)
+         video_vga_pol_i         => video_vga_pol_i,  -- M2M-UPSTREAM vga-polarity
          -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09)
          fb_ena_i                => fb_ena_i,
          fb_hsize_i              => fb_hsize_i,

@@ -51,6 +51,8 @@ entity av_pipeline is
       video_vblank_i          : in  std_logic;
       -- M2M-UPSTREAM interlace (AExp 2026-07-04): interlace field flag for ascal
       video_fl_i              : in  std_logic := '0';
+      -- M2M-UPSTREAM vga-polarity: the VGA connector's sync polarity (framework.vhd)
+      video_vga_pol_i         : in  std_logic_vector(1 downto 0) := "00";
       -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): ascal's framebuffer mode, driven
       -- by the core (an RTG graphics card: the scaler shows a framebuffer in HyperRAM instead
       -- of the core's video). Slowly changing values from the core clock domain - ascal
@@ -697,6 +699,7 @@ begin
          video_red_i             => video_red_i,
          video_green_i           => video_green_i,
          video_blue_i            => video_blue_i,
+         video_vga_pol_i         => video_vga_pol_i,  -- M2M-UPSTREAM vga-polarity
          video_hs_i              => video_hs_i,
          video_vs_i              => video_vs_i,
          -- M2M-UPSTREAM screen-center: VGA soft-blanked window (raw when offsets=0)

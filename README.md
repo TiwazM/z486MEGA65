@@ -21,7 +21,11 @@ The current version is **v0.1-preview** (see
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
   resolution
 - Scaling filters (Sharp, Smooth, Pixels) and optional scanlines (25 % or 50 %)
-- No tearing when the PC's 70 Hz text mode goes out at 60 Hz
+- No tearing on HDMI (the scaler keeps three frames)
+- VGA out for analog monitors: set the menu's "Refresh" to "Original (VGA)" for
+  the PC's own timing (DOS text at 70 Hz), with the sync polarity a VGA card
+  gives, so the monitor recognises each mode; "60 Hz (HDMI)", the default,
+  retimes every mode to 60 Hz, which suits HDMI
 
 **Sound**
 - Sound Blaster 16 with OPL3 FM music
@@ -49,8 +53,8 @@ The current version is **v0.1-preview** (see
   can be on pin 9 (C64GS style) or pin 5, set in the menu.
 
 **Core**
-- Menu on HELP: disks, HDMI mode, filter, scanlines, joystick, reset; settings
-  are saved to the SD card
+- Menu on HELP: disks, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
+  joystick, reset; settings are saved to the SD card
 - The reset button and Ctrl+Alt+Del restart the PC cleanly
 
 ## Tested

@@ -22,15 +22,19 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   - The x87's speed and accuracy ([x87](x87.md): what it costs per
     instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
   - An HDMI mode at the PC's own 70 Hz (720×400 at 70 Hz, which most
-    monitors take): native mode keeps the PC's picture size but runs at 60 Hz,
-    so the scaler drops about one frame in seven, and fast animation judders
-    (King's Quest VI's boat scene: frames seem to play out of order).
+    monitors take), for the menu's "Refresh: Original (VGA)": then the PC
+    runs DOS text at 70 Hz and the 60 Hz HDMI drops about one frame in seven.
+    With the default "60 Hz (HDMI)" (z486's `video_f60`, on since the first
+    build) the PC itself runs at 60 Hz, so the scaler drops nothing: King's
+    Quest VI's judder in its boat scene (frames seem to play out of order),
+    first put down to dropped 70 Hz frames, has another cause, not found yet.
   - King's Quest VI's intro movie: the lower part of the picture sometimes
     shows an older frame than the top (tearing), worse in some runs and
     builds than in others. Ruled out: the CD reads (the same sectors, sizes
     and pace on `hand` and v0.1-preview, IDE trace; KQ6's read pattern is
     byte-exact in `tb_cdrom`), the Sound Blaster switches, and video memory
-    speed (Dr. Hardware: 35.7 MB/s). The 70 Hz mode above may cure it.
+    speed (Dr. Hardware: 35.7 MB/s). Not the 70-to-60 Hz conversion either:
+    the PC runs at 60 Hz by default (`video_f60`).
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
@@ -84,8 +88,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   bridge's z486 side resets with HyperRAM too, and the PC waits for it.
   ascal shows the framebuffer
   from HyperRAM (M2M-UPSTREAM rtg-framebuffer). Below `0x300000` ascal keeps
-  three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
-  on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
+  three frames of the VGA picture (triple buffering): the PC's frames (60 Hz
+  but not locked to the HDMI output's, or 70 Hz text with "Refresh: Original")
+  otherwise showed half-old, half-new frames where the screen
   changed (a flickering clock, stray lines, the cursor). The scaler
   interpolates sharp bilinear by default: the 720x400 text mode scales by 1.2
   (480p, 720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes
@@ -202,7 +207,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
   BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
-  scanlines, the joystick's fire 2 (pin 9 or pin 5), help, "Reset the PC". An image mounted at start-up
+  scanlines, refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
+  help, "Reset the PC". An image mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard
@@ -222,7 +228,7 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   mode, as a real VGA monitor does. On an R6 with a 1280x1024 monitor the DOS
   prompt came out as 720x480 and The 7th Guest's VESA screens as 640x480,
   switching by themselves. The HDMI modes all exist already; the
-  PC's 70 Hz text mode goes out at 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
+  PC's frames go out at the HDMI mode's 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
   resolution: the picture is 1280x960 between bars and the monitor scales
   nothing, where 480p or 720p are scaled twice (by the core and by the
   monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
@@ -242,6 +248,21 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   one. On a 5:4 monitor 1280x1024 is the sharpest mode by far: 800x600 is
   1.25x (every fourth pixel doubled, then smoothed) and the monitor scales
   it again.
+- VGA connector: the PC's own picture (the framework's analog pipeline, not
+  the scaler). An analog monitor has to work out each line's pixel count from
+  the timing, and a VGA card helps it with the sync polarity (the misc output
+  register, port 3C2h: +/- 350 lines, -/+ 400, -/- 480). Two things broke
+  that: MiSTer's `video_cleaner` makes both syncs active-high (as the scaler
+  wants), and z486's `video_f60` retimes every mode to 60 Hz, so DOS text had
+  26.9 kHz lines instead of 31.5 kHz. A Dell called it "640x350 at 60 Hz",
+  sampled the 720-pixel lines with the wrong clock (strokes of uneven width,
+  a shimmer, edges cut off) and its auto adjust could not fix it. The menu's
+  "Refresh" now chooses: "60 Hz (HDMI)" (the default, as before) or
+  "Original (VGA)" (`video_f60` off: the VGA's own timing, DOS text at 70 Hz),
+  and the connector carries the polarity the PC wrote to 3C2h (M2M-UPSTREAM
+  vga-polarity: `mega65.vhd` takes the bits from the PC's I/O writes,
+  `analog_pipeline.vhd` turns the connector's syncs; inside the framework
+  they stay active-high). Not on the board yet.
 - L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
   between the CPU's memory port and the SDRAM, as on a 486 board:
   direct-mapped, 16-byte lines, write-through. A line fill that hits is

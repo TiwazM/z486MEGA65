@@ -121,6 +121,9 @@ port (
    video_hblank_o          : out std_logic;
    video_vblank_o          : out std_logic;
    video_fl_o              : out std_logic;  -- interlace field flag for ascal weave deinterlacing
+   -- M2M-UPSTREAM vga-polarity: the VGA connector's sync polarity as the PC's VGA sets it
+   -- (bit 0 HSYNC, bit 1 VSYNC; 1 = negative). video_hs_o/video_vs_o stay active-high.
+   video_vga_pol_o         : out std_logic_vector(1 downto 0);
 
    -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): the RTG graphics card - ascal shows
    -- the framebuffer in HyperRAM instead of the Amiga picture while fb_ena_o = '1' (HDMI only:
@@ -355,8 +358,9 @@ constant C_MENU_FLT_SMOOTH    : natural := 22;  -- (21: Sharp, the default)
 constant C_MENU_FLT_PIXELS    : natural := 23;
 constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
 constant C_MENU_SL_50         : natural := 31;
-constant C_MENU_JOY_P5        : natural := 38;  -- the game port's fire 2 on pin 5 (37: pin 9)
-constant C_MENU_RESET         : natural := 43;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_RF_ORIG       : natural := 38;  -- the VGA's own refresh (37: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 45;  -- the game port's fire 2 on pin 5 (44: pin 9)
+constant C_MENU_RESET         : natural := 50;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -410,6 +414,7 @@ signal main_dbg_log_we        : std_logic;
 signal main_dbg_mem_busy      : std_logic;
 signal main_dbg_io_rd         : std_logic_vector(23 downto 0);   -- the last I/O read: port, byte
 signal main_dbg_io_wr         : std_logic_vector(23 downto 0);   -- the last I/O write
+signal main_vga_pol           : std_logic_vector(1 downto 0) := "00";  -- VSYNC, HSYNC negative
 signal main_dbg_sb_req        : std_logic_vector(1 downto 0);    -- the SB's DMA requests
 signal main_dbg_sb_irq        : std_logic;
 signal main_dbg_io_rd_stb     : std_logic;                       -- main_dbg_io_rd/wr are new
@@ -679,6 +684,7 @@ component z486_mega65 is
       ps2_mouse_data_out : out   std_logic;
       joy_dig            : in    std_logic_vector(7 downto 0);
       cpu_slow           : in    std_logic;
+      video_f60          : in    std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
       l2_enable          : in    std_logic;
       cache_off          : in    std_logic;
@@ -925,6 +931,10 @@ begin
          ps2_mouse_data_in  => main_mouse_dev_dat,
          joy_dig            => main_joy_dig,
          cpu_slow           => main_cpu_slow,
+         -- the menu's "Refresh": 60 Hz (the default) or the VGA's own timing, which analog
+         -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
+         -- 26.9 kHz lines)
+         video_f60          => not main_osm_control_i(C_MENU_RF_ORIG),
          ps2_mouse_clk_out  => main_mouse_host_clk,
          ps2_mouse_data_out => main_mouse_host_dat,
 
@@ -1509,6 +1519,26 @@ begin
          dst_clk_i  => qnice_clk_i,
          dst_data_o => qnice_iot_stat
       ); -- i_cdc_iot_stat
+
+   -- M2M-UPSTREAM vga-polarity: a VGA card tells an analog monitor how many lines its mode has by
+   -- the sync polarity, from the misc output register (port 3C2h: bit 6 HSYNC, bit 7 VSYNC, 1 =
+   -- negative): +/- 350 lines (EGA modes), -/+ 400 (DOS text, 320x200), -/- 480. z486's vga.v
+   -- keeps those bits (general_hsync/general_vsync) but makes active-high syncs, and MiSTer's
+   -- video_cleaner makes them active-high in any case, which the scaler wants; so on the VGA
+   -- connector every mode had +/+ and a monitor had to guess: a Dell took DOS text for 640x350,
+   -- sampled the 720-pixel lines with the wrong clock (uneven strokes, shimmer, edges cut off)
+   -- and its auto adjust could not fix it. The bits come from the PC's writes to 3C2h (as
+   -- vga.v takes them: no reset), the analog pipeline turns the connector's syncs to match.
+   p_main_vga_pol : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr(23 downto 8) = x"03C2" then
+            main_vga_pol <= main_dbg_io_wr(7) & main_dbg_io_wr(6);
+         end if;
+      end if;
+   end process p_main_vga_pol;
+
+   video_vga_pol_o <= main_vga_pol;
 
    -- Native (M2M-UPSTREAM native): the PC's picture size as ascal sees it: the pixels (ce) of
    -- the widest line's display enable, the lines of a frame; the SVGA framebuffer's size while

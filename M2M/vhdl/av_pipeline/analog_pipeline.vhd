@@ -34,6 +34,10 @@ entity analog_pipeline is
       video_blue_i            : in  std_logic_vector(7 downto 0);
       video_hs_i              : in  std_logic;
       video_vs_i              : in  std_logic;
+      -- M2M-UPSTREAM vga-polarity: the connector's sync polarity (bit 0 HSYNC, bit 1 VSYNC;
+      -- 1 = negative), as a PC's VGA card tells an analog monitor its mode's lines; the syncs
+      -- inside stay active-high (the M2M convention). Not used for CSYNC.
+      video_vga_pol_i         : in  std_logic_vector(1 downto 0) := "00";
       video_hblank_i          : in  std_logic;
       video_vblank_i          : in  std_logic;
       audio_clk_i             : in  std_logic;
@@ -266,7 +270,21 @@ begin
    -- in a VHDL block so that we can use a PBLOCK in the XDC file to tack the registers near to the
    -- FPGAs VGA output pins.
    VGA_OUT_PHASE_SHIFTED : block
+      -- M2M-UPSTREAM vga-polarity: video_vga_pol_i in the video clock domain (it changes with a
+      -- mode set only)
+      signal vga_pol_s1, vga_pol_s2 : std_logic_vector(1 downto 0) := "00";
+      attribute ASYNC_REG : string;
+      attribute ASYNC_REG of vga_pol_s1 : signal is "TRUE";
+      attribute ASYNC_REG of vga_pol_s2 : signal is "TRUE";
    begin
+      sync_vga_pol : process(video_clk_i)
+      begin
+         if rising_edge(video_clk_i) then
+            vga_pol_s1 <= video_vga_pol_i;
+            vga_pol_s2 <= vga_pol_s1;
+         end if;
+      end process;
+
       phase_shift_vga_signals : process(video_clk_i)
       begin
          if falling_edge(video_clk_i) then -- phase shifting by using the negative edge of the video clock
@@ -279,8 +297,9 @@ begin
             -- Composite sync output that is compatible with the MiSTer VGA to SCART adaptor needs
             -- the composite sync signal on pin 13 and HIGH on pin 14, see: https://misterfpga.org/viewtopic.php?t=1811
             -- M2M-UPSTREAM screen-center: the pins carry the positioned syncs
-            vga_hs_o    <= vga_hs_pos when not video_csync_i else not vga_cs_ps;
-            vga_vs_o    <= vga_vs_pos when not video_csync_i else '1';
+            -- M2M-UPSTREAM vga-polarity: in the core's polarity (video_vga_pol_i)
+            vga_hs_o    <= (vga_hs_pos xor vga_pol_s2(0)) when not video_csync_i else not vga_cs_ps;
+            vga_vs_o    <= (vga_vs_pos xor vga_pol_s2(1)) when not video_csync_i else '1';
          end if;
       end process;
    end block VGA_OUT_PHASE_SHIFTED;
