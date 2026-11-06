@@ -10,6 +10,7 @@
 // read cylinder FFFFh), IDENTIFY, LBA28 reads across the image file's two extents, writes, SET
 // MULTIPLE and READ MULTIPLE, an unknown command (aborted); and the CMOS's hard disk bytes. Then
 // a reset on the clock that starts a sector's copy: the next read's copy still checked.
+// SLOT/CARD0/CARD1: the image on the back card, or a slot without a card (sdslots' ready).
 // CORE/sim/run_disks.sh runs it with xsim.
 //
 // Licensed under GPL v3
@@ -23,7 +24,13 @@ module tb_ide #(
     // must copy it again)
     parameter int FAULT = 0,
     // disk_sd's G_LUTRAM: 1, the ring and the write buffer in LUT RAM
-    parameter int LUTRAM = 0
+    parameter int LUTRAM = 0,
+    // the image's card (MODE bit 1: 0 the bottom tray, 1 the back slot), and which slots have a
+    // card: sdslots holds a slot's controller in reset without one, so the engine port shows
+    // that slot not ready while its slot bit names it
+    parameter int SLOT = 0,
+    parameter int CARD0 = 1,
+    parameter int CARD1 = 1
 );
     reg clk = 0;
     always #7.8125 clk = ~clk;              // the PC's 64 MHz
@@ -159,8 +166,13 @@ module tb_ide #(
     reg [8:0] e_rdidx = 0, e_wridx = 0;
     reg [7:0] e_rddata = 0;
     reg [15:0] e_rdblk = 0;
+    // sdslots: during a transfer the port is its slot's controller, else the one the slot bit
+    // names (C2Q_SLOT, bit 75)
+    reg eng_slot = 0;
+    wire eng_cur = e_busy ? eng_slot : c2q[75];
+    wire e_ready = eng_cur ? CARD1 != 0 : CARD0 != 0;
     assign q2c = {e_wridx, 16'd0, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
-                  e_busy, 1'b1};
+                  e_busy, e_ready};
     integer eng_reads = 0, eng_blocks = 0, eng_writes = 0, eng_aborts = 0, write_errors = 0;
     integer preempt_after = -1, err_block = -1, max_ahead = 0;
     integer expect_write_lba [integer];
@@ -172,6 +184,9 @@ module tb_ide #(
             b = c2q[34:3];
             wr = c2q[1];
             n = c2q[50:35];
+            if (c2q[75] != SLOT) $fatal(1, "engine: a transfer on slot %0d, the image is on %0d", c2q[75], SLOT);
+            if (!e_ready) $fatal(1, "engine: a START to slot %0d, which has no card", c2q[75]);
+            eng_slot <= c2q[75];
             e_busy <= 1;
             repeat (40) @(posedge qclk);
             if (!wr) begin
@@ -374,7 +389,7 @@ module tb_ide #(
         qwr(28'h0000041, 16'(TOTAL)); qwr(28'h0000042, 16'(TOTAL >> 16));
         qwr(28'h0000043, 16'd9000); qwr(28'h0000044, 16'd0);
         qwr(28'h0000045, 16'd3);
-        qwr(28'h0000040, 16'd1);
+        qwr(28'h0000040, 16'(1 | (SLOT << 1)));
 
         // the CMOS: 12h F0h, 19h 2Fh, the checksum
         for (k = 0; k < 200; k++) begin

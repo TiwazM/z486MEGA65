@@ -12,6 +12,8 @@
 # byte wrong (disk_sd's G_FAULT): pc_mgmt and pc_cdrom must read it again, fresh from the card
 # (tb_cdrom needs FAULT=9 or more: a CD block takes four answers, each try must miss one).
 # LUTRAM=1 run_disks.sh ...: disk_sd's ring and write buffer in LUT RAM (G_LUTRAM) instead of block RAM.
+# SLOT=1 CARD0=0 run_disks.sh tb_ide: the image on the back card, no card in the bottom tray
+# (tb_ide only; CARD1=0 the other way round).
 # disk_sd's ring FIFO is XPM's (xpm_fifo_async): xelab takes -L xpm and glbl.
 # Output in CORE/sim/build/.
 set -e
@@ -25,6 +27,10 @@ gen=""
 fault=""
 [[ -n "$FAULT" ]] && fault="-generic_top FAULT=$FAULT"
 [[ -n "$LUTRAM" ]] && fault="$fault -generic_top LUTRAM=$LUTRAM"
+slots=""
+[[ -n "$SLOT" ]] && slots="$slots -generic_top SLOT=$SLOT"
+[[ -n "$CARD0" ]] && slots="$slots -generic_top CARD0=$CARD0"
+[[ -n "$CARD1" ]] && slots="$slots -generic_top CARD1=$CARD1"
 mkdir -p "$root/CORE/sim/build"
 
 # sdhost.vhd holds the package and the controller: only the package is needed
@@ -47,6 +53,7 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
                     /core/CORE/vhdl/cd_audio.vhd /core/CORE/vhdl/pc_cdrom.vhd /core/CORE/vhdl/pc_mgmt.vhd /core/CORE/vhdl/disk_sd.vhd &&
         for tb in $tbs; do
             g=\"\"; [ \$tb != tb_floppy ] && g=\"$gen\"
+            [ \$tb = tb_ide ] && g=\"\$g $slots\"
             g=\"\$g $fault\"
             xelab --relax -debug off -L xpm \$tb glbl \$g -s \${tb}_snap && xsim \${tb}_snap -R || exit 1
         done"

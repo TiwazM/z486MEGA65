@@ -780,6 +780,7 @@ begin
       variable v_off  : unsigned(31 downto 0);
       variable v_n    : unsigned(31 downto 0);
       variable v_lim  : unsigned(31 downto 0);
+      variable v_slot : std_logic;
    begin
       if rising_edge(qnice_clk_i) then
          sd_start <= '0';
@@ -994,20 +995,30 @@ begin
                   rs      <= R_START;
                end if;
 
+            -- The slot first: the engine port shows the ready and busy of the controller r_slot
+            -- names (sdslots), so they are this transfer's only once r_slot is its card's. (0.1
+            -- set r_slot after checking them: it stayed 0 from the start, the bottom tray, and
+            -- with no card there, whose controller sdslots holds in reset, an image on the back
+            -- card failed every try.)
             when R_START =>
+               if r_wr = '1' then
+                  v_slot := mode(x_drv)(1);
+               else
+                  v_slot := mode(c_drv)(1);
+               end if;
                if r_abort = '1' then
                   rs <= R_IDLE;
+               elsif r_slot /= v_slot then
+                  r_slot <= v_slot;                  -- its ready and busy from the next clock
                elsif sd_ready = '0' then
                   rs <= R_RETRY;                     -- no card, or not initialised (yet)
                elsif sd_busy = '0' then
                   if r_wr = '1' then
                      e_addr  <= x_blk;
                      e_count <= x"0001";
-                     r_slot  <= mode(x_drv)(1);
                   else
                      e_addr  <= c_blk + t_start;
                      e_count <= c_n - t_start;
-                     r_slot  <= mode(c_drv)(1);
                   end if;
                   r_moved  <= '0';
                   sd_start <= '1';
