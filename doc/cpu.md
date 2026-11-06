@@ -71,6 +71,8 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
   On the board (`z486-R6-fpu6`) Dr. Hardware's Hardstones barely move,
   26,985 from 26,912 (+0.3 %): its integer test hardly calls. Code that
   calls a lot (compiled C, the BIOS) gains more.
+  `CPUSPEED` on fpu6 (`tools/dos/cpuspeed.s`, real mode): CALL + RET
+  **7.37** clocks, from 14.47 on fpu4; the other integer rows as before.
 
 ## What to do, in order
 
