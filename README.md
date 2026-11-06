@@ -146,6 +146,7 @@ printed on the MEGA65's keycaps:
 - [Disks](doc/disks.md): the floppy, IDE and CD-ROM drives and the SD card path
 - [SDRAM clock](doc/sdram-clock.md): how the SDRAM clock's phase was measured
 - [x87](doc/x87.md): the FPU's clocks per instruction and its accuracy gaps
+- [CPU](doc/cpu.md): where the integer core is slower than a 486, and what changed
 - [Building](doc/building.md): the repository's layout and how to build the core
 - [Results](doc/results.md): build and timing results
 - [M2M provenance](doc/m2m-provenance.md): the framework's origin
