@@ -165,6 +165,15 @@ Dell P1917S is 720x400 at 70 Hz with clean text (no shimmer, the first column
 whole), HDMI 70 Hz in DOS too, and "Joystick: Off" lets DOS Quake start without
 its calibration.
 
+The RTC read check, the PC's clock on every restart, the drive LED and the
+DSP's output stage (`z486-R6-rtcsnd.cor`, 1e699d1, on top of vga70b): placed
+from vga70b's layout (`impl strong incr`, 98.4 % of cells and 94 % of nets
+kept, 42 minutes; 86,272 LUTs, 43,554 registers, 253 block RAM tiles, 66 DSPs)
+it closes with 0.473 ns to spare at 64 MHz and 0.173 ns at the implementation
+target, hold +0.036 ns, every clock met. qnice_clk is down to +0.128 ns (from
++0.649), on QNICE's device reads into its CPU (one more register source).
+Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
