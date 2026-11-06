@@ -409,6 +409,30 @@ t_addm: mov     si, offset buf_a
         LOOP32  add ax, [si]
 t_madd: mov     di, offset buf_b
         LOOP32  add [di], ax
+t_cmpm: mov     si, offset buf_a
+        LOOP32  cmp ax, [si]
+t_cmpmj: mov    si, offset buf_a
+        mov     dx, [si]                                /* equal: JNE not taken */
+        mov     bp, [count]
+2:      .rept   16
+        cmp     dx, [si]
+        jne     1f
+1:
+        .endr
+        dec     bp
+        jnz     2b
+        ret
+t_cmpma: mov    si, offset buf_a
+        mov     bp, [count]
+2:      .rept   16
+        cmp     ax, [si]
+        add     dx, bx
+        .endr
+        dec     bp
+        jnz     2b
+        ret
+t_cmpmr: mov    si, offset buf_a
+        LOOP32  cmp [si], ax
 t_ldx:  mov     bx, offset buf_a
         xor     si, si
         LOOP32  mov ax, [bx + si]
@@ -898,6 +922,10 @@ tests:
         .word   t_st,    9000, 32,   1, n_st,    0
         .word   t_addm,  4500, 32,   2, n_addm,  0
         .word   t_madd,  3000, 32,   3, n_madd,  0
+        .word   t_cmpm,  4500, 32,   2, n_cmpm,  0
+        .word   t_cmpmj, 6000, 16,   3, n_cmpmj, 0
+        .word   t_cmpma, 6000, 16,   3, n_cmpma, 0
+        .word   t_cmpmr, 4500, 32,   2, n_cmpmr, 0
         .word   t_ldx,   4500, 32,   2, n_ldx,   0
         .word   t_lea,   9000, 32,   1, n_lea,   0
         .word   t_mov32, 4500, 32,   2, n_mov32, 0
@@ -975,6 +1003,10 @@ n_ld:    .asciz "mov ax, [si]"
 n_st:    .asciz "mov [di], ax"
 n_addm:  .asciz "add ax, [si]"
 n_madd:  .asciz "add [di], ax"
+n_cmpm:  .asciz "cmp ax, [si]"
+n_cmpmj: .asciz "cmp dx, [si] + jne not taken"
+n_cmpma: .asciz "cmp ax, [si] + add dx, bx"
+n_cmpmr: .asciz "cmp [si], ax"
 n_ldx:   .asciz "mov ax, [bx+si]"
 n_lea:   .asciz "lea ax, [bx+8]"
 n_mov32: .asciz "mov eax, ebx (66h)"
