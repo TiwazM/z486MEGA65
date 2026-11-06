@@ -21,8 +21,10 @@ back. 16-bit: real-mode code, as DOS programs, CPUSPEED and Dr. Hardware run;
 | ADD r,r; MOV r,m | 1 | 1 | 1 |
 | ADD r,m | 1.1 | 1.1 | 2 |
 | ADD r,m, its result used by the next instruction | +2 | +2 | 0 |
-| CMP r,m; CMP m,r | 2.9 | 3 | 2 |
-| SHL r,1; SHL r,imm | 2.75 | 2.9 | 3; 2 |
+| CMP r,m; CMP m,r; CMP m,imm; TEST r,m | 2.9 | 3 | 2 |
+| CMP r,m + Jcc not taken | 4.25 | 4.25 | 3 |
+| SHL r,1; SHL r,imm | 2 | 2 | 3; 2 |
+| a shift's result used by the next instruction | +1 | +1 | 0 |
 | PUSH r + POP r, back to back | 3 | 5 | 2 |
 | JMP short; Jcc taken | 3; 3.4 | 3; 3.4 | 3; 3 |
 | CALL rel + RET | **14.25** | 7.75 | 8 |
@@ -34,8 +36,12 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
 - **16-bit CALL and RET** ran their whole 386 microcode: z486 kept a 16-bit
   CALL off the hardwired branch it gives a 32-bit one, and only a 32-bit RET
   on a flat 32-bit stack was a direct load of its target.
-- **CMP r,m and the shifts** run a third microcode step their recipes do not
-  need.
+- **CMP and TEST with a memory operand** run their 386 microcode (read,
+  wait, compare), where ALU r,m is a direct load (the data pipeline reads
+  it, the ALU in writeback): CMP was left out because that writeback always
+  wrote the register.
+- **Shifts** take a 486's clocks; an instruction that uses the result as
+  data waits one more (as an address it gets it at once).
 - **An ALU result from memory** (`ADD AX,[SI]`) comes about two clocks after
   a plain load's, which is forwarded to the next instruction at once. A faster
   path would lengthen the load forwarding, the build's slowest timing path.
@@ -74,12 +80,31 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
   `CPUSPEED` on fpu6 (`tools/dos/cpuspeed.s`, real mode): CALL + RET
   **7.37** clocks, from 14.47 on fpu4; the other integer rows as before.
 
+- **CMP r,m** (z486 `fpu` 53d71a5): CMP r,m (3A/3B) is a direct ALU load
+  as ADD r,m is: the data pipeline reads the operand and the writeback
+  subtracts, keeps the flags and writes no register (none is pending, so the
+  next instruction may read it at once). `cmp_rm_flags` checks the flags
+  straight after it (Jcc either way, LAHF, PUSHF, ADC, SETcc; bytes, words,
+  dwords) with the operands in the cache.
+
+  | Loop | Before | After | 486 |
+  |---|---:|---:|---:|
+  | CMP r,m | 3 | **1.1** | 2 |
+  | CMP r,m + Jcc not taken | 4.25 | **3.25** | 3 |
+  | CMP r,m + ADD r,r | 4.5 | **3.5** | 3 |
+
+  Not built for the board yet.
+
 ## What to do, in order
 
-1. ~~16-bit CALL and RET~~ (above).
-2. CMP r,m and SHL in two steps instead of three: one clock each, in any code.
+1. ~~16-bit CALL and RET~~ and ~~CMP r,m~~ (above).
+2. CMP m,r, CMP m,imm and TEST r,m on the same path (the writeback would
+   need its operands swapped, or the immediate).
 3. A 16-bit POP as a direct load, as the RET (the C frame above).
-4. The ALU-from-memory result a clock sooner, if the timing allows.
+4. A register ALU instruction right after an ALU-from-memory one waits
+   2.5 clocks (both write the flags); the ALU-from-memory result a clock
+   sooner; a shift's result a clock sooner. All three touch the load
+   forwarding or the register reads, on the build's slowest paths.
 
 Found on the way, in z486 as it was: a near JMP or CALL past the CS limit of
 a protected-mode code segment does not fault (#GP), and instructions run on
