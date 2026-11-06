@@ -124,6 +124,12 @@ paths the microcode ROM's output into the address unit and the segment
 registers, none of the RET's. It boots on the board (Hardstones 26,985,
 from fpu5's 26,912).
 
+CMP r,m as a direct ALU load (`z486-R6-fpu7.cor`, z486 533b8a1, on top of
+fpu6; about 625 more LUTs) closed with 0.30 ns to spare on main_clk (0.002 ns
+at the implementation target), its slowest paths a memory-load commit into
+the general registers (whose write now skips a CMP), then the x87
+multiplier (+0.517 ns). Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
