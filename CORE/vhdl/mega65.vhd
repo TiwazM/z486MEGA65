@@ -1242,6 +1242,8 @@ begin
          pot_y_i         => main_m1351_y,
          flip_i          => main_iot_arm(22 downto 21),
          c1351_o         => main_c1351,
+         pin9_i          => main_pot1_x_i,             -- an Amiga mouse's right button
+         pin5_i          => main_pot1_y_i,             -- and middle (a mouSTer's activepotlines)
          key_num_i       => main_kb_key_num_i,
          key_pressed_n_i => main_kb_key_pressed_n_i,
          tx_valid_o      => main_mouse_tx_valid,

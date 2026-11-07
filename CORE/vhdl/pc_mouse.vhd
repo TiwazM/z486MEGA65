@@ -14,13 +14,21 @@
 -- the lines over raw (M2M-UPSTREAM raw-joyports). The right button shorts pin 9 to ground,
 -- which the MEGA65's paddle circuit cannot see (Megamiga, on an R3), so a held key stands in
 -- for it: F13 (G_RMB_KEY), which the PC's keyboard does not use (on the R6 too: the right
--- button reads as an open line on a game port's pin 9, qmon.py joy, 2026-11-02).
+-- button reads as an open line on a game port's pin 9, qmon.py joy, 2026-11-02). A mouSTer
+-- (firmware 3.23.5313 on) with activepotlines=true drives pin 9 (right) and pin 5 (middle)
+-- high while its buttons are up: a SID value of 0, open (255) while one is held (measured
+-- 2026-11-07, clean 0 or 255). So a line that has read driven is a button from then on: open
+-- = held (pin9_i, pin5_i); a plain Amiga mouse never drives them and has F13 only. Both lines
+-- open for 2 s (the mouse unplugged, or a passive one plugged in) drop that until they read
+-- driven again.
 --
 -- Or a Commodore 1351, or a mouSTer in its C64 mode (c1351): its position on the paddle lines
 -- (POT X, POT Y; bits 6..1 of the SID's value, its x and y mod 64), the left button on pin 6,
 -- the right one on pin 1 (up). The framework samples the paddles as a SID does (mouse_input.vhd)
--- and hands them over inverted, an open line 0. Lines that read driven (a SID value under 254)
--- for G_DETECT_MS make it a 1351, open for five times as long an Amiga mouse again; each new
+-- and hands them over inverted, an open line 0. Lines that read mid-range (a SID value of
+-- 4..251, as the MEGA65's mouse_input.vhdl takes a 1351's; a mouSTer's active button lines
+-- read 0 or 255) for G_DETECT_MS make it a 1351, open for five times as long, or a step on
+-- pins 2..4 (which a 1351 never moves), an Amiga mouse again; each new
 -- reading (settled after the framework's per-bit crossing) moves it by the difference to the
 -- last one, -32..31 an axis. flip_i reverses an axis (qmon.py c1351), should one run backwards.
 --
@@ -71,6 +79,10 @@ entity pc_mouse is
       pot_y_i         : in  std_logic_vector(7 downto 0) := x"00";
       flip_i          : in  std_logic_vector(1 downto 0) := "00";  -- a 1351's y, x reversed
       c1351_o         : out std_logic;              -- a 1351 on the port
+      -- pin 9 and pin 5 as the framework gives them (inverted), never swapped: an Amiga mouse's
+      -- right and middle buttons where it drives the lines (a mouSTer's activepotlines)
+      pin9_i          : in  std_logic_vector(7 downto 0) := x"00";
+      pin5_i          : in  std_logic_vector(7 downto 0) := x"00";
 
       -- the MEGA65 keyboard scan, for the right button's key
       key_num_i       : in  integer range 0 to 79;
@@ -131,6 +143,18 @@ architecture synthesis of pc_mouse is
    signal c1351      : std_logic := '0';
    signal p_stb      : std_logic := '0';
    signal p_dx, p_dy : signed(5 downto 0) := (others => '0');
+   signal amiga_step : std_logic := '0';                           -- pins 2..4 moved
+
+   -- an Amiga mouse's active button lines (p_buttons): pin 9 and 5 synchronised and settled;
+   -- whether each has read driven, and held open now; both open how long
+   signal b9_1, b9_2 : std_logic_vector(7 downto 0) := x"00";
+   signal b5_1, b5_2 : std_logic_vector(7 downto 0) := x"00";
+   signal b_settle   : natural range 0 to 15 := 0;
+   signal seen9      : std_logic := '0';
+   signal seen5      : std_logic := '0';
+   signal held9      : std_logic := '0';
+   signal held5      : std_logic := '0';
+   signal both_ms    : natural range 0 to 2000 := 0;
 
    type t_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
 
@@ -138,7 +162,7 @@ architecture synthesis of pc_mouse is
    function step(p, n : std_logic_vector(1 downto 0)) return integer is
    begin
       if p = n then return 0; end if;
-      case p & n is
+      case std_logic_vector'(p & n) is
          when "0001" | "0111" | "1110" | "1000" => return 1;
          when "0100" | "1101" | "1011" | "0010" => return -1;
          when others => return 0;                           -- both lines changed: lost a step
@@ -182,7 +206,9 @@ begin
    tx_valid_o <= '1' when q_cnt /= 0 else '0';
    tx_data_o  <= q(to_integer(q_rd));
 
-   btn     <= '0' & (rmb or (c1351 and not s2(0))) & not s2(4);   -- a 1351's right: pin 1
+   -- middle: an Amiga mouse's pin 5; right: F13, a 1351's pin 1, or an Amiga mouse's pin 9
+   btn     <= (not c1351 and held5) &
+              (rmb or (c1351 and not s2(0)) or (not c1351 and held9)) & not s2(4);
    c1351_o <= c1351;
 
    -- A 1351: the paddle values settle (the framework crosses them bit by bit), a new one moves
@@ -215,7 +241,8 @@ begin
             if flip_i(1) = '1' then
                p_dy <= signed(unsigned(not pv_y(6 downto 1)) - unsigned(v_sy(6 downto 1)));
             end if;
-            if unsigned(v_sx) < 254 or unsigned(v_sy) < 254 then
+            if (unsigned(v_sx) >= 4 and unsigned(v_sx) <= 251) or
+               (unsigned(v_sy) >= 4 and unsigned(v_sy) <= 251) then
                driven <= '1';
                p_stb  <= c1351 and driven;       -- (not from or to open lines: no jump)
             else
@@ -241,12 +268,73 @@ begin
             end if;
          end if;
 
+         if amiga_step = '1' then                 -- pins 2..4 moved: an Amiga mouse
+            c1351  <= '0';
+            drv_ms <= 0;
+         end if;
+
          if rst_i = '1' then
             c1351  <= '0';
             drv_ms <= 0;
          end if;
       end if;
    end process p_1351;
+
+   -- An Amiga mouse's right and middle buttons on pins 9 and 5 where it drives them (a mouSTer
+   -- with activepotlines): SID value 63 or less = driven (up), 192 or more = open (held), once
+   -- the line has read driven; both open for 2 s and the lines count as passive again
+   p_buttons : process (clk_i)
+      variable v_9, v_5 : unsigned(7 downto 0);
+   begin
+      if rising_edge(clk_i) then
+         b9_1 <= pin9_i;
+         b9_2 <= b9_1;
+         b5_1 <= pin5_i;
+         b5_2 <= b5_1;
+         if b9_1 /= b9_2 or b5_1 /= b5_2 then
+            b_settle <= 0;
+         elsif b_settle /= 15 then
+            b_settle <= b_settle + 1;
+         end if;
+         if b_settle = 8 then
+            v_9 := unsigned(not b9_2);               -- the SID's values
+            v_5 := unsigned(not b5_2);
+            if v_9 <= 63 then
+               seen9 <= '1';
+               held9 <= '0';
+            elsif v_9 >= 192 then
+               held9 <= seen9;
+            end if;
+            if v_5 <= 63 then
+               seen5 <= '1';
+               held5 <= '0';
+            elsif v_5 >= 192 then
+               held5 <= seen5;
+            end if;
+         end if;
+         if ms_cnt = C_MS - 1 then
+            if held9 = '1' and held5 = '1' then
+               if both_ms /= 2000 then
+                  both_ms <= both_ms + 1;
+               else
+                  seen9 <= '0';                     -- unplugged, or a passive mouse now
+                  seen5 <= '0';
+                  held9 <= '0';
+                  held5 <= '0';
+               end if;
+            else
+               both_ms <= 0;
+            end if;
+         end if;
+         if rst_i = '1' then
+            seen9 <= '0';
+            seen5 <= '0';
+            held9 <= '0';
+            held5 <= '0';
+            both_ms <= 0;
+         end if;
+      end if;
+   end process p_buttons;
 
    p_mouse : process (clk_i)
       variable v_b     : t_bytes;
@@ -291,6 +379,10 @@ begin
          -- The port: count the quadrature steps (MegaMac's directions; y turned to count up)
          s1  <= fire_n_i & right_n_i & left_n_i & down_n_i & up_n_i;
          s2  <= s1;
+         amiga_step <= '0';
+         if s2(3 downto 1) /= s1(3 downto 1) then    -- pins 4, 3, 2 moved: an Amiga mouse
+            amiga_step <= '1';
+         end if;
          v_h := s2(1) & s2(3);                -- H, HQ
          v_v := s2(0) & s2(2);                -- V, VQ
          v_x := acc_x;

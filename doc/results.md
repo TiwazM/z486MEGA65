@@ -176,6 +176,14 @@ On the board it boots and reads the clock right after the load; its drive LED
 stays amber (it took the SD request toggle for a level; fixed in the source,
 for the next build).
 
+The drive LED fix, the 25-row menu canvas, the smaller menu (75 % in the
+640/720-pixel modes) and the I/O trace's quiet mode (`z486-R6-osmled.cor`, on
+top of rtcsnd): placed from rtcsnd's layout (`impl strong incr`, 99.3 % of
+cells and 97 % of nets kept, 40 minutes; 86,338 LUTs, 43,568 registers) it
+closes with 0.379 ns to spare at 64 MHz and 0.079 ns at the implementation
+target, qnice_clk +0.130 ns, hold +0.036 ns, every clock met. Not on the board
+yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):

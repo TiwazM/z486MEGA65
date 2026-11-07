@@ -42,20 +42,6 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     sets take two or three of those steps in turn (an I/O trace while moving
     steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
     each step over the time to the next one would even it out.
-  - An Amiga mouse's right and middle buttons (pins 9 and 5) where the
-    mouse can drive the lines: a pull-up to +5 V in the mouse or an adapter
-    (AExp: about 2 kΩ from pin 7), or a mouSTer with firmware 3.23.5313 or
-    newer and `activepotlines=true` in `[mouse]`. Released, the paddle line
-    reads driven (a SID value near 0); pressed, open (255). Take a line as
-    a button only once it has read released (MegaST does the same), else a
-    mouse without the pull-up holds the button down; F13 stays. Such a
-    mouse probably freezes the pointer today: its driven lines look like a
-    1351's (`pc_mouse.vhd`, driven = under 254) and the quadrature is no
-    longer counted. Count only mid-range values (4..251, as the MEGA65's
-    own `mouse_input.vhdl` does) as a 1351's, and a step on pins 2-4 (which
-    a 1351 never pulls) as an Amiga mouse at once. Read pin 9 unswapped
-    (`qmon.py c1351 swap`). Measure first: `qmon.py mouse` with such a
-    mouse, for the thresholds (a weak pull-up may read mid-range).
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
@@ -137,7 +123,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   Amiga mode, is the PC's PS/2 mouse (`CORE/vhdl/pc_mouse.vhd`): its
   quadrature lines as MegaMac decodes them, the left button on pin 6. The
   right button (pin 9) is invisible to the MEGA65's paddle circuit (Megamiga
-  measured it, and the R6 is no different), so F13 stands in for it. For a
+  measured it, and the R6 is no different), so F13 stands in for it. A mouSTer
+  (firmware 3.23.5313 on) with `activepotlines=true` drives pins 9 and 5 high
+  while its right and middle buttons are up: they read as a SID value of 0,
+  and 255 (open) while held, nothing in between (measured 2026-11-07). A line
+  that has read driven is a button from then on; both open for 2 s (unplugged)
+  drops that. Such lines used to make the core take the mouse for a 1351
+  (driven = under 254) and stop counting its quadrature; a 1351 is now only
+  mid-range values (4..251, as `mouse_input.vhdl` takes it), and a step on pins
+  2..4, which a 1351 never moves, makes it an Amiga mouse at once
+  (`CORE/sim/run_pc_mouse.sh`). For a
   real right button, use a Commodore 1351 or a mouSTer in its C64 mode
   (`c1351`, `mode=mouse` in its INI): its position on the paddle lines, the
   right button on pin 1. The core finds a 1351 by itself (its paddle lines

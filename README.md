@@ -50,7 +50,10 @@ The current version is **v0.1-preview** (see
 - PS/2 mouse on joystick port 1:
   - Commodore 1351, or a mouSTer in C64 mode: both buttons, detected
     automatically
-  - Amiga mouse, or a mouSTer in Amiga mode: F13 is the right button
+  - mouSTer in Amiga mode with `activepotlines=true` (firmware 3.23.5313 or
+    newer): all three buttons
+  - Amiga mouse (or a mouSTer in Amiga mode without that): F13 is the right
+    button
 - Game port joystick on port 2 with up to three buttons. The second fire button
   can be on pin 9 (C64GS style) or pin 5, set in the menu.
 
@@ -164,10 +167,13 @@ printed on the MEGA65's keycaps:
 ## Mouse and joystick
 
 - **Mouse on port 1.** A Commodore 1351, or a USB mouse behind a mouSTer set to
-  C64 mode (`c1351` and `mode=mouse` in its INI), has both buttons. An Amiga
-  mouse, or a mouSTer in Amiga mode, works too, but the MEGA65 can't read its
-  right button (pin 9): F13 stands in for it. The core tells them apart by
-  itself. Load a PS/2 mouse driver (CuteMouse, or Windows' "Microsoft or IBM
+  C64 mode (`c1351` and `mode=mouse` in its INI), has both buttons. A mouSTer in
+  Amiga mode with firmware 3.23.5313 or newer and `activepotlines=true` in its
+  INI has all three (right and middle): it drives the button lines, which the
+  MEGA65 can read. A plain Amiga mouse works too, but the MEGA65 can't read its
+  right button (pin 9): F13 stands in for it. The core tells them all apart by
+  itself. (Edit the INI the mouSTer writes, not one copied over with a new
+  firmware: the update writes its defaults.) Load a PS/2 mouse driver (CuteMouse, or Windows' "Microsoft or IBM
   PS/2"). There is no scroll wheel.
 - **Joystick on port 2** is the PC's game port joystick. Fire is button 1. A C64
   two- or three-button stick's extra buttons are buttons 2 and 3: the second on
