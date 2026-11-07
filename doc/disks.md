@@ -70,11 +70,26 @@ command. A read elsewhere ends the run. Before, every sector was an SD
 command of its own, about 440 µs: Dr. Hardware measured 997 KB/s with 64 KB
 blocks; with the runs 2989 KB/s (10 KB blocks: 1036 -> 2624 KB/s), the
 average sector 456 -> 146 µs. Its access time stayed 6.1-6.2 ms. A CD-ROM
-READ is one run too: its 2048-byte sectors are four of the image's. Writes still go to
-the card one sector at a time (DOS without a disk cache rewrites the FAT for
-every file). `tools/qmon.py disks` shows the sector counts, the time per
-sector and the SD transfers (`disks clear` zeroes them, `disks watch 10`
-counts sectors per second over 10 seconds).
+READ is one run too: its 2048-byte sectors are four of the image's.
+
+Writes come in runs as well (2026-11-07). Before, every sector was an SD
+write of its own (CMD24), and the card programmed each one before taking the
+next: about 6 ms a sector on the board, 83 KB/s, over ten minutes for a 50 MB
+game install. Now an IDE write command is one multi-block SD write (CMD25) of
+its sectors, within the image's extent: `pc_mgmt` says how many sectors the
+command still writes, the write buffer has four slots, a sector is answered
+as soon as the next one has a free slot, and the card waits between blocks
+(its clock stopped) until the PC has the next one. The command's last sector
+is answered only once the whole run is on the card, so the command ends with
+its data written. Any other request first lets the run write every sector it
+has. A floppy still writes one sector at a time. `tb_ide.sv` checks runs of
+1 to 64 sectors with a slow and a fast card, across two extents, with QNICE
+taking the card and with an SD error in the middle, and a write the PC
+abandons after 3 of 8 sectors: every block reaches the card once.
+
+`tools/qmon.py disks` shows the sector counts, the time per sector and the SD
+transfers (`disks clear` zeroes them, `disks watch 10` counts sectors per
+second over 10 seconds).
 
 Checked on the board with MS-DOS 6.22 (`fc /b` of a file against itself and
 against fresh copies, 25,151 sectors read and 2,325 written): no wrong data,

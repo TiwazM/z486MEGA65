@@ -1176,11 +1176,16 @@ begin
                      end if;
                end case;
 
+            -- the sectors this command still writes, this one included (disk_sd's write run)
             when S_HW_SD =>
                pm_address <= C_IDE & x"0F";
                pm_req_unit  <= "10";
                pm_req_lba   <= "0000" & std_logic_vector(i_lba);
-               pm_req_cnt   <= '0' & x"01";
+               if i_cnt = 0 then
+                  pm_req_cnt <= '1' & x"00";      -- 256
+               else
+                  pm_req_cnt <= '0' & std_logic_vector(i_cnt);
+               end if;
                pm_req_wr    <= '1';
                sd_next        <= S_HW_DONE;
                state          <= S_SD_ASK;
