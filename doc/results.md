@@ -242,6 +242,10 @@ kept, 23 minutes; 86,710 LUTs, 43,884 registers) it closes with 0.365 ns to spar
 folders, the palette's rainbow; True Color (24 bit), 640x480, too. Display
 Properties' sample bar shows the same stepped two rainbows at 16 and 24 bit (coarser
 at 256 colours): Windows' picture, not the colour depth.
+Benchmarks on hicol (2026-11-07): 3DBench 1.0 47.9 fps, where Phil's Computer Lab
+lists 48.1 for a 486DX2-66; SpeedSys's VESA memory 20,786 KB/s (its own sample of a
+Pentium MMX 200 with an S3 ViRGE: 11,289); SpeedSys itself stops after its system
+box, in a loop reading port 61h (the I/O trace's timer option is for that).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
