@@ -86,6 +86,11 @@ can't tell a released stick from an empty port) and stops after "Playing
 registered version." to calibrate it, with its prompts on a console that
 isn't on screen yet: press fire on port 2 at each step, or Esc to skip it,
 or start Quake with `-nojoy`.
+Windows 3.11 runs at up to 1024x768 in 256 colours with Microsoft's generic
+"Super VGA 256 colors" driver (`SVGA.EXE` from the Windows Driver Library,
+through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
+(Options, Change System Settings, Display). Its own drivers stop at 800x600 in
+16 colours.
 
 ## Getting started
 
