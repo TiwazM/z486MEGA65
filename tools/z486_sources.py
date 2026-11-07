@@ -81,7 +81,10 @@ PATCHES = {
          "    output     [15:0] dbg_ps2,          // MEGA65: the 8042's IRQs, output buffer, enables, states\n"
          "    output     [15:0] dbg_ps2_fifo,     // MEGA65: the bytes in its mouse and keyboard FIFOs\n"
          "    output     [15:0] dbg_inta_bad,     // MEGA65: INTAs the PIC acknowledged with another vector\n"
-         "    output     [15:0] dbg_inta_last,    // MEGA65: the last one: the CPU's vector, the PIC's"),
+         "    output     [15:0] dbg_inta_last,    // MEGA65: the last one: the CPU's vector, the PIC's\n"
+         "    output      [1:0] fdd_motor,        // MEGA65: floppy.v's motor bits (drive sounds)\n"
+         "    output            fdd_sel,          // MEGA65: the selected floppy drive\n"
+         "    output     [15:0] fdd_cyl,          // MEGA65: B:'s and A:'s head cylinders"),
         ("pic_inta_bridge inta_bridge (",
          "wire pic_vector_hold;  // MEGA65 (z486_sources.py)\n"
          "pic_inta_bridge inta_bridge ("),
@@ -100,6 +103,11 @@ PATCHES = {
          "\t.vector_hold       (pic_vector_hold),   // MEGA65 (z486_sources.py)\n"
          "\t.dbg_regs          (dbg_pic)\n);\n"
          "assign dbg_irq = interrupt;"),
+        ("\t.request           (fdd_request),\n\t.irq               (irq_6)\n);",
+         "\t.request           (fdd_request),\n\t.irq               (irq_6),\n\n"
+         "\t.drv_motor         (fdd_motor),         // MEGA65 (z486_sources.py): drive sounds\n"
+         "\t.drv_sel           (fdd_sel),\n"
+         "\t.drv_cyl           (fdd_cyl)\n);"),
         ("\t.sbp               (sbp),",
          "\t.sbp               (sbp),\n\n"
          "\t.dma_take_starved  (sb_take_starved),  // MEGA65 (z486_sources.py)\n"
@@ -126,6 +134,23 @@ PATCHES = {
          "assign dbg_sb_req = {dma_sb_req_16, dma_sb_req_8};\n"
          "assign dbg_sb_irq = irq_5;\n\n"
          "// IO Bus Adapter (z486 IO cycles to byte-sequential peripheral bus)"),
+    ],
+    # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
+    # internal drive follows them): the DOR's motor bits, the selected drive and each drive's
+    # head cylinder (SEEK, RECALIBRATE, a read's or write's implied seek, a multi-track step on)
+    "z486_MiSTer/src/soc/floppy.v": [
+        ("\toutput      [1:0] request\n);",
+         "\toutput      [1:0] request,\n\n"
+         "\toutput      [1:0] drv_motor,  // MEGA65 (z486_sources.py): the DOR's motor bits, B: A:\n"
+         "\toutput            drv_sel,    // MEGA65: the selected drive\n"
+         "\toutput     [15:0] drv_cyl     // MEGA65: B:'s and A:'s head cylinders\n"
+         ");"),
+        ("\nendmodule",
+         "\n// MEGA65: the drives' state for the drive sounds (z486_sources.py)\n"
+         "assign drv_motor = {motor_enable[1], motor_enable[0]};\n"
+         "assign drv_sel   = selected_drive_r;\n"
+         "assign drv_cyl   = {cylinder[1], cylinder[0]};\n\n"
+         "endmodule"),
     ],
     # sound_dsp.v: the write status port (2xCh) reads busy for 3 us after a DMA request starts,
     # not for as long as it is up. The DSP holds a request until the DMA controller answers it,

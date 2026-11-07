@@ -228,17 +228,25 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    46    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
 --    47    ----
 --    48    Back to main menu
---    49  ----
---    50  Help
---    51  Reset the PC            C_MENU_RESET
---    52  ----
---    53  Close Menu
+--    49  Drive sounds: %s        submenu: the internal floppy drive follows the PC's (fdd_sound.vhd)
+--    50    Floppy drive sounds   headline
+--    51    ----
+--    52    On                    (default) its motor and head follow the PC's floppy drives
+--                                (steps only while a disk is in it)
+--    53    Off                   C_MENU_SND_OFF: the drive idle
+--    54    ----
+--    55    Back to main menu
+--    56  ----
+--    57  Help
+--    58  Reset the PC            C_MENU_RESET
+--    59  ----
+--    60  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change (and MENU_HEAP_SIZE there when the menu grows).
-constant OPTM_SIZE         : natural := 54;
+constant OPTM_SIZE         : natural := 61;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 17;   -- the main menu's lines (0-7, 18, 26, 34, 41, 49-53)
+constant OPTM_DY           : natural := 18;   -- the main menu's lines (0-7, 18, 26, 34, 41, 49, 56-60)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -290,6 +298,13 @@ constant OPTM_ITEMS        : string :=
    " Off\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
+   " Drive sounds: %s\n"      &
+   " Floppy drive sounds\n"   &
+   "\n"                       &
+   " On\n"                    &
+   " Off\n"                   &
+   "\n"                       &
+   " Back to main menu\n"     &
    "\n"                       &
    " Help\n"                  &
    " Reset the PC\n"          &
@@ -307,6 +322,7 @@ constant OPTM_G_SCAN       : integer := 7;
 constant OPTM_G_CD         : integer := 8;
 constant OPTM_G_JOY        : integer := 9;
 constant OPTM_G_REFRESH    : integer := 10;
+constant OPTM_G_SOUND      : integer := 11;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -359,11 +375,18 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_JOY,                               -- 46 Off
                                              OPTM_G_LINE,                              -- 47
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 48 Back
-                                             OPTM_G_LINE,                              -- 49
-                                             OPTM_G_HELP,                              -- 50 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 51 Reset the PC
-                                             OPTM_G_LINE,                              -- 52
-                                             OPTM_G_CLOSE                              -- 53 Close Menu
+                                             OPTM_G_SUBMENU,                           -- 49 Drive sounds: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 50 Floppy drive sounds
+                                             OPTM_G_LINE,                              -- 51
+                                             OPTM_G_SOUND + OPTM_G_STDSEL,             -- 52 On
+                                             OPTM_G_SOUND,                             -- 53 Off
+                                             OPTM_G_LINE,                              -- 54
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 55 Back
+                                             OPTM_G_LINE,                              -- 56
+                                             OPTM_G_HELP,                              -- 57 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 58 Reset the PC
+                                             OPTM_G_LINE,                              -- 59
+                                             OPTM_G_CLOSE                              -- 60 Close Menu
                                            );
 
 begin

@@ -83,6 +83,9 @@ module z486_mega65 #(
     input  wire        mgmt_write,
     input  wire [15:0] mgmt_writedata,
     output wire  [1:0] fdd_request,
+    output wire  [1:0] fdd_motor,          // floppy.v: the DOR's motor bits, B: A: (drive sounds)
+    output wire        fdd_sel,            // the selected floppy drive
+    output wire [15:0] fdd_cyl,            // B:'s and A:'s head cylinders
     output wire  [2:0] ide0_request,
     output wire  [2:0] ide1_request,
 
@@ -380,6 +383,9 @@ system #(
     .clock_rate          (28'(CLK_HZ)),
 
     .fdd_request         (fdd_request),
+    .fdd_motor           (fdd_motor),
+    .fdd_sel             (fdd_sel),
+    .fdd_cyl             (fdd_cyl),
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
     .floppy_wp           (2'b00),

@@ -248,7 +248,7 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
   scanlines, refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
-  help, "Reset the PC". An image mounted at start-up
+  drive sounds (on or off), help, "Reset the PC". An image mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard
@@ -345,8 +345,36 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   again every 20 ms, and after 100 (2 s) it starts from 2000-01-01
   (M2M-UPSTREAM rtc-verify; `CORE/sim/run_rtc_master.sh` feeds it that junk).
 - Drive LED (`mega65.vhd`): the PC's disk accesses, as a case LED shows a
-  drive's activity line: amber while the hard disk or the CD-ROM drive has a
-  command or a block in hand, green for the floppies, at least 40 ms each.
+  drive's activity line, in Megamiga's colours: red while the hard disk or the
+  CD-ROM drive has a command or a block in hand, yellow for the floppies,
+  orange for both, at least 40 ms each.
+- Drive sounds (`fdd_sound.vhd`): the MEGA65's internal floppy drive follows
+  the PC's floppy drives, which are images on the SD card. `floppy.v` (a patch
+  in `tools/z486_sources.py`) says which drive is selected, whose motor is on
+  and which cylinder each one's head is on (SEEK, RECALIBRATE, a read's or
+  write's implied seek). The drive is selected while the PC has a floppy motor
+  on (its own LED lights, as a PC drive's does) and while its head moves; its
+  motor runs with the PC's; its head steps after the selected drive's
+  cylinder, one step every 4 ms (a 3.5" drive takes 3), DIR set 10 us before
+  each 4 us STEP pulse, at most to cylinder 79. Going out to cylinder 0 it
+  steps until TRACK0 shows (up to 10 steps more, for a lost step), and TRACK0
+  seen anywhere sets the head to 0. At the start (power-up, the menu's "On")
+  it steps in once and then out to TRACK0, at most 90 steps; a drive that
+  never shows TRACK0 is left alone. WGATE, WDATA, SIDE1 and DENSITY stay high:
+  it never writes.
+  A disk in the drive keeps the motor off (only the head moves), so a real
+  disk doesn't spin under its heads for nothing. DSKCHG latches when a disk
+  comes out and clears on a step with one in, as on a PC: every step's end
+  reads it. A disk put in while the head stands still leaves DSKCHG latched
+  until the next step, so INDEX tells it: two index pulses while the motor
+  runs stop the motor (after about 200-400 ms of spinning) and a step away and
+  back asks DSKCHG. If DSKCHG then says there is no disk, the mechanism sends
+  INDEX without one, and INDEX is not used again until the next start.
+  DSKCHG going active while the drive is selected means the disk came out.
+  The menu's "Drive sounds" (On, the default, or Off) switches it.
+  `CORE/sim/run_fdd_sound.sh` runs it against a model of the drive (TRACK0,
+  DSKCHG, INDEX, a drive with INDEX without a disk, one without TRACK0) and
+  checks every step pulse's timing.
 - Sound Blaster pops: z486's DSP holds its last sample when it stops (a DMA
   pause, the end of a transfer) and drops to 0 when it mutes (speaker off in
   SB Pro mode, the 80h silence), so a level a sound ends on stays until the
@@ -399,7 +427,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
   Cursor Up, then press Help).
 
-Not wired yet: the MEGA65's own floppy drive.
+The MEGA65's own floppy drive only makes the drive sounds; it does not read
+or write real floppies yet.
 
 ## Keyboard after a warm reset
 

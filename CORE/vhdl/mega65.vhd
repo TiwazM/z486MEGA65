@@ -361,7 +361,8 @@ constant C_MENU_SL_50         : natural := 31;
 constant C_MENU_RF_ORIG       : natural := 38;  -- the VGA's own refresh (37: 60 Hz, the default)
 constant C_MENU_JOY_P5        : natural := 45;  -- the game port's fire 2 on pin 5 (44: pin 9)
 constant C_MENU_JOY_OFF       : natural := 46;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 51;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_SND_OFF       : natural := 53;  -- no drive sounds (52: On, the default)
+constant C_MENU_RESET         : natural := 58;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -609,6 +610,9 @@ signal main_audio             : std_logic_vector(31 downto 0);
 ---------------------------------------------------------------------------------------------
 
 signal main_fdd_request       : std_logic_vector(1 downto 0);
+signal main_fdd_motor         : std_logic_vector(1 downto 0);    -- floppy.v: B:'s and A:'s motor
+signal main_fdd_sel           : std_logic;                       -- the selected floppy drive
+signal main_fdd_cyl           : std_logic_vector(15 downto 0);   -- B:'s and A:'s head cylinders
 signal main_ide0_request      : std_logic_vector(2 downto 0);
 signal main_ide1_request      : std_logic_vector(2 downto 0);
 signal main_mgmt_address      : std_logic_vector(15 downto 0);
@@ -692,6 +696,9 @@ component z486_mega65 is
       mgmt_write         : in    std_logic;
       mgmt_writedata     : in    std_logic_vector(15 downto 0);
       fdd_request        : out   std_logic_vector(1 downto 0);
+      fdd_motor          : out   std_logic_vector(1 downto 0);
+      fdd_sel            : out   std_logic;
+      fdd_cyl            : out   std_logic_vector(15 downto 0);
       ide0_request       : out   std_logic_vector(2 downto 0);
       ide1_request       : out   std_logic_vector(2 downto 0);
       ps2_kbd_clk_in     : in    std_logic;
@@ -776,11 +783,8 @@ begin
    iec_srq_en_o         <= '0';
    iec_srq_n_o          <= '1';
 
-   -- M2M-UPSTREAM floppy-pins: the internal drive idle
-   f_motora_o           <= '1';
-   f_selecta_o          <= '1';
-   f_stepdir_o          <= '1';
-   f_step_o             <= '1';
+   -- M2M-UPSTREAM floppy-pins: the internal drive makes the PC's floppy drives' sounds
+   -- (fdd_sound.vhd: motor, select, step, direction); it never writes, and side 0, DD
    f_side1_o            <= '1';
    f_wdata_o            <= '1';
    f_wgate_o            <= '1';
@@ -902,10 +906,10 @@ begin
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
 
-   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line:
-   -- amber while the hard disk or the CD-ROM drive has a command or a block in hand (ide.v asks
-   -- pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), green for the floppy
-   -- drives (the floppy wins when both). Each access keeps it lit for 40 ms at least, so that a
+   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line,
+   -- in Megamiga's colours: red while the hard disk or the CD-ROM drive has a command or a block
+   -- in hand (ide.v asks pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), yellow
+   -- for the floppy drives, orange for both. Each access keeps it lit for 40 ms at least, so that a
    -- one-sector access still shows. main_disk_req is a toggle (one change per request,
    -- pc_mgmt.vhd), not a level: its changes count (rtcsnd took the level, and an odd count of
    -- requests left the LED on for good).
@@ -934,7 +938,36 @@ begin
    end process p_main_drive_led;
 
    main_drive_led_o     <= '1' when main_led_hd /= 0 or main_led_fd /= 0 else '0';
-   main_drive_led_col_o <= x"00FF00" when main_led_fd /= 0 else x"FF8000";
+   main_drive_led_col_o <= x"FF8000" when main_led_hd /= 0 and main_led_fd /= 0 else
+                           x"FF0000" when main_led_hd /= 0 else
+                           x"FFFF00";
+
+   -- Drive sounds: the internal floppy drive follows the PC's floppy drives (motor and head),
+   -- the motor only without a disk in it; the menu's "Drive sounds: Off" leaves it idle
+   i_fdd_sound : entity work.fdd_sound
+      generic map (
+         G_CLK_HZ    => CORE_CLK_SPEED
+      )
+      port map (
+         clk_i       => main_clk,
+         rst_i       => main_rst,
+         enable_i    => not main_osm_control_i(C_MENU_SND_OFF),
+         pc_motor_i  => main_fdd_motor,
+         pc_sel_i    => main_fdd_sel,
+         pc_cyl0_i   => main_fdd_cyl(7 downto 0),
+         pc_cyl1_i   => main_fdd_cyl(15 downto 8),
+         f_selecta_o => f_selecta_o,
+         f_motora_o  => f_motora_o,
+         f_step_o    => f_step_o,
+         f_stepdir_o => f_stepdir_o,
+         f_track0_i  => f_track0_i,
+         f_index_i   => f_index_i,
+         f_diskchg_i => f_diskchanged_i,
+         cyl_o       => open,
+         disk_o      => open,
+         idx_off_o   => open,
+         fault_o     => open
+      );
 
    i_z486 : z486_mega65
       generic map (
@@ -996,6 +1029,9 @@ begin
          mgmt_write         => main_mgmt_write,
          mgmt_writedata     => main_mgmt_writedata,
          fdd_request        => main_fdd_request,
+         fdd_motor          => main_fdd_motor,
+         fdd_sel            => main_fdd_sel,
+         fdd_cyl            => main_fdd_cyl,
          ide0_request       => main_ide0_request,
          ide1_request       => main_ide1_request,
 

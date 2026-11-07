@@ -59,11 +59,16 @@ The current version is **v0.1-preview** (see
 
 **Core**
 - Menu on HELP: disks, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
-  joystick, reset; settings are saved to the SD card
+  joystick, drive sounds, reset; settings are saved to the SD card
 - The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
   from the MEGA65's again
-- The drive LED shows the PC's disk accesses: amber for the hard disk and the
-  CD-ROM, green for the floppies
+- The drive LED shows the PC's disk accesses, in Megamiga's colours: red for
+  the hard disk and the CD-ROM, yellow for the floppies, orange for both
+- Drive sounds: the MEGA65's own floppy drive hums and clicks with the PC's
+  floppy drives (their images on the SD card). Its motor runs while the PC's
+  does and its head steps to the cylinder the PC's is on. With a disk in it,
+  only the head moves: the motor stays off, so the disk doesn't spin for
+  nothing. It never writes. "Drive sounds: Off" in the menu leaves it idle
 
 ## Tested
 
@@ -200,7 +205,8 @@ printed on the MEGA65's keycaps:
   get stuck out of step. With another system BIOS, the pointer can start
   jumping between the screen edges when a program starts or quits while the
   mouse is moving: load the mouse driver again (`ctmouse`).
-- The MEGA65's own floppy drive isn't used.
+- The MEGA65's own floppy drive only makes the drive sounds: it can't read
+  real floppies yet.
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 
