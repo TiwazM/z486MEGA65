@@ -140,6 +140,12 @@ Then boot a DOS install floppy from A: (FreeDOS's, for example) and let it
 partition and format C:. A FAT32 card can't hold a file of 4 GB or more, so
 keep the image below that. More in [Disks](doc/disks.md).
 
+Mounting an image walks its cluster chain on the card, so it takes longer the
+smaller the card's clusters are: a 2 GB `hdd.img` mounts in about 20 seconds
+on a card with 4 KB clusters and about 5 seconds with 16 KB. Format the card
+with 16 or 32 KB clusters (`qmon.py disks` shows the card's as "shift", the
+log2 of its sectors per cluster: 5 for 16 KB, 6 for 32 KB).
+
 3. Press HELP for the menu, to mount images and pick the HDMI mode.
 
 ## Keyboard

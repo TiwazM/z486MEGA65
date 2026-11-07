@@ -210,7 +210,8 @@ the event FIFO is full, the sweep, the translator reset with the PC, its state i
 `qmon.py status`): placed from osm50's layout (97.8 % of nets kept, 41 minutes;
 86,106 LUTs, 43,737 registers) it closes with 0.400 ns to spare at 64 MHz and
 0.100 ns at the implementation target, qnice_clk +0.138 ns, hold +0.036 ns, every
-clock met. Not on the board yet.
+clock met. On the board (2026-11-07) it starts the PC, and `qmon.py status` shows
+the keyboard line (no Shift held back, no sweep releases).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
