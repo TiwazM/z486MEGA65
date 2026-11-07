@@ -181,8 +181,16 @@ The drive LED fix, the 25-row menu canvas, the smaller menu (75 % in the
 top of rtcsnd): placed from rtcsnd's layout (`impl strong incr`, 99.3 % of
 cells and 97 % of nets kept, 40 minutes; 86,338 LUTs, 43,568 registers) it
 closes with 0.379 ns to spare at 64 MHz and 0.079 ns at the implementation
-target, qnice_clk +0.130 ns, hold +0.036 ns, every clock met. Not on the board
-yet.
+target, qnice_clk +0.130 ns, hold +0.036 ns, every clock met. On the board the
+drive LED follows the disk accesses in Windows 95, and the file browser fits at
+70 Hz; the 75 % menu, though, sat in from the corner and looked soft (fixed for
+the next build: half size, anchored in the corner).
+
+The Amiga mouse's right and middle buttons on a mouSTer's active POT lines
+(`z486-R6-amouse.cor`, d0da0e9, on top of osmled): placed from osmled's layout
+(98.8 % of nets kept, 25 minutes; 86,391 LUTs, 43,622 registers) it closes with
+0.361 ns to spare at 64 MHz and 0.061 ns at the implementation target, hold
++0.036 ns, every clock met. Not on the board yet.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions

@@ -1950,14 +1950,14 @@ begin
    qnice_audio_filter_o       <= '0';
    qnice_zoom_crop_o          <= '0';
    -- The menu's size on HDMI (vga_osm.vhd draws cells of 16 - S pixels for the lowest set bit S,
-   -- sharp bilinear): 75 % in the 640- and 720-pixel modes (480p and native's 400/480-line ones),
-   -- where at full size the file browser filled the picture (2026-11-07); 88 % at 800x600; full
-   -- size in 720p, 1024x768 and 1280x1024
-   qnice_osm_cfg_scaling_o    <= "000010000" when qnice_hdmi_mode = C_VIDEO_HDMI_640_60   or
+   -- kept in the top right corner, M2M-UPSTREAM osm-anchor): half size in the 640- and 720-pixel
+   -- modes (480p and native's 400/480-line ones), where at full size the file browser filled the
+   -- picture: 8-pixel cells, the 8x8 font 1:1 and crisp (75 %, 12-pixel cells, looked soft on
+   -- the board, 2026-11-07); full size (the font doubled) in the others
+   qnice_osm_cfg_scaling_o    <= "100000000" when qnice_hdmi_mode = C_VIDEO_HDMI_640_60   or
                                                   qnice_hdmi_mode = C_VIDEO_HDMI_720_5994 or
                                                   qnice_hdmi_mode = C_VIDEO_VGA_640_70    or
                                                   qnice_hdmi_mode = C_VIDEO_VGA_720_70    else
-                                 "000000100" when qnice_hdmi_mode = C_VIDEO_SVGA_800_60   else
                                  "000000001";
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
    -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])

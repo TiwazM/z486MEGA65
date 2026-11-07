@@ -118,8 +118,8 @@ architecture synthesis of vga_osm is
       vga_osm_x2           : integer range 0 to 127;
       vga_osm_y1           : integer range 0 to 127;
       vga_osm_y2           : integer range 0 to 127;
-      vga_pivot_x          : integer range 0 to 2047;
-      vga_pivot_y          : integer range 0 to 2047;
+      vga_pivot_x          : integer range 0 to 4095;
+      vga_pivot_y          : integer range 0 to 4095;
       vga_delta_x_negative  : std_logic;
       vga_delta_y_negative  : std_logic;
       vga_delta_x_magnitude : integer range 0 to 2047;
@@ -306,8 +306,8 @@ begin
       variable vga_osm_y  : integer range 0 to 127;
       variable vga_osm_dx : integer range 0 to 127;
       variable vga_osm_dy : integer range 0 to 127;
-      variable pivot_x    : integer range 0 to 2047;
-      variable pivot_y    : integer range 0 to 2047;
+      variable pivot_x    : integer range 0 to 4095;
+      variable pivot_y    : integer range 0 to 4095;
       variable delta_x    : integer range -2047 to 2047;
       variable delta_y    : integer range -2047 to 2047;
    begin
@@ -316,8 +316,12 @@ begin
          vga_osm_y  := to_integer(vga_osm_cfg_xy_i(7 downto 0));
          vga_osm_dx := to_integer(vga_osm_cfg_dxdy_i(15 downto 8));
          vga_osm_dy := to_integer(vga_osm_cfg_dxdy_i(7 downto 0));
-         pivot_x    := vga_osm_dx * G_FONT_DX / 2;
-         pivot_y    := vga_osm_dy * G_FONT_DY / 2;
+         -- M2M-UPSTREAM osm-anchor (z486 for MEGA65, 2026-11-07): scaled about the window's
+         -- top right corner, which stays where it is: a menu at the canvas's right edge, as
+         -- z486's, stays in the picture's corner (scaled about (dx/2, dy/2) from the canvas's
+         -- origin it moved in and down). Full size (scaling 0) maps 1:1 whatever the pivot.
+         pivot_x    := (vga_osm_x + vga_osm_dx) * G_FONT_DX;
+         pivot_y    := vga_osm_y * G_FONT_DY;
          delta_x    := vga_col_i - pivot_x;
          delta_y    := vga_row_i - pivot_y;
 
