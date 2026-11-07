@@ -529,6 +529,7 @@ signal main_nat_slow          : std_logic := '0';     -- this frame is longer th
 signal main_nat_f             : std_logic := '0';     -- the last frame was shorter
 signal qnice_nat_size         : std_logic_vector(24 downto 0);
 signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
+signal qnice_hdmi_mode        : video_mode_type;   -- the HDMI mode (native's or the menu's)
 signal qnice_nat_on           : std_logic := '0';
 signal qnice_nat_w            : natural range 0 to 4095 := 640;
 signal qnice_nat_h            : natural range 0 to 4095 := 480;
@@ -1925,12 +1926,13 @@ begin
                             when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
                          (others => '0');
 
-   qnice_video_mode_o <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+   qnice_hdmi_mode    <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
                          C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
                          C_VIDEO_SVGA_1024_60  when qnice_osm_control_i(C_MENU_HDMI_1024) = '1' else
                          C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_HDMI_800)  = '1' else
                          C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
                          C_VIDEO_HDMI_16_9_60;
+   qnice_video_mode_o <= qnice_hdmi_mode;
 
    qnice_dvi_o                <= '0';         -- HDMI with sound
    qnice_scandoubler_o        <= '0';         -- the PC's VGA is 31 kHz already
@@ -1939,7 +1941,16 @@ begin
    qnice_audio_mute_o         <= '0';
    qnice_audio_filter_o       <= '0';
    qnice_zoom_crop_o          <= '0';
-   qnice_osm_cfg_scaling_o    <= (others => '1');
+   -- The menu's size on HDMI (vga_osm.vhd draws cells of 16 - S pixels for the lowest set bit S,
+   -- sharp bilinear): 75 % in the 640- and 720-pixel modes (480p and native's 400/480-line ones),
+   -- where at full size the file browser filled the picture (2026-11-07); 88 % at 800x600; full
+   -- size in 720p, 1024x768 and 1280x1024
+   qnice_osm_cfg_scaling_o    <= "000010000" when qnice_hdmi_mode = C_VIDEO_HDMI_640_60   or
+                                                  qnice_hdmi_mode = C_VIDEO_HDMI_720_5994 or
+                                                  qnice_hdmi_mode = C_VIDEO_VGA_640_70    or
+                                                  qnice_hdmi_mode = C_VIDEO_VGA_720_70    else
+                                 "000000100" when qnice_hdmi_mode = C_VIDEO_SVGA_800_60   else
+                                 "000000001";
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
    -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
    qnice_ascal_mode_o         <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
