@@ -76,8 +76,12 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     21h and 31h, and pit.v alone (Verilator) reads back the gate, flips refresh
     every 15 us and dips OUT2 for 843 ns: so only SpeedSys's way of reaching the
     port goes wrong. SPEEDSYS.EXE is packed; its loop needs unpacking to read.
-    CACHECHK's "Timer messed up!" may be the same. CACHECHK's clock (26.1 MHz)
-    is a BSR loop: z486 runs BSR/BSF with the 386's bit-by-bit microcode.
+    CACHECHK's "Timer messed up!" may be the same, and Norton System
+    Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
+    2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
+    timer. CACHECHK's clock (26.1 MHz) is a BSR loop: z486 runs BSR/BSF with
+    the 386's bit-by-bit microcode. SI 8.0's CPU index is 121.7 (its 486DX-33
+    71.2, Pentium-66 211.4), the overall index 82.0 with that disk figure.
   - Native mode measures the PC's picture a line short (640x479, 720x399 at
     the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
     screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
