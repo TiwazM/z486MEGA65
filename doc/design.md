@@ -28,13 +28,15 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     Manager it boots to the desktop and uses OAKCDROM/MSCDEX for the CD.
     `pc_cdrom.vhd` answers one of the driver's probes in a way it waits on
     for ever; reproduce with the controller in, then `qmon.py ide 60` and
-    `qmon.py status`. And its High Color (16 bit) mode with the ET4000
-    driver, 800x600, shows the wrong colours (dark blue as dark red, teal as
-    orange-brown, grey as lime; 256 colours look right): the 16-bit format
+    `qmon.py status`. And with the ET4000 driver 256 colours are right up to
+    1024x768, but High Color (16 bit, up to 800x600) and True Color (24 bit,
+    up to 640x480) show the wrong colours (16 bit: dark blue as dark red,
+    teal as orange-brown, grey as lime): the 16-bit format
     the SVGA framebuffer gives the scaler (RGB/BGR, 565/555) does not match
     what the driver writes; red and blue are swapped at least, and teal fits
-    RGB555 read as BGR565, but grey turning lime needs more than a swap. A
-    test image with pure bars and the format word ascal gets will tell.
+    RGB555 read as BGR565, but grey turning lime needs more than a swap
+    (24 bit likewise wrong). A test image with pure bars and the format word
+    ascal gets will tell.
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
