@@ -56,6 +56,31 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     DOOM's demo sounds also feels off (the same with `sbsoft` on and off),
     likewise to compare with DOSBox.
   - CD music while a game loads from the hard disk, not tried on the board.
+  - Chris's 3D Benchmark (Phil's DOS Benchmark Pack, `MARKS/CHRISB/BENCH.EXE`,
+    DJGPP: invalid, zero divide and overflow unmasked) stops with "Floating Point
+    exception at eip=00003df5", the FLD m32 after an FSTP m32 (BENCH.EXE
+    3DD1..3DF5: two products, FSUBP, FSTP m32). In z486's simulation an x87
+    instruction with a memory operand does not take a pending unmasked exception
+    while the x87 is still busy with the one before: it runs, and the exception
+    comes at the next instruction (`z486/tests/programs/x87_pending_direct.asm`:
+    WAIT and the register forms pass, every memory form fails). That explains
+    where it is reported, not what raised it: BENCH.EXE's sequence over 128 value
+    sets (`x87_chris3d.asm`) is bit-exact with no exception, and stores that page
+    fault (`x87_store_page_fault.asm`) restart cleanly. Next: v0.1 against the
+    fpu cores on the board (the bitstreams are kept) to find where it started.
+  - SpeedSys 4.78 stops after its system box, polling port 61h at
+    4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
+    (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
+    still (I/O trace `timer` option, `natdbg`). DEBUG's `o 61 21` / `i 61` give
+    21h and 31h, and pit.v alone (Verilator) reads back the gate, flips refresh
+    every 15 us and dips OUT2 for 843 ns: so only SpeedSys's way of reaching the
+    port goes wrong. SPEEDSYS.EXE is packed; its loop needs unpacking to read.
+    CACHECHK's "Timer messed up!" may be the same. CACHECHK's clock (26.1 MHz)
+    is a BSR loop: z486 runs BSR/BSF with the 386's bit-by-bit microcode.
+  - Native mode measures the PC's picture a line short (640x479, 720x399 at
+    the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
+    screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
+    a wrong size into Windows (rows dropped) until a reset.
 
 ## What the shell does now
 
