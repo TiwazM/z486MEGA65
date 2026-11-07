@@ -239,7 +239,9 @@ kept, 23 minutes; 86,710 LUTs, 43,884 registers) it closes with 0.365 ns to spar
 64 MHz and 0.065 ns at the implementation target, qnice_clk +0.154 ns, hold
 +0.036 ns, every clock met. On the board (2026-11-07) Windows 95 at High Color
 (16 bit), 800x600, has its colours right: the teal desktop, navy title bars, yellow
-folders, the palette's rainbow.
+folders, the palette's rainbow; True Color (24 bit), 640x480, too. Display
+Properties' sample bar shows the same stepped two rainbows at 16 and 24 bit (coarser
+at 256 colours): Windows' picture, not the colour depth.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
