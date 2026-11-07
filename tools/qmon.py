@@ -512,7 +512,7 @@ def iotrace(opts):
         timer = "timer" in opts
         poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0) |
              (8 if timer else 0))
-        print("I/O trace started%s%s%s" % (
+        print("I/O trace started%s%s%s%s" % (
             ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
             ", stops when full" if once else "",
             ", without DMA polling" if quiet else "",
