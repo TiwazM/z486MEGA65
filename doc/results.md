@@ -250,6 +250,12 @@ most 12.5; DX2-80s 13.4; DX4-100s 14.7); SpeedSys's VESA memory 20,786 KB/s (its
 Pentium MMX 200 with an S3 ViRGE: 11,289); SpeedSys itself stops after its system
 box, in a loop reading port 61h (the I/O trace's timer option is for that).
 
+Debug readouts (`z486-R6-natdbg.cor`, d255437 and 46be0ff, on top of hicol: native mode's
+measurement in `qmon.py status`, the I/O trace's timer option): placed from hicol's layout
+(98.5 % of nets kept, 30 minutes; 86,785 LUTs, 43,943 registers) it closes with 0.532 ns
+to spare at 64 MHz and 0.232 ns at the implementation target, qnice_clk +0.741 ns,
+hr_rwds +0.066 ns, hold +0.036 ns, every clock met. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
