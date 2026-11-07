@@ -218,6 +218,12 @@ the FIFO lost no release). PIOTEST on the card reformatted with 16 KB clusters:
 REP INSW 3,040 KB/s, IN loop 1,918, REP INSD 3,655, IN check 2,226, 16 MB without
 a wrong byte, as before.
 
+Disk writes in runs (`z486-R6-wrun.cor`, dc297d1, on top of kbd: one CMD25 per IDE
+write command, a four-slot write buffer): placed from kbd's layout (97.7 % of nets
+kept, 25 minutes; 86,700 LUTs, 43,883 registers) it closes with 0.365 ns to spare at
+64 MHz and 0.065 ns at the implementation target, qnice_clk +0.236 ns, hold
++0.036 ns, every clock met. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
