@@ -200,7 +200,8 @@ the implementation target, hold +0.036 ns, every clock met. On the board
 (2026-11-07) it starts the PC, and the menu is right: half size, crisp, in the
 top-right corner. A mouSTer in Amiga mode with `activepotlines=true` is seen
 as an Amiga mouse with both lines driven (SID 0), and its right button works in
-Windows 95. The middle button is not tested (Windows 95 ignores it).
+Windows 95. The middle button is not tested (Windows 95 ignores it). A soft
+reset keeps the time (the RTC is copied into the CMOS again on the reset).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
