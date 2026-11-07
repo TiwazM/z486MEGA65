@@ -228,6 +228,10 @@ slowest 2.8 ms: a command's last sector, which waits for its run to be on the
 card), from 6,135 us with one CMD24 per sector on kbd; five copies of QBASIC.EXE
 compare equal with `fc /b`; PIOTEST's reads as before (REP INSW 3,031 KB/s, REP
 INSD 3,637, 20 MB without a wrong byte).
+Crusader: No Remorse's 55 MB install from the CD: 62,151 sectors written in
+its first 30 MB at 144 us a sector on average (the slowest 35 ms, the card's
+own housekeeping), nothing failed: about 9 seconds of writing where one CMD24
+per sector took about 6 minutes; the install now waits on the CD and the CPU.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
