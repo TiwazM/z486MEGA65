@@ -85,7 +85,9 @@ its data written. Any other request first lets the run write every sector it
 has. A floppy still writes one sector at a time. `tb_ide.sv` checks runs of
 1 to 64 sectors with a slow and a fast card, across two extents, with QNICE
 taking the card and with an SD error in the middle, and a write the PC
-abandons after 3 of 8 sectors: every block reaches the card once.
+abandons after 3 of 8 sectors: every block reaches the card once. On the
+board a write is answered in about 50 us on average instead of 6.1 ms, and
+copies compare equal with `fc /b`.
 
 `tools/qmon.py disks` shows the sector counts, the time per sector and the SD
 transfers (`disks clear` zeroes them, `disks watch 10` counts sectors per

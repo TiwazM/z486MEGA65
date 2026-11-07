@@ -222,7 +222,12 @@ Disk writes in runs (`z486-R6-wrun.cor`, dc297d1, on top of kbd: one CMD25 per I
 write command, a four-slot write buffer): placed from kbd's layout (97.7 % of nets
 kept, 25 minutes; 86,700 LUTs, 43,883 registers) it closes with 0.365 ns to spare at
 64 MHz and 0.065 ns at the implementation target, qnice_clk +0.236 ns, hold
-+0.036 ns, every clock met. Not on the board yet.
++0.036 ns, every clock met. On the board (2026-11-07) it starts the PC; 4,168
+sectors written with nothing failed, a write answered in 51 us on average (the
+slowest 2.8 ms: a command's last sector, which waits for its run to be on the
+card), from 6,135 us with one CMD24 per sector on kbd; five copies of QBASIC.EXE
+compare equal with `fc /b`; PIOTEST's reads as before (REP INSW 3,031 KB/s, REP
+INSD 3,637, 20 MB without a wrong byte).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
