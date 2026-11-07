@@ -279,6 +279,9 @@ begin
       keys(45) <= '1';
       clocks(4 * 80 * G_HOLD);
       clocks(2000);
+      -- while the matrix scan is far from key 45: else its last sample (down) against the
+      -- forced copy (up) is a new press
+      wait until rising_edge(clk) and key_num = 0;
       dut_state <= force (others => '0');
       keys(45) <= '0';
       clocks(4 * 80 * G_HOLD);
