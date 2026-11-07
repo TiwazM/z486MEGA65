@@ -7,9 +7,16 @@
 --
 -- The framework scans the 80 MEGA65 keys (key_num_i runs 0..79 at 1 kHz with
 -- key_pressed_n_i, M2M's numbering as in Megamac's mac_keyboard.vhd). Every change of a mapped
--- key becomes an event in a 32-entry FIFO: a full FIFO drops a press, never a release (a lost
--- release is a key the PC holds down for good); then the release overwrites the newest entry.
--- Each event becomes its scan codes in a 16-byte queue for ps2_device.
+-- key becomes an event in a 32-entry FIFO. A change the full FIFO cannot take stays out of the
+-- module's copy of the matrix too, so the key's next scan sees it again: nothing is lost, it
+-- waits (until 2026-11-07 a full FIFO kept a release by overwriting the newest entry, which lost
+-- another release when that one was a release: tapping Shift+F7 for F8 while the PC did not
+-- read the keyboard left F7 down for good, and with it the PC's Shift held back). Each event
+-- becomes its scan codes in a 16-byte queue for ps2_device.
+-- A sweep, one key per clock, is the safety net: a key this module holds (its make went out,
+-- or it holds the PC's Shift back) that the matrix has up while no event waits gets its
+-- release then. rst_i is the PC's reset too (mega65.vhd): the BIOS sends the keyboard nothing,
+-- so nothing else would ever clear what this module holds.
 --
 -- The keys by their labels: letters and digits as on a PC, the symbols as on the MEGA65's
 -- keycaps (: and Shift+: = [, ; and Shift+; = ], @, *, +, -, =, Shift+2 = ", Shift+6 = &,
@@ -56,7 +63,13 @@ entity pc_keyboard is
       tx_data_o       : out std_logic_vector(7 downto 0);
       tx_ready_i      : in  std_logic;
       rx_valid_i      : in  std_logic;              -- from ps2_device
-      rx_data_i       : in  std_logic_vector(7 downto 0)
+      rx_data_i       : in  std_logic_vector(7 downto 0);
+
+      -- For qmon.py status: 6..0 the key that holds the PC's Shift back (80: none), 7 the matrix
+      -- has that key down, 8/9 the shifts as the key events have them (left, right), 10/11 as
+      -- the PC has them, 12 MEGA, 13 scanning on, 14 a key waits in the event FIFO, 15 '1' (this
+      -- readout is there); 23..16 the releases the sweep sent, 30..24 the last one's key
+      dbg_o           : out std_logic_vector(31 downto 0)
    );
 end entity pc_keyboard;
 
@@ -243,6 +256,15 @@ architecture synthesis of pc_keyboard is
    signal supp       : integer range 0 to 80 := 80;   -- the key that holds the shifts back; 80 none
    signal key_var    : t_var := (others => V_NONE);
 
+   -- The sweep: sw_hit = key sw_num is held here and up in the matrix (a clock old)
+   signal sw_k       : integer range 0 to 79 := 0;
+   signal sw_num     : integer range 0 to 79 := 0;
+   signal sw_hit     : std_logic := '0';
+   signal heals      : unsigned(7 downto 0) := (others => '0');
+   signal heal_last  : integer range 0 to 79 := 0;
+   signal supp_down  : std_logic := '0';
+   signal ev_wait    : std_logic;
+
    -- Typematic: 240 Hz ticks
    constant C_TICK   : natural := G_CLK_HZ / 240;
    signal tick_cnt   : natural range 0 to C_TICK - 1 := 0;
@@ -269,6 +291,11 @@ begin
    tx_valid_o <= '1' when q_cnt /= 0 else '0';
    tx_data_o  <= q(to_integer(q_rd));
 
+   ev_wait <= '1' when ev_cnt /= 0 else '0';
+   dbg_o <= '0' & std_logic_vector(to_unsigned(heal_last, 7)) & std_logic_vector(heals) &
+            '1' & ev_wait & scan_en & phys_mega & sent_r & sent_l &
+            phys_r & phys_l & supp_down & std_logic_vector(to_unsigned(supp, 7));
+
    ---------------------------------------------------------------------------------------------
    -- The matrix: one event per change of a key that does something
    ---------------------------------------------------------------------------------------------
@@ -281,14 +308,15 @@ begin
          num_q     <= key_num_i;
          pressed_q <= not key_pressed_n_i;
          if pressed_q /= state(num_q) and (C_BASE(num_q) /= C_NONE or num_q = K_MEGA) then
+            -- a change the full FIFO cannot take waits for the key's next scan
             if ev_cnt /= 32 then
                ev_fifo(to_integer(ev_wr)) <= pressed_q & std_logic_vector(to_unsigned(num_q, 7));
                v_push := '1';
-            elsif pressed_q = '0' then
-               ev_fifo(to_integer(ev_wr - 1)) <= '0' & std_logic_vector(to_unsigned(num_q, 7));
+               state(num_q) <= pressed_q;
             end if;
+         else
+            state(num_q) <= pressed_q;
          end if;
-         state(num_q) <= pressed_q;
          if v_push = '1' then
             ev_wr <= ev_wr + 1;
          end if;
@@ -354,6 +382,27 @@ begin
          v_pop      := false;
          v_defaults := false;
          ev_pop     <= '0';
+
+         -- The sweep: is key sw_k held here (its make went out, it holds the PC's Shift back,
+         -- a shift or MEGA as the events had it) while the matrix has it up?
+         if sw_k = 79 then
+            sw_k <= 0;
+         else
+            sw_k <= sw_k + 1;
+         end if;
+         sw_num <= sw_k;
+         if state(sw_k) = '0' and (key_var(sw_k) /= V_NONE or supp = sw_k or
+               (sw_k = K_LSHIFT and phys_l = '1') or (sw_k = K_RSHIFT and phys_r = '1') or
+               (sw_k = K_MEGA and phys_mega = '1')) then
+            sw_hit <= '1';
+         else
+            sw_hit <= '0';
+         end if;
+         if supp = 80 then
+            supp_down <= '0';
+         else
+            supp_down <= state(supp);
+         end if;
 
          -- The 240 Hz tick: typematic delay and period
          if tick_cnt = C_TICK - 1 then
@@ -433,11 +482,19 @@ begin
                rep_due   <= '0';
             end if;
 
-         elsif ev_cnt /= 0 and ev_pop = '0' and q_cnt <= 8 then
-            -- A key event (ev_pop = '0': the FIFO's count is a cycle behind a pop)
-            v_ev  := ev_fifo(to_integer(ev_rd));
+         elsif (ev_cnt /= 0 or sw_hit = '1') and ev_pop = '0' and q_cnt <= 8 then
+            -- A key event (ev_pop = '0': the FIFO's count is a cycle behind a pop), or with no
+            -- event waiting, the release of a key the sweep found up (sw_hit is a clock old:
+            -- a press since then is an event, and an event taken since then sets ev_pop)
+            if ev_cnt /= 0 then
+               v_ev   := ev_fifo(to_integer(ev_rd));
+               ev_pop <= '1';
+            else
+               v_ev      := '0' & std_logic_vector(to_unsigned(sw_num, 7));
+               heals     <= heals + 1;
+               heal_last <= sw_num;
+            end if;
             v_num := to_integer(unsigned(v_ev(6 downto 0)));
-            ev_pop <= '1';
             if v_num = K_LSHIFT or v_num = K_RSHIFT then
                if v_num = K_LSHIFT then
                   phys_l <= v_ev(7);

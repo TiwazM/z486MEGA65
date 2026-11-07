@@ -545,6 +545,7 @@ signal main_kbd_tx_data       : std_logic_vector(7 downto 0);
 signal main_kbd_tx_ready      : std_logic;
 signal main_kbd_rx_valid      : std_logic;
 signal main_kbd_rx_data       : std_logic_vector(7 downto 0);
+signal main_dbg_kbd           : std_logic_vector(31 downto 0);   -- pc_keyboard.vhd's readout
 signal main_kbd_dev_clk       : std_logic;     -- the keyboard's lines
 signal main_kbd_dev_dat       : std_logic;
 signal main_kbd_host_clk      : std_logic;     -- the 8042's lines
@@ -1142,22 +1143,24 @@ begin
          dst_data_o => qnice_cd_stat
       ); -- i_cdc_cd_stat
 
-   -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
-   -- is not: the BIOS resets it with command FF.
+   -- The MEGA65 keyboard as the PC's PS/2 keyboard, reset with the PC: the BIOS sends the
+   -- keyboard nothing (no FF reset; the log of a whole boot, 2026-11-07), so a key this module
+   -- held for good would otherwise have stayed held until the core was loaded again.
    i_pc_keyboard : entity work.pc_keyboard
       generic map (
          G_CLK_HZ        => CORE_CLK_SPEED
       )
       port map (
          clk_i           => main_clk,
-         rst_i           => main_rst,
+         rst_i           => main_pc_reset,
          key_num_i       => main_kb_key_num_i,
          key_pressed_n_i => main_kb_key_pressed_n_i,
          tx_valid_o      => main_kbd_tx_valid,
          tx_data_o       => main_kbd_tx_data,
          tx_ready_i      => main_kbd_tx_ready,
          rx_valid_i      => main_kbd_rx_valid,
-         rx_data_i       => main_kbd_rx_data
+         rx_data_i       => main_kbd_rx_data,
+         dbg_o           => main_dbg_kbd
       ); -- i_pc_keyboard
 
    i_ps2_keyboard : entity work.ps2_device
@@ -1308,8 +1311,9 @@ begin
             -- the PICs and the 8042 (z486_sources.py): master ISR:IRR, slave ISR:IRR, slave
             -- IMR:master IMR, the IRQ lines, the 8042's state and FIFOs, the INTAs the PIC
             -- acknowledged with another vector than the CPU took, the last one's two vectors;
-            -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd)
-            main_dbg_snap2 <= x"0000" & x"0000" & x"0000" & x"0000" & x"0000" &
+            -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd);
+            -- the keyboard translator's state (pc_keyboard.vhd, words 12:11)
+            main_dbg_snap2 <= x"0000" & x"0000" & x"0000" & main_dbg_kbd &
                               x"000" & "000" & main_c1351 &
                               main_pot2_y_i & main_pot2_x_i & main_pot1_y_i & main_pot1_x_i &
                               main_dbg_inta_last & main_dbg_inta_bad &

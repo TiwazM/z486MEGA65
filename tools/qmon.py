@@ -583,6 +583,43 @@ def joy_watch(secs):
             last = j
 
 
+# the MEGA65's keys by M2M's numbers (pc_keyboard.vhd), for kbd_line
+KEY_NAMES = {0: "INST/DEL", 1: "RETURN", 2: "cursor right", 3: "F7", 4: "F1", 5: "F3", 6: "F5",
+             7: "cursor down", 15: "left Shift", 40: "+", 43: "-", 45: ":", 46: "@", 48: "GBP",
+             49: "*", 50: ";", 51: "CLR/HOME", 52: "right Shift", 53: "=", 54: "arrow up",
+             57: "arrow left", 58: "CTRL", 60: "SPACE", 61: "MEGA", 63: "RUN/STOP",
+             64: "NO SCROLL", 65: "TAB", 66: "ALT", 67: "HELP", 68: "F9", 69: "F11", 70: "F13",
+             71: "ESC", 72: "CAPS LOCK", 73: "cursor up", 74: "cursor left", 75: "RESTORE"}
+
+
+def key_name(n):
+    return KEY_NAMES.get(n, "key %d" % n)
+
+
+def kbd_line():
+    # the keyboard translator (pc_keyboard.vhd dbg_o, snapshot words 0x803C:0x803B): the key that
+    # holds the PC's Shift back (a key whose release went missing held it for good, 2026-11-07),
+    # and the releases its sweep had to send itself
+    w = dump(0x803B, 0x803C)
+    if None in w:
+        return "keyboard: ?"
+    lo, hi = w
+    if not lo & 0x8000:
+        return "keyboard: this core has no translator readout"
+    supp = lo & 0x7F
+    held = ("Shift held back while %s is down (%s)" %
+            (key_name(supp), "the keyboard has it down" if lo & 0x80 else
+             "the keyboard has it UP: stuck") if supp != 80 else "no Shift held back")
+    shifts = "Shift: keys %s%s, the PC has %s%s" % (
+        "L" if lo & 0x100 else "-", "R" if lo & 0x200 else "-",
+        "L" if lo & 0x400 else "-", "R" if lo & 0x800 else "-")
+    heals = hi & 0xFF
+    return ("keyboard: %s; %s%s%s%s; releases the sweep sent: %d%s" %
+            (held, shifts, ", MEGA down" if lo & 0x1000 else "",
+             "" if lo & 0x2000 else ", scanning off (F5)", ", events waiting" if lo & 0x4000 else "",
+             heals, " (the last: %s)" % key_name(hi >> 8 & 0x7F) if heals else ""))
+
+
 def mouse_line():
     # port 1's mouse (pc_mouse.vhd): Amiga or 1351, and both ports' paddle lines as SID values
     # (the framework hands them over inverted: an open line reads 255 here). POT X is pin 9: a
@@ -655,6 +692,7 @@ def pic_8042():
     out.append("INTAs the PIC acknowledged with another vector than the CPU took: %d%s" %
                (w[6], "  (the last: CPU %02Xh, PIC %02Xh)" % (w[7] >> 8, w[7] & 0xFF) if w[6] else ""))
     out.append(mouse_line())
+    out.append(kbd_line())
     return "\n".join(out)
 
 

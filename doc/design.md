@@ -372,3 +372,22 @@ comes while nobody reads port 60h. `tools/z486_sources.py` patches `pic.v`:
 after ICW1 an input that is already high counts as a new edge, so it is
 served once (the same for the mouse's IRQ12). `tb_pic.sv` replays the race;
 upstream's `pic.v` fails it.
+
+## Shift lost for good (2026-11-07)
+
+After tapping Shift+F7 (F8) at "Starting Windows 95…", Shift did nothing any
+more, `:` came out as `;` and `*` as `8`, in DOS and Windows, across resets,
+until F7 was pressed on its own. For F8 `pc_keyboard.vhd` releases the PC's
+Shift and holds it back until F7 comes up; F7's release never arrived. Its
+32-entry event FIFO waits while the PC does not take bytes (the 8042's FIFO
+full at 60, typematic F8s filling it). When the FIFO was full, a release
+overwrote the newest entry, so that entry's release was lost whenever it was
+one. And nothing cleared it: the module is not reset with the PC, and the BIOS
+sends the keyboard no command at all (the log of a whole boot). Now a change
+the full FIFO cannot take stays out of the module's matrix copy and is seen at
+the key's next scan; a sweep releases any key the module holds that the matrix
+has up while no event waits; the module is reset with the PC; and `qmon.py
+status` shows the key that holds Shift back and the sweep's releases.
+`CORE/sim/run_kbd_stress.sh` (nvc) plays random presses of the keys that move
+Shift while the PC stops reading; with long stops the old code failed half of
+10 seeds (keys the PC kept down, `:` without Shift, Shift+A as `a`).
