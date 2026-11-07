@@ -211,7 +211,12 @@ the event FIFO is full, the sweep, the translator reset with the PC, its state i
 86,106 LUTs, 43,737 registers) it closes with 0.400 ns to spare at 64 MHz and
 0.100 ns at the implementation target, qnice_clk +0.138 ns, hold +0.036 ns, every
 clock met. On the board (2026-11-07) it starts the PC, and `qmon.py status` shows
-the keyboard line (no Shift held back, no sweep releases).
+the keyboard line (no Shift held back, no sweep releases). Shift+F7 (F8) at
+Windows 95's start brings up its startup menu, and afterwards Shift, `:` and
+the other added Shifts still work (no Shift held back, the sweep sent nothing:
+the FIFO lost no release). PIOTEST on the card reformatted with 16 KB clusters:
+REP INSW 3,040 KB/s, IN loop 1,918, REP INSD 3,655, IN check 2,226, 16 MB without
+a wrong byte, as before.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
