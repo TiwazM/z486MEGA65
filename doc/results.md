@@ -172,7 +172,9 @@ kept, 42 minutes; 86,272 LUTs, 43,554 registers, 253 block RAM tiles, 66 DSPs)
 it closes with 0.473 ns to spare at 64 MHz and 0.173 ns at the implementation
 target, hold +0.036 ns, every clock met. qnice_clk is down to +0.128 ns (from
 +0.649), on QNICE's device reads into its CPU (one more register source).
-Not on the board yet.
+On the board it boots and reads the clock right after the load; its drive LED
+stays amber (it took the SD request toggle for a level; fixed in the source,
+for the next build).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions

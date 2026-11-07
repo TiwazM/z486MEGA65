@@ -379,6 +379,7 @@ signal main_pc_reset          : std_logic;
 signal main_pc_reset_d        : std_logic := '0';
 signal main_led_hd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;   -- drive LED hold
 signal main_led_fd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;
+signal main_led_req_d         : std_logic := '0';                  -- main_disk_req a clock ago
 signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS time again
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
@@ -901,17 +902,20 @@ begin
    -- amber while the hard disk or the CD-ROM drive has a command or a block in hand (ide.v asks
    -- pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), green for the floppy
    -- drives (the floppy wins when both). Each access keeps it lit for 40 ms at least, so that a
-   -- one-sector access still shows.
+   -- one-sector access still shows. main_disk_req is a toggle (one change per request,
+   -- pc_mgmt.vhd), not a level: its changes count (rtcsnd took the level, and an odd count of
+   -- requests left the LED on for good).
    p_main_drive_led : process (main_clk)
       constant C_HOLD : natural := CORE_CLK_SPEED / 25;      -- 40 ms
       variable v_hd   : boolean;
       variable v_fd   : boolean;
    begin
       if rising_edge(main_clk) then
+         main_led_req_d <= main_disk_req;
          v_hd := main_ide0_request /= "000" or main_ide1_request /= "000" or
-                 (main_disk_req = '1' and main_disk_req_unit(1) = '1');      -- units 2, 3
+                 (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '1');  -- units 2, 3
          v_fd := main_fdd_request /= "00" or
-                 (main_disk_req = '1' and main_disk_req_unit(1) = '0');      -- units 0, 1
+                 (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '0');  -- units 0, 1
          if v_hd then
             main_led_hd <= C_HOLD;
          elsif main_led_hd /= 0 then
