@@ -66,8 +66,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     WAIT and the register forms pass, every memory form fails). That explains
     where it is reported, not what raised it: BENCH.EXE's sequence over 128 value
     sets (`x87_chris3d.asm`) is bit-exact with no exception, and stores that page
-    fault (`x87_store_page_fault.asm`) restart cleanly. Next: v0.1 against the
-    fpu cores on the board (the bitstreams are kept) to find where it started.
+    fault (`x87_store_page_fault.asm`) restart cleanly. v0.1-preview stops the
+    same way (the same EIP and registers, 2026-11-07): older than this round's
+    x87 work, so a bisect over the fpu cores would find nothing.
   - SpeedSys 4.78 stops after its system box, polling port 61h at
     4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
     (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
