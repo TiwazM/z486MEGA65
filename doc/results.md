@@ -198,7 +198,9 @@ placed from amouse's layout (97.8 % of nets kept, 25 minutes; 86,463 LUTs,
 43,665 registers) it closes with 0.393 ns to spare at 64 MHz and 0.093 ns at
 the implementation target, hold +0.036 ns, every clock met. On the board
 (2026-11-07) it starts the PC, and the menu is right: half size, crisp, in the
-top-right corner. The mouSTer's Amiga buttons are not tested yet.
+top-right corner. A mouSTer in Amiga mode with `activepotlines=true` is seen
+as an Amiga mouse with both lines driven (SID 0), and its right button works in
+Windows 95. The middle button is not tested (Windows 95 ignores it).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
