@@ -237,7 +237,9 @@ HiColor and TrueColor in a PC's pixel order (`z486-R6-hicol.cor`, 5fc2e68, on to
 wrun: the framebuffer format BGR, 1555): placed from wrun's layout (99.98 % of nets
 kept, 23 minutes; 86,710 LUTs, 43,884 registers) it closes with 0.365 ns to spare at
 64 MHz and 0.065 ns at the implementation target, qnice_clk +0.154 ns, hold
-+0.036 ns, every clock met. Not on the board yet.
++0.036 ns, every clock met. On the board (2026-11-07) Windows 95 at High Color
+(16 bit), 800x600, has its colours right: the teal desktop, navy title bars, yellow
+folders, the palette's rainbow.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions

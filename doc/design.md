@@ -36,7 +36,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     bits, red in the top; 24 bit blue, green, red in memory) and 1555 (a
     Sierra HiColor DAC's 32K colours). ascal's decode with the old bits gives
     exactly those colours; `z486_mega65.sv` now sets BGR and 1555, as
-    z486_mister.sv's menu defaults to. z486's VGA does not emulate the DAC's
+    z486_mister.sv's menu defaults to, and Windows 95's High Color is right
+    on the board (`z486-R6-hicol`). z486's VGA does not emulate the DAC's
     hidden register that picks 555 or 565, so a program that wants 64K colours
     (565) would show slightly wrong greens; MiSTer has a menu option for it.
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
