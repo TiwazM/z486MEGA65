@@ -81,7 +81,13 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   - Native mode measures the PC's picture a line short (640x479, 720x399 at
     the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
     screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
-    a wrong size into Windows (rows dropped) until a reset.
+    a wrong size into Windows (rows dropped) until a reset. After v0.2: first
+    in simulation, native's count against the lines and pixels ascal takes in
+    (p_main_native counts a line where its display enable ends), then the fix.
+  - After v0.2, in this order: native's measurement (above); the x87's
+    memory forms taking a pending exception, then what raises Chris's 3D
+    Benchmark's ([CPU](cpu.md) 6); SpeedSys's port 61h loop (unpack it
+    first); BSF/BSR in a clock or two ([CPU](cpu.md) 5).
 
 ## What the shell does now
 
