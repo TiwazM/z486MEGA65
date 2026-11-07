@@ -664,7 +664,11 @@ assign video_ce = core_ce_pixel;
 // ------------------------------------------------------------------------------------------
 // SVGA framebuffer descriptor (z486_mister.sv, MISTER_FB): ET4000 linear hi-colour modes set
 // vga_flags[1:0] != 0 with PELWIDTH (vga_flags[2]) = 0; the scaler then reads the pixels from
-// the framebuffer instead of the VGA stream. Format bits 4:3 as ao486's defaults (RGB, 565).
+// the framebuffer instead of the VGA stream. Format bits 4:3 = BGR, 1555: a PC's pixel order
+// (a 16-bit word's blue in bits 4..0, red in the top; 24 bit blue, green, red in memory) and
+// 32K colours, what z486_mister.sv's menu defaults to ({~status[5], ~status[6]}, both 0).
+// Until 2026-11-07 RGB and 565 here: Windows 95's High Color showed dark blue as dark red,
+// teal as orange-brown, white as pale yellow-green, and True Color had red and blue swapped.
 // ------------------------------------------------------------------------------------------
 
 always @(posedge clk_sys) begin
@@ -676,7 +680,7 @@ always @(posedge clk_sys) begin
     fb_height      <= vga_flags[3] ? {2'b0, vga_height[10:1]} : {1'b0, vga_height};
     fb_format[2:0] <= (vga_flags[1:0] == 2'd3) ? 3'b101 :
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
-    fb_format[4:3] <= 2'b00;
+    fb_format[4:3] <= 2'b11;
 end
 
 assign fb_pal_a  = vga_pal_a;

@@ -29,14 +29,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     `pc_cdrom.vhd` answers one of the driver's probes in a way it waits on
     for ever; reproduce with the controller in, then `qmon.py ide 60` and
     `qmon.py status`. And with the ET4000 driver 256 colours are right up to
-    1024x768, but High Color (16 bit, up to 800x600) and True Color (24 bit,
-    up to 640x480) show the wrong colours (16 bit: dark blue as dark red,
-    teal as orange-brown, grey as lime): the 16-bit format
-    the SVGA framebuffer gives the scaler (RGB/BGR, 565/555) does not match
-    what the driver writes; red and blue are swapped at least, and teal fits
-    RGB555 read as BGR565, but grey turning lime needs more than a swap
-    (24 bit likewise wrong). A test image with pure bars and the format word
-    ascal gets will tell.
+    1024x768; High Color (16 bit, up to 800x600) and True Color (24 bit, up
+    to 640x480) showed the wrong colours (dark blue as dark red, teal as
+    orange-brown, white as pale yellow-green). The framebuffer's format bits
+    told the scaler RGB and 565, where a PC's pixel is BGR (blue in the low
+    bits, red in the top; 24 bit blue, green, red in memory) and 1555 (a
+    Sierra HiColor DAC's 32K colours). ascal's decode with the old bits gives
+    exactly those colours; `z486_mega65.sv` now sets BGR and 1555, as
+    z486_mister.sv's menu defaults to. z486's VGA does not emulate the DAC's
+    hidden register that picks 555 or 565, so a program that wants 64K colours
+    (565) would show slightly wrong greens; MiSTer has a menu option for it.
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
