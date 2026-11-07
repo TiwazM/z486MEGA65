@@ -345,9 +345,10 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   again every 20 ms, and after 100 (2 s) it starts from 2000-01-01
   (M2M-UPSTREAM rtc-verify; `CORE/sim/run_rtc_master.sh` feeds it that junk).
 - Drive LED (`mega65.vhd`): the PC's disk accesses, as a case LED shows a
-  drive's activity line, in Megamiga's colours: red while the hard disk or the
-  CD-ROM drive has a command or a block in hand, yellow for the floppies,
-  orange for both, at least 40 ms each.
+  drive's activity line, in Megamiga's colours: red while the hard disk has a
+  command or a block in hand, yellow for the floppies, green for the CD-ROM
+  drive (its commands, and the disc image's reads, CD audio too), orange for
+  two or more at once, at least 40 ms each.
 - Drive sounds (`fdd_sound.vhd`): the MEGA65's internal floppy drive follows
   the PC's floppy drives, which are images on the SD card. `floppy.v` (a patch
   in `tools/z486_sources.py`) says which drive is selected, whose motor is on

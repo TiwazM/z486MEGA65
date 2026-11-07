@@ -63,7 +63,8 @@ The current version is **v0.1-preview** (see
 - The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
   from the MEGA65's again
 - The drive LED shows the PC's disk accesses, in Megamiga's colours: red for
-  the hard disk and the CD-ROM, yellow for the floppies, orange for both
+  the hard disk, yellow for the floppies, and green for the CD-ROM (CD audio
+  too); orange for two or more at once
 - Drive sounds: the MEGA65's own floppy drive hums and clicks with the PC's
   floppy drives (their images on the SD card). Its motor runs while the PC's
   does and its head steps to the cylinder the PC's is on. With a disk in it,
