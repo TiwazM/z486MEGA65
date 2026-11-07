@@ -61,7 +61,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     MiSTer too; MiSTer has "Count" modes for that).
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
-    taking interrupts; where it is then is not known.
+    taking interrupts; where it is then is not known. With the Pro option
+    some sound effects may not play (not certain: to compare with DOSBox
+    first; then `qmon.py iotrace start quiet` while one should play).
   - CD music while a game loads from the hard disk, not tried on the board.
 
 ## What the shell does now

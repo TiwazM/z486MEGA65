@@ -26,9 +26,11 @@
 #                             DMA requests' long waits and the DMA commands its DSP held back,
 #                             with microseconds, and its samples' big jumps; stops it first
 #                             ("peek": reads it running)
-#   qmon.py iotrace start [freeze] [once]
+#   qmon.py iotrace start [freeze] [once] [quiet]
 #                             start it again (empty); "freeze": stop at the card's first 1 ms
-#                             wait; "once": stop when full (the first 1024 entries)
+#                             wait; "once": stop when full (the first 1024 entries); "quiet":
+#                             leave out DMA flip-flop clears and status reads (a driver polling
+#                             its position fills the trace with them in a tenth of a second)
 #   qmon.py iotrace jump [N]  the smallest sample jump it logs, N/256 of the full range
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
@@ -486,11 +488,12 @@ def iotrace(opts):
               ("?" if v is None else v & 0xFF))
         return
     if opts[:1] in (["start"], ["freeze"]):
-        freeze, once = "freeze" in opts, "once" in opts
-        poke(0x8004, (1 if freeze else 0) | (2 if once else 0))
-        print("I/O trace started%s%s" % (
+        freeze, once, quiet = "freeze" in opts, "once" in opts, "quiet" in opts
+        poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0))
+        print("I/O trace started%s%s%s" % (
             ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
-            ", stops when full" if once else ""))
+            ", stops when full" if once else "",
+            ", without DMA polling" if quiet else ""))
         return
     if opts[:1] != ["peek"]:
         poke(0x8005, 0)                    # stop it: a running trace changes while it is read

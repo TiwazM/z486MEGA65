@@ -473,11 +473,13 @@ signal main_iot_owhy          : std_logic_vector(1 downto 0) := (others => '0');
 -- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range), 20: the
 -- PIC's vector hold from the first INTA off (pic_inta_bridge.sv's vector_hold), 22..21: a 1351
 -- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x),
--- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft)
-signal main_iot_arm           : std_logic_vector(24 downto 0);
-signal main_iot_arm_d         : std_logic_vector(24 downto 0) := (others => '0');
+-- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft), 25: the trace
+-- quiet: no DMA flip-flop clears (0Ch, D8h) or DMA status reads (08h, D0h), which a driver
+-- polling its position writes and reads every few hundred microseconds
+signal main_iot_arm           : std_logic_vector(25 downto 0);
+signal main_iot_arm_d         : std_logic_vector(25 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(24 downto 0) := '0' & x"040000";
+signal qnice_iot_arm          : std_logic_vector(25 downto 0) := "00" & x"040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -1496,12 +1498,16 @@ begin
          if main_iot_run = '1' and (main_iot_arm(11) = '0' or main_iot_cnt < 1023 or
                                     (main_iot_cnt = 1023 and main_iot_we = '0')) then
             if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8)) or
-               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) then
+               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) and
+               not (main_iot_arm(25) = '1' and (main_dbg_io_wr(23 downto 8) = x"000C" or
+                                                main_dbg_io_wr(23 downto 8) = x"00D8")) then
                main_iot_entry <= std_logic_vector(main_iot_us) & main_dbg_io_wr(23 downto 8) &
                                  "000" & "00000" & main_dbg_io_wr(7 downto 0);
                main_iot_we    <= '1';
             elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8)) and
-                  main_dbg_io_rd /= main_iot_last_rd then
+                  main_dbg_io_rd /= main_iot_last_rd and
+                  not (main_iot_arm(25) = '1' and (main_dbg_io_rd(23 downto 8) = x"0008" or
+                                                   main_dbg_io_rd(23 downto 8) = x"00D0")) then
                main_iot_entry  <= std_logic_vector(main_iot_us) & main_dbg_io_rd(23 downto 8) &
                                   "001" & "00000" & main_dbg_io_rd(7 downto 0);
                main_iot_we     <= '1';
@@ -1594,7 +1600,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 25,
+         G_DATA_SIZE    => 26,
          G_REGISTER_SRC => false
       )
       port map (
@@ -1979,7 +1985,8 @@ begin
    --                access goes uncached; back on, reset the PC: lines may be stale)
    --    0x0004      read: the I/O trace's entries written (p_main_iot); write: start it again
    --                (empty, running; bit 0 = stop at the Sound Blaster's first 1 ms DMA wait,
-   --                bit 1 = stop when full)
+   --                bit 1 = stop when full, bit 2 = quiet: no DMA flip-flop clears or status
+   --                reads, a polling driver's)
    --    0x0005      read: bit 1 = it is running, bit 0 = it has wrapped (1024 or more);
    --                write: stop it
    --    0x0006      bit 0 = the Sound Blaster takes a new DMA command over a stalled transfer
@@ -2033,6 +2040,7 @@ begin
                qnice_iot_arm(9 downto 0) <= '0' & qnice_dev_data_i(0) &
                                             std_logic_vector(unsigned(qnice_iot_arm(7 downto 0)) + 1);
                qnice_iot_arm(11) <= qnice_dev_data_i(1);
+               qnice_iot_arm(25) <= qnice_dev_data_i(2);
             elsif qnice_dev_addr_i = x"0000005" then
                qnice_iot_arm(9) <= '1';
             elsif qnice_dev_addr_i = x"0000006" then
