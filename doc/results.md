@@ -192,6 +192,13 @@ The Amiga mouse's right and middle buttons on a mouSTer's active POT lines
 0.361 ns to spare at 64 MHz and 0.061 ns at the implementation target, hold
 +0.036 ns, every clock met. Not on the board yet.
 
+The menu at half size in the 640/720 modes, kept in the top right corner
+(`z486-R6-osm50.cor`, 39ad0f7, on top of amouse, so with its mouse buttons):
+placed from amouse's layout (97.8 % of nets kept, 25 minutes; 86,463 LUTs,
+43,665 registers) it closes with 0.393 ns to spare at 64 MHz and 0.093 ns at
+the implementation target, hold +0.036 ns, every clock met. Not on the board
+yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
