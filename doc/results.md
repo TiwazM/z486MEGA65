@@ -202,6 +202,8 @@ top-right corner. A mouSTer in Amiga mode with `activepotlines=true` is seen
 as an Amiga mouse with both lines driven (SID 0), and its right button works in
 Windows 95. The middle button is not tested (Windows 95 ignores it). A soft
 reset keeps the time (the RTC is copied into the CMOS again on the reset).
+Switching the mouSTer between Amiga and 1351 mode while Windows 3.11 runs
+works both ways (pointer and buttons).
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
