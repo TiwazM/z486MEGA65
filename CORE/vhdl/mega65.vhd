@@ -138,6 +138,10 @@ port (
    fb_pal_a_o              : out std_logic_vector( 7 downto 0);
    fb_pal_dw_o             : out std_logic_vector(23 downto 0);
    fb_pal_wr_o             : out std_logic;
+   -- M2M-UPSTREAM scaler-16bpp: the scaler keeps the core picture at 16bpp 565 instead of
+   -- 24bpp (z486_mega65.sv: pictures wider than 720 pixels, for the HyperRAM's bandwidth).
+   -- Core clock domain (= the video clock), slowly changing.
+   video_16bpp_o           : out std_logic;
    fb_pal_dr_i             : in  std_logic_vector(23 downto 0) := (others => '0');
 
    --------------------------------------------------------------------------------------------------------
@@ -664,6 +668,7 @@ component z486_mega65 is
       fb_pal_a           : out   std_logic_vector(7 downto 0);
       fb_pal_d           : out   std_logic_vector(23 downto 0);
       fb_pal_wr          : out   std_logic;
+      scaler_16bpp       : out   std_logic;
       ddram_busy         : in    std_logic;
       ddram_burstcnt     : out   std_logic_vector(7 downto 0);
       ddram_addr         : out   std_logic_vector(28 downto 0);
@@ -964,6 +969,7 @@ begin
          fb_pal_a           => fb_pal_a_o,
          fb_pal_d           => fb_pal_dw_o,
          fb_pal_wr          => fb_pal_wr_o,
+         scaler_16bpp       => video_16bpp_o,
 
          ddram_busy         => main_ddram_busy,
          ddram_burstcnt     => main_ddram_burstcnt,

@@ -62,6 +62,10 @@ entity digital_pipeline is
       fb_pal_dw_i             : in  std_logic_vector(23 downto 0) := (others => '0');  -- R G B
       fb_pal_wr_i             : in  std_logic := '0';
       fb_pal_dr_o             : out std_logic_vector(23 downto 0);
+      -- M2M-UPSTREAM scaler-16bpp (z486 for MEGA65, 2026-11-07): '1' = ascal keeps the core
+      -- picture at 16bpp 565 (format "00") instead of 24bpp: 2/3 of the HyperRAM traffic.
+      -- Needs ascal's 16bpp-eol fix. Core clock domain; ascal samples it asynchronously.
+      video_16bpp_i           : in  std_logic := '0';
       audio_clk_i              : in  std_logic;  -- 12.288 MHz
       audio_rst_i              : in  std_logic;
       audio_left_i             : in  signed(15 downto 0); -- Signed PCM format
@@ -239,7 +243,12 @@ architecture synthesis of digital_pipeline is
    signal hr_wide_readdatavalid  : std_logic;
    signal hr_wide_waitrequest    : std_logic;
 
+   signal ascal_format           : unsigned(1 downto 0);  -- M2M-UPSTREAM scaler-16bpp
+
 begin
+
+   -- M2M-UPSTREAM scaler-16bpp: "00" 16bpp 565, "01" 24bpp (the original, fixed)
+   ascal_format <= "00" when video_16bpp_i = '1' else "01";
 
    -- SYS_DXDY
    sys_info_hdmi_o(15 downto 0) <=
@@ -576,7 +585,8 @@ begin
          vmax              => hdmi_vmax_base,               -- input
 
          -- Scaler format. 00=16bpp 565, 01=24bpp 10=32bpp
-         format            => "01",                         -- input: 24bpp
+         -- M2M-UPSTREAM scaler-16bpp: 16bpp for the core's wide pictures. Original: "01"
+         format            => ascal_format,                 -- input: 24bpp / 16bpp
 
          -- Polyphase filter coefficients (not used by us)
          poly_clk          => qnice_poly_clk_i,             -- input

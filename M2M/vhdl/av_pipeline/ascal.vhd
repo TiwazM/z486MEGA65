@@ -1496,11 +1496,18 @@ BEGIN
           i_lrad<=0;
           i_vcpt<=i_vcpt+1;
           i_hacc<=(i_hsize - i_ohsize + 8192) MOD 8192;
-          i_hbcpt<=0;
         END IF;
         IF i_de_delay=17 THEN
           i_acpt<=0;
           i_wad<=2*BLEN-1;
+          -- M2M-UPSTREAM 16bpp-eol (z486 for MEGA65, 2026-11-07): the line's burst count
+          -- clears here, not at 16 with the rest. The end of line (i_eol, below) counts the
+          -- last part-filled burst after the flush of the last word: up to 8 pixels at 16bpp,
+          -- which puts it at de_delay 16, and its i_hbcpt+1 then overrode the clear. The next
+          -- line started with every burst used and was never written: in 16bpp every other
+          -- line was missing (the picture squashed into its top half). 24bpp flushes at most
+          -- 6 pixels and ends at 14. Original: i_hbcpt<=0 at de_delay 16.
+          i_hbcpt<=0;
         END IF;
         
         IF i_pvs='0' AND i_vs_pre='1' THEN

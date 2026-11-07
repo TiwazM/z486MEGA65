@@ -47,6 +47,7 @@ module z486_mega65 #(
     output wire  [7:0] fb_pal_a,
     output wire [23:0] fb_pal_d,
     output wire        fb_pal_wr,
+    output reg         scaler_16bpp,       // the scaler keeps this picture at 16bpp (below)
 
     // MiSTer DDR3 port (clk_sys): boot image and SVGA framebuffer
     input  wire        ddram_busy,
@@ -682,6 +683,18 @@ always @(posedge clk_sys) begin
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
     fb_format[4:3] <= 2'b11;
 end
+
+// ------------------------------------------------------------------------------------------
+// The scaler (ascal) writes the VGA picture into HyperRAM and reads it back for HDMI, at 24bpp
+// unless told otherwise. 800x600 at 60 Hz is 86 MB/s each way, 172 MB/s, more than the
+// HyperRAM gives (~160 MB/s with its 128-byte bursts): Windows 3.11's Super VGA 16 colours
+// came out in shifted lines and stray pixel runs. Pictures wider than 90 characters (720
+// pixels: 800x600 16 colours, 132-column text) go at 16bpp 565 instead, 115 MB/s; 640x480,
+// 720-pixel text and the 320-pixel games keep 24bpp, the VGA DAC's 6 bits per colour.
+// The SVGA framebuffer modes (fb_en) do not use this: the scaler reads the PC's framebuffer.
+// ------------------------------------------------------------------------------------------
+
+always @(posedge clk_sys) scaler_16bpp <= (vga_width > 9'd90);
 
 assign fb_pal_a  = vga_pal_a;
 assign fb_pal_d  = {vga_pal_d[17:12], vga_pal_d[17:16],
