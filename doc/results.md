@@ -246,7 +246,9 @@ Benchmarks on hicol (2026-11-07): 3DBench 1.0 47.9 fps, where Phil's Computer La
 lists 48.1 for a 486DX2-66 (its benchmark sheet's 29 DX2-66s: median 43.4, 20.9 to
 51.7; Quake 6.7, at most 7.5, where z486 has 7.8; DX2-80s 56.1 and 8.1, DX4-100s
 60.6 and 9.1); PC Player Benchmark (VGA 320x200) 13.2 fps (DX2-66s: median 10.9, at
-most 12.5; DX2-80s 13.4; DX4-100s 14.7); SpeedSys's VESA memory 20,786 KB/s (its own sample of a
+most 12.5; DX2-80s 13.4; DX4-100s 14.7); Landmark System Speed Test 6.00: an
+80486DX at 65.775 MHz with an 80487, CPU 322.32 MHz AT, FPU 293.33 MHz 80287,
+video 25,869 chr/ms; Norton SI 8.0 CPU index 121.7; SpeedSys's VESA memory 20,786 KB/s (its own sample of a
 Pentium MMX 200 with an S3 ViRGE: 11,289); SpeedSys itself stops after its system
 box, in a loop reading port 61h (the I/O trace's timer option is for that).
 
