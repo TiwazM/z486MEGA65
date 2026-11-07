@@ -21,6 +21,20 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Later:**
   - The x87's speed and accuracy ([x87](x87.md): what it costs per
     instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
+  - Windows 95 (installed 2026-11-07): its normal boot hangs in
+    `esdi_506.pdr`'s init of the second IDE channel, our ATAPI CD-ROM
+    (`BOOTLOG.TXT`: "Initing esdi_506.pdr" with no success line; no disk I/O,
+    the VMM looping on the timer). With that controller removed in Device
+    Manager it boots to the desktop and uses OAKCDROM/MSCDEX for the CD.
+    `pc_cdrom.vhd` answers one of the driver's probes in a way it waits on
+    for ever; reproduce with the controller in, then `qmon.py ide 60` and
+    `qmon.py status`. And its High Color (16 bit) mode with the ET4000
+    driver, 800x600, shows the wrong colours (dark blue as dark red, teal as
+    orange-brown, grey as lime; 256 colours look right): the 16-bit format
+    the SVGA framebuffer gives the scaler (RGB/BGR, 565/555) does not match
+    what the driver writes; red and blue are swapped at least, and teal fits
+    RGB555 read as BGR565, but grey turning lime needs more than a swap. A
+    test image with pure bars and the format word ascal gets will tell.
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
