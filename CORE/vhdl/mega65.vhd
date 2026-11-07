@@ -1312,9 +1312,16 @@ begin
             -- IMR:master IMR, the IRQ lines, the 8042's state and FIFOs, the INTAs the PIC
             -- acknowledged with another vector than the CPU took, the last one's two vectors;
             -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd);
-            -- the keyboard translator's state (pc_keyboard.vhd, words 12:11)
-            main_dbg_snap2 <= x"0000" & x"0000" & x"0000" & main_dbg_kbd &
-                              x"000" & "000" & main_c1351 &
+            -- the keyboard translator's state (pc_keyboard.vhd, words 12:11); native's
+            -- measurement (p_main_native): word 15 the last frame's width, its 70 Hz flag, the
+            -- framebuffer on; 14 its lines, the frames alike so far; 13 the accepted width and
+            -- 70 Hz flag; word 10's top the accepted lines
+            main_dbg_snap2 <= std_logic_vector(main_nat_w) & main_nat_f & main_fb_en & "00" &
+                              std_logic_vector(main_nat_h) &
+                              std_logic_vector(to_unsigned(main_nat_same, 3)) & '0' &
+                              main_nat_size(23 downto 12) & main_nat_size(24) & "000" &
+                              main_dbg_kbd &
+                              main_nat_size(11 downto 0) & "000" & main_c1351 &
                               main_pot2_y_i & main_pot2_x_i & main_pot1_y_i & main_pot1_x_i &
                               main_dbg_inta_last & main_dbg_inta_bad &
                               main_dbg_ps2_fifo & main_dbg_ps2 & main_dbg_irq &

@@ -596,6 +596,41 @@ def key_name(n):
     return KEY_NAMES.get(n, "key %d" % n)
 
 
+def native_mode(w, h, f70):
+    # mega65.vhd p_qnice_native: the HDMI mode native picks for an accepted size
+    tw = 2 * w if w <= 400 else w
+    th = 2 * h if h <= 300 else h
+    if w < 256 or h < 160:
+        return "640x480 60 Hz, the picture scaled (nothing sensible measured)"
+    for cond, name in ((tw <= 640 and th <= 400 and f70, "640x400 70 Hz"),
+                       (tw <= 720 and th <= 400 and f70, "720x400 70 Hz"),
+                       (tw <= 640 and th <= 480, "640x480 60 Hz"),
+                       (tw <= 720 and th <= 480, "720x480 59.94 Hz"),
+                       (tw <= 800 and th <= 600, "800x600 60 Hz"),
+                       (tw <= 1024 and th <= 768, "1024x768 60 Hz")):
+        if cond:
+            return "%s, a %dx%d window 1:1" % (name, tw, th)
+    return "1280x1024 60 Hz, the picture scaled (larger than 1024x768)"
+
+
+def native_line():
+    # native's measurement (mega65.vhd p_main_native, snapshot words 0x803F..0x803D, 0x803A):
+    # the size it accepted (eight frames alike), the last frame's, the framebuffer
+    w = dump(0x803A, 0x803A) + dump(0x803D, 0x803F)
+    if None in w:
+        return "native: ?"
+    acc_h, (acc_w16, last_h16, last_w16) = w[0] >> 4, w[1:]
+    if (acc_w16 | last_h16 | last_w16) == 0 and acc_h == 0:
+        return "native: this core has no readout"
+    acc_w, acc_70 = acc_w16 >> 4, acc_w16 >> 3 & 1
+    last_h, alike = last_h16 >> 4, last_h16 >> 1 & 7
+    last_w, last_70, fb = last_w16 >> 4, last_w16 >> 3 & 1, last_w16 >> 2 & 1
+    return ("native: accepted %dx%d%s -> %s; last frame %dx%d%s, %d frames alike%s" %
+            (acc_w, acc_h, " (70 Hz)" if acc_70 else "", native_mode(acc_w, acc_h, acc_70),
+             last_w, last_h, " (70 Hz)" if last_70 else "", alike,
+             "; the SVGA framebuffer is shown (its size counts)" if fb else ""))
+
+
 def kbd_line():
     # the keyboard translator (pc_keyboard.vhd dbg_o, snapshot words 0x803C:0x803B): the key that
     # holds the PC's Shift back (a key whose release went missing held it for good, 2026-11-07),
@@ -693,6 +728,7 @@ def pic_8042():
                (w[6], "  (the last: CPU %02Xh, PIC %02Xh)" % (w[7] >> 8, w[7] & 0xFF) if w[6] else ""))
     out.append(mouse_line())
     out.append(kbd_line())
+    out.append(native_line())
     return "\n".join(out)
 
 
