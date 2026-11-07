@@ -158,3 +158,19 @@ printed on the MEGA65's keycaps:
   Smolinski (the framework, the shell's starting point).
 - PCXT-EGA-MEGA65 by silent-command, for the approaches to storage, keyboard
   and mouse on the MEGA65.
+
+## Licence
+
+z486MEGA65 is licensed under the GNU General Public License version 3, like
+the MiSTer2MEGA65 framework it is built on: see [LICENSE](LICENSE). The
+submodules keep their own licences:
+
+- z486: the Apache License 2.0 for its SystemVerilog, Python and Markdown
+  files (its `LICENSE-SCOPE.md`); its microcode image is not covered.
+- QNICE-FPGA: BSD-3-Clause.
+- z486_MiSTer: the notices in its files (the MiSTer framework's files are GPL
+  version 2 or later).
+
+The core built from this repository (the `.bit` and `.cor` files) contains
+z486's microcode image, which none of these licences cover. The BIOS images
+the core loads from the SD card are not part of it.
