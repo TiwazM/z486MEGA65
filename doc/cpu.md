@@ -110,6 +110,19 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
    2.5 clocks (both write the flags); the ALU-from-memory result a clock
    sooner; a shift's result a clock sooner. All three touch the load
    forwarding or the register reads, on the build's slowest paths.
+5. BSF and BSR in a clock or two: a priority encoder on the operand in place
+   of the 386 microcode's bit-by-bit loop. CACHECHK times a BSR for its
+   clock and reports z486 as a 486 at 26.1 MHz (a 486 itself takes 6 to 103
+   clocks by the value); compilers, decompressors and memory managers use
+   them, games rarely in their loops. The single-step tests cover both.
+6. The x87, not a speed item: an x87 instruction with a memory operand does
+   not take a pending unmasked exception while the x87 is still busy with
+   the one before; it runs, and the exception comes at the next instruction
+   (`z486/tests/programs/x87_pending_direct.asm`: WAIT and the register forms
+   pass, every memory form fails). It should wait for the x87, then take the
+   exception (#MF with CR0.NE, else FERR#) before it changes anything. Found
+   with Chris's 3D Benchmark (see [design](design.md)), which stops on v0.1
+   too; what raises its exception is not known yet.
 
 Found on the way, in z486 as it was: a near JMP or CALL past the CS limit of
 a protected-mode code segment does not fault (#GP), and instructions run on
