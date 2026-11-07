@@ -476,10 +476,10 @@ signal main_iot_owhy          : std_logic_vector(1 downto 0) := (others => '0');
 -- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft), 25: the trace
 -- quiet: no DMA flip-flop clears (0Ch, D8h) or DMA status reads (08h, D0h), which a driver
 -- polling its position writes and reads every few hundred microseconds
-signal main_iot_arm           : std_logic_vector(25 downto 0);
-signal main_iot_arm_d         : std_logic_vector(25 downto 0) := (others => '0');
+signal main_iot_arm           : std_logic_vector(26 downto 0);
+signal main_iot_arm_d         : std_logic_vector(26 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(25 downto 0) := "00" & x"040000";
+signal qnice_iot_arm          : std_logic_vector(26 downto 0) := "000" & x"040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -1430,12 +1430,15 @@ begin
    --           bits 9..8 why: 0 a DMA sample, 1 the DSP holds it at 0 (speaker off in SB Pro
    --           mode, 80h), 2 a direct output or ADPCM
    -- QNICE can also stop it (main_iot_arm(9)), or start it to stop when full (main_iot_arm(11):
-   -- the first 1024 entries instead of the last).
+   -- the first 1024 entries instead of the last). Started with main_iot_arm(26) ("timer"), kinds
+   -- 0 and 1 take the timer and port 61h too: writes to 40-43h and 61h, reads of 40-42h and
+   -- 61h (a program waiting on the speaker timer's output or the refresh bit, SpeedSys).
    -- Bits 63..32 the time, 31..16 the port, 15..13 the kind, 7..0 the byte.
    p_main_iot : process (main_clk)
-      function wr_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      function wr_ok (p : std_logic_vector(15 downto 0); tmr : std_logic) return boolean is
       begin
-         return p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
+         return (tmr = '1' and (p(15 downto 2) = "00000000010000" or p = x"0061")) or
+                p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
                 (p(15 downto 4) = x"008" and p /= x"0080") or
                 p = x"0060" or p = x"0064" or
                 (p(15 downto 4) = x"022" and p(3 downto 2) /= "00" and p(3 downto 1) /= "100");
@@ -1446,9 +1449,10 @@ begin
          return ((p = x"0020" or p = x"00A0") and v /= x"20" and v(4 downto 3) /= "01") or
                 (p = x"0021" and v /= imr);
       end function pic_ok;
-      function rd_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      function rd_ok (p : std_logic_vector(15 downto 0); tmr : std_logic) return boolean is
       begin
-         return p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
+         return (tmr = '1' and (p = x"0040" or p = x"0041" or p = x"0042" or p = x"0061")) or
+                p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
                 p = x"00D0" or p = x"0060" or p = x"0064";
       end function rd_ok;
    begin
@@ -1510,14 +1514,14 @@ begin
          -- stopping when full: the 1024th entry may be on its way (main_iot_we)
          if main_iot_run = '1' and (main_iot_arm(11) = '0' or main_iot_cnt < 1023 or
                                     (main_iot_cnt = 1023 and main_iot_we = '0')) then
-            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8)) or
+            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8), main_iot_arm(26)) or
                pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) and
                not (main_iot_arm(25) = '1' and (main_dbg_io_wr(23 downto 8) = x"000C" or
                                                 main_dbg_io_wr(23 downto 8) = x"00D8")) then
                main_iot_entry <= std_logic_vector(main_iot_us) & main_dbg_io_wr(23 downto 8) &
                                  "000" & "00000" & main_dbg_io_wr(7 downto 0);
                main_iot_we    <= '1';
-            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8)) and
+            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8), main_iot_arm(26)) and
                   main_dbg_io_rd /= main_iot_last_rd and
                   not (main_iot_arm(25) = '1' and (main_dbg_io_rd(23 downto 8) = x"0008" or
                                                    main_dbg_io_rd(23 downto 8) = x"00D0")) then
@@ -1613,7 +1617,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 26,
+         G_DATA_SIZE    => 27,
          G_REGISTER_SRC => false
       )
       port map (
@@ -2054,6 +2058,7 @@ begin
                                             std_logic_vector(unsigned(qnice_iot_arm(7 downto 0)) + 1);
                qnice_iot_arm(11) <= qnice_dev_data_i(1);
                qnice_iot_arm(25) <= qnice_dev_data_i(2);
+               qnice_iot_arm(26) <= qnice_dev_data_i(3);
             elsif qnice_dev_addr_i = x"0000005" then
                qnice_iot_arm(9) <= '1';
             elsif qnice_dev_addr_i = x"0000006" then

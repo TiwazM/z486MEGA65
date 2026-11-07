@@ -26,11 +26,13 @@
 #                             DMA requests' long waits and the DMA commands its DSP held back,
 #                             with microseconds, and its samples' big jumps; stops it first
 #                             ("peek": reads it running)
-#   qmon.py iotrace start [freeze] [once] [quiet]
+#   qmon.py iotrace start [freeze] [once] [quiet] [timer]
 #                             start it again (empty); "freeze": stop at the card's first 1 ms
 #                             wait; "once": stop when full (the first 1024 entries); "quiet":
 #                             leave out DMA flip-flop clears and status reads (a driver polling
-#                             its position fills the trace with them in a tenth of a second)
+#                             its position fills the trace with them in a tenth of a second);
+#                             "timer": the PIT (40-43h) and port 61h too, writes and reads that
+#                             change (what a program waits on there)
 #   qmon.py iotrace jump [N]  the smallest sample jump it logs, N/256 of the full range
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
@@ -457,6 +459,24 @@ def iot_port(port, val, wr, dsp):
         return name
     if port in IOT_PAGE:
         return "DMA page ch%d" % IOT_PAGE[port]
+    if port == 0x61:
+        if wr:
+            return "port 61h: speaker %s, timer 2 gate %s" % ("on" if val & 2 else "off",
+                                                              "on" if val & 1 else "off")
+        return "port 61h: timer 2 output %d, refresh %d, speaker %s, gate %s" % (
+            val >> 5 & 1, val >> 4 & 1, "on" if val & 2 else "off", "on" if val & 1 else "off")
+    if 0x40 <= port <= 0x43:
+        if port == 0x43 and wr:
+            if val >> 6 == 3:
+                return "PIT read-back: %s%s, counters %s" % (
+                    "" if val & 0x20 else "count ", "" if val & 0x10 else "status",
+                    ",".join(str(i) for i in range(3) if val >> (1 + i) & 1))
+            if val >> 4 & 3 == 0:
+                return "PIT counter %d latched" % (val >> 6)
+            return "PIT counter %d: mode %d, %s%s" % (
+                val >> 6, (val >> 1) & 7, {1: "LSB", 2: "MSB", 3: "LSB+MSB"}[val >> 4 & 3],
+                ", BCD" if val & 1 else "")
+        return "PIT counter %d %s" % (port - 0x40, "<-" if wr else "->")
     name = IOT_PORT.get(port, "port %03X" % port)
     if wr and port == 0x22C:
         if dsp["left"]:
@@ -489,11 +509,14 @@ def iotrace(opts):
         return
     if opts[:1] in (["start"], ["freeze"]):
         freeze, once, quiet = "freeze" in opts, "once" in opts, "quiet" in opts
-        poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0))
+        timer = "timer" in opts
+        poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0) |
+             (8 if timer else 0))
         print("I/O trace started%s%s%s" % (
             ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
             ", stops when full" if once else "",
-            ", without DMA polling" if quiet else ""))
+            ", without DMA polling" if quiet else "",
+            ", with the timer and port 61h" if timer else ""))
         return
     if opts[:1] != ["peek"]:
         poke(0x8005, 0)                    # stop it: a running trace changes while it is read
