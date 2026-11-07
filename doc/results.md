@@ -205,6 +205,13 @@ reset keeps the time (the RTC is copied into the CMOS again on the reset).
 Switching the mouSTer between Amiga and 1351 mode while Windows 3.11 runs
 works both ways (pointer and buttons).
 
+The keyboard fix (`z486-R6-kbd.cor`, 516273d, on top of osm50: no release lost when
+the event FIFO is full, the sweep, the translator reset with the PC, its state in
+`qmon.py status`): placed from osm50's layout (97.8 % of nets kept, 41 minutes;
+86,106 LUTs, 43,737 registers) it closes with 0.400 ns to spare at 64 MHz and
+0.100 ns at the implementation target, qnice_clk +0.138 ns, hold +0.036 ns, every
+clock met. Not on the board yet.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
