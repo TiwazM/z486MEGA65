@@ -63,7 +63,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known. With the Pro option
     some sound effects may not play (not certain: to compare with DOSBox
-    first; then `qmon.py iotrace start quiet` while one should play).
+    first; then `qmon.py iotrace start quiet` while one should play). One of
+    DOOM's demo sounds also feels off (the same with `sbsoft` on and off),
+    likewise to compare with DOSBox.
   - CD music while a game loads from the hard disk, not tried on the board.
 
 ## What the shell does now
