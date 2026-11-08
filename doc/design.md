@@ -67,6 +67,13 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     21h and 31h, and pit.v alone (Verilator) reads back the gate, flips refresh
     every 15 us and dips OUT2 for 843 ns: so only SpeedSys's way of reaching the
     port goes wrong. SPEEDSYS.EXE is packed; its loop needs unpacking to read.
+    On v0.2 (2026-11-08) it stops earlier: its header, then its own 8-pixel
+    text mode with its closing text, every character doubled and every other
+    one missing, and the PC hung (no memory manager: the CPU at 41DF:4ADF in
+    real mode, no port polled; with EMM386: in the memory manager, 0048:05D2).
+    cdsvc (no DAC registers) does the same, so the DAC is not the cause;
+    natdbg reached the system box. To bisect: svga16, then natdbg again, with
+    the same DOS setup.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
