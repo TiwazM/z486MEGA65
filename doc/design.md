@@ -304,6 +304,22 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   one. On a 5:4 monitor 1280x1024 is the sharpest mode by far: 800x600 is
   1.25x (every fourth pixel doubled, then smoothed) and the monitor scales
   it again.
+- The scaler's own HyperRAM traffic: the PC's VGA picture (text, VGA and the
+  planar Super VGA modes; the 256-colour and HiColor modes are a framebuffer
+  ascal reads directly) is written into ascal's buffer and read back for
+  HDMI, at 24 bit. 800x600 at 60 Hz is 86 MB/s each way, 172 MB/s, where the
+  HyperRAM gives about 160 MB/s (100 MHz, 16 bit, 128-byte bursts): Windows
+  3.11's "Super VGA (800x600, 16 colors)" flickered, jumped and drew stray
+  lines (on v0.1 too), though the PC drew it right (the full-system
+  simulation and QEMU agree). Pictures wider than 720 pixels now go through
+  at 16 bit, 565 (`scaler_16bpp` in `z486_mega65.sv`, M2M-UPSTREAM
+  scaler-16bpp): 115 MB/s at 800x600, and red and blue at 5 bits leave the
+  16 colours at most 3/255 off. 640x480 and text stay at 24 bit (110 MB/s).
+  ascal's 16-bit mode had a bug of its own: at the end of a line its burst
+  count's step and the next line's reset came in the same clock, so every
+  other line was never written (M2M-UPSTREAM 16bpp-eol). `scaler_16bpp`
+  changes only with the PC's mode; `CORE.xdc` cuts its crossing into
+  hdmi_clk as it does the framebuffer descriptor's.
 - VGA connector: the PC's own picture (the framework's analog pipeline, not
   the scaler). An analog monitor has to work out each line's pixel count from
   the timing, and a VGA card helps it with the sync polarity (the misc output

@@ -33,6 +33,13 @@ Rules (Megamiga's):
   - `reset-write` (`M2M/vhdl/av_pipeline/ascal.vhd`): ascal's write request
     resets; a reset in one of its input write bursts left a burst half done,
     and the HyperRAM side waited for its beats for good.
+  - `16bpp-eol` (`M2M/vhdl/av_pipeline/ascal.vhd`): in 16-bit mode the end of a
+    line's burst count step and the next line's reset came in the same clock,
+    so every other line was never written.
+  - `scaler-16bpp` (`digital_pipeline.vhd`, `av_pipeline.vhd`, `framework.vhd`,
+    `top_mega65-r6.vhd`): the core can ask ascal to keep its picture at 16 bit
+    (565) instead of 24; z486 does for pictures wider than 720 pixels, whose
+    24-bit write and read exceed the HyperRAM's bandwidth.
   - `typematic-time` (`M2M/rom/sysdef.asm`, `keyboard.asm`,
     `keyboard_vars.asm`): the cursor keys' repeat in the Shell's menus starts
     after 0.4 s and steps 20 times a second, timed with QNICE's cycle counter.

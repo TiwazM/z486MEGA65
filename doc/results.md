@@ -258,6 +258,18 @@ measurement in `qmon.py status`, the I/O trace's timer option): placed from hico
 to spare at 64 MHz and 0.232 ns at the implementation target, qnice_clk +0.741 ns,
 hr_rwds +0.066 ns, hold +0.036 ns, every clock met. Not on the board yet.
 
+Super VGA 16 colours (`z486-R6-svga16.cor`, 418ab4c and dd5cfab on top of natdbg: the
+scaler at 16 bit for pictures wider than 720 pixels and ascal's 16-bit line fix; with
+e85c57f, an ISO that starts with text is no cue sheet): placed from natdbg's
+checkpoint, its only failures were `scaler_16bpp`'s crossing into hdmi_clk (-2.343 ns,
+timed as synchronous with 0.347 ns). With `CORE.xdc`'s cut on the same layout it has
+0.580 ns to spare at 64 MHz and 0.280 ns at the implementation target, hdmi_clk
++0.731 ns, hr_rwds +0.217 ns, hold +0.036 ns, every clock met (86,915 LUTs, 44,011
+registers). On the board (2026-11-08) PAT.COM's 800x600 and 640x480 16-colour
+pictures are right and steady, and Windows 3.11 at "Super VGA (800x600, 16 colors)"
+no longer flickers, jumps or draws stray lines. Native mode leaves out PAT's top
+frame line: the line it measures short.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
