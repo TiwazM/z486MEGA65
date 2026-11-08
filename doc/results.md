@@ -292,6 +292,13 @@ red and green twice), 15- and 24-bit ramps right; Windows 95 at High Color shows
 GRAD.BMP's ramps smooth. But the BIOS now offered 800x600 at 24 bit (115h), whose
 picture came out as stripes: the next build's 8-bit register index takes that back.
 
+v0.2 (`z486-R6-v0.2.cor`, built as `z486-R6-v02`: fcac637, the DAC's 8-bit register
+index, on top of hdac): placed from hdac's finished layout (99.8 % of nets kept, 25
+minutes) it closes with 0.411 ns to spare at 64 MHz and 0.111 ns at the implementation
+target, hdmi_clk +0.519 ns, hr_rwds +0.216 ns, qnice_clk +0.844 ns, hold +0.025 ns,
+every clock met, every net routed (86,795 LUTs, 44,199 registers). In the full-system
+simulation the BIOS marks 115h unavailable again and still reads 110h/111h back.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):
