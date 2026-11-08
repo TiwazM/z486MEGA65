@@ -21,25 +21,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Later:**
   - The x87's speed and accuracy ([x87](x87.md): what it costs per
     instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
-  - Windows 95 (installed 2026-11-07): its normal boot hangs in
-    `esdi_506.pdr`'s init of the second IDE channel, our ATAPI CD-ROM
-    (`BOOTLOG.TXT`: "Initing esdi_506.pdr" with no success line; no disk I/O,
-    the VMM looping on the timer). With that controller removed in Device
-    Manager it boots to the desktop and uses OAKCDROM/MSCDEX for the CD.
-    `pc_cdrom.vhd` answers one of the driver's probes in a way it waits on
-    for ever; reproduce with the controller in, then `qmon.py ide 60` and
-    `qmon.py status`. And with the ET4000 driver 256 colours are right up to
-    1024x768; High Color (16 bit, up to 800x600) and True Color (24 bit, up
-    to 640x480) showed the wrong colours (dark blue as dark red, teal as
-    orange-brown, white as pale yellow-green). The framebuffer's format bits
-    told the scaler RGB and 565, where a PC's pixel is BGR (blue in the low
-    bits, red in the top; 24 bit blue, green, red in memory) and 1555 (a
-    Sierra HiColor DAC's 32K colours). ascal's decode with the old bits gives
-    exactly those colours; `z486_mega65.sv` now sets BGR and 1555, as
-    z486_mister.sv's menu defaults to, and Windows 95's High Color is right
-    on the board (`z486-R6-hicol`). z486's VGA does not emulate the DAC's
-    hidden register that picks 555 or 565, so a program that wants 64K colours
-    (565) would show slightly wrong greens; MiSTer has a menu option for it.
+  - Programs that bring SciTech's UniVBE engine (UVBELib) take z486's VGA for
+    an ET4000/W32: The Eleventh Hour prints "Tseng Labs SuperVGA (ET4000/W32
+    unknown revision) with 2 Mb, VBE 1.2" and "RAM DAC: Normal 8 bit DAC",
+    then runs with its sound but a black screen. z486's ET4000 has W32
+    traits (2 MB, the extended segment register 3CBh, CRTC 31h-37h kept but
+    mostly without effect) but no linear framebuffer (CRTC 30h/36h), which
+    UniVBE's W32 driver most likely draws into (not traced). Either a plain
+    AX to such detection (an AX had at most 1 MB) or the W32's linear window;
+    the second goes with a W32 hardware cursor (Windows' software cursor
+    flickers when the picture under it changes, as on a real ET4000AX).
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
@@ -234,7 +225,20 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   types following the images; the CD-ROM drive, an ATAPI device on the second
   channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does, with
   `cd_audio.vhd` for CD audio and the firmware's `cdimage.asm` for cue sheets),
-  which `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
+  which `pc_mgmt` lets onto the management bus when it is idle. Windows 95's
+  own driver for the channel, `esdi_506.pdr`, hung in its init of the CD-ROM's
+  channel (normal boot only: no disk I/O, the VMM on the timer; with the
+  controller removed it used OAKCDROM/MSCDEX). Every good status the drive gave
+  had bit 4 set (58h, 5Ch, 5Eh, 54h), which is DSC on a hard disk but SERVICE
+  on a packet device: an overlapped command wanting service. Main_MiSTer found
+  `esdi_506` rejects the channel then (its #1221 and #1224, Code 10 there);
+  bit 4 is now 0 (48h, 4Ch, 4Eh, 44h), except DSC when SEEK is done, which
+  VIDE-CDD.SYS waits for (#1239). Windows 95 then finds the drive: AutoRun,
+  AVIs from the CD, CD Player (`z486-R6-cdsvc`, 2026-11-08). The rest of what
+  the drive answers matches Main_MiSTer's choices (DEVICE RESET status 00h,
+  the diagnostic code 01h after a reset, INQUIRY and REQUEST SENSE exempt from
+  a pending UNIT ATTENTION); Main_MiSTer's `ide.cpp`/`ide_cdrom.cpp` are the
+  reference for these. `disk_sd` reads and writes straight in the
   image file through the SD host controller's engine port (Megamiga's
   sd-host), with the file's extent map from the firmware (fragmented files are
   fine); reads come in runs of one SD command each through a 32-sector ring
@@ -320,6 +324,22 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   other line was never written (M2M-UPSTREAM 16bpp-eol). `scaler_16bpp`
   changes only with the PC's mode; `CORE.xdc` cuts its crossing into
   hdmi_clk as it does the framebuffer descriptor's.
+- The HiColor DAC. Tseng's VGA BIOS (V8.00N) sets HiColor and TrueColor modes
+  through the DAC's registers (int 10h AX=10F0h) and reads the mode back
+  (10F2h), which the VESA call 4F03h (the current mode) asks. vga.v had no DAC
+  registers: after 4F02h set 110h or 111h (640x480, 15 or 16 bit) 4F03h said
+  101h (256 colours), and every 16-bit picture went out as 555, red and green
+  ramps restarting halfway. vga.v now has the command register behind four
+  reads of 3C6h and the extended registers its bit 4 opens, as the BIOS
+  programs them for its DAC type 20h (Sierra SC1502x-like; 86Box pairs
+  Tseng's V8 BIOS with that DAC), patched in by `tools/z486_sources.py`; the
+  framebuffer format follows it, 565 for 16 bit, 1555 for 15 bit. Register
+  index 8 bits, only 0..7 kept: at power-on the BIOS loads 34 bytes from
+  index 20h, which a 3-bit index wrapped onto register 1, and the BIOS then
+  took the DAC for type 24h and offered 800x600 at 24 bit (115h), which the
+  display (24-bit pictures 640 wide) cannot show. `CORE/sim/build/vbe/` (not
+  in git) has the checks: VBEPROBE.COM (what the VESA BIOS offers and reads
+  back), HICOL.COM (ramps in any 15/16/24-bit mode), GRAD.BMP.
 - VGA connector: the PC's own picture (the framework's analog pipeline, not
   the scaler). An analog monitor has to work out each line's pixel count from
   the timing, and a VGA card helps it with the sync polarity (the misc output

@@ -272,6 +272,26 @@ frame line: the line it measures short. The Eleventh Hour's ISO, whose first sec
 starts with text and which the firmware refused as a cue sheet over 16K, now mounts
 and its installer runs.
 
+Windows 95's CD-ROM driver (`z486-R6-cdsvc.cor`, b3413b4 on top of svga16: status
+bit 4, SERVICE on a packet device, no longer set): placed from svga16's layout (99.8 %
+of nets kept) it closes with 0.307 ns to spare at 64 MHz and 0.007 ns at the
+implementation target, hdmi_clk +0.439 ns, hold +0.025 ns, every clock met (86,701
+LUTs, 44,111 registers). On the board (2026-11-08) Windows 95 with its second IDE
+controller back finds the CD-ROM drive and uses its own driver: AutoRun starts
+Phantasmagoria's installer, Media Player plays Gabriel Knight 2's AVI from the CD, CD
+Player plays King's Quest VI's audio tracks.
+
+The HiColor DAC (`z486-R6-hdac.cor`, b87655c on top of cdsvc): placed from cdsvc's
+layout (98.5 % of nets kept). Post-route phys_opt left two nets of the x87's command
+ROM partially routed (DRC RTSTAT-2: no bitstream); `route_design` on the same
+checkpoint finished them, and it closes with 0.131 ns to spare at 64 MHz, hdmi_clk
++0.519 ns, hr_rwds +0.209 ns, hold +0.025 ns, every clock met (86,759 LUTs, 44,193
+registers). On the board (2026-11-08) VBEPROBE reads 4F03h as 0110h and 0111h after
+setting them (cdsvc: 0101h for both), HICOL's 16-bit ramps are one ramp each (cdsvc:
+red and green twice), 15- and 24-bit ramps right; Windows 95 at High Color shows
+GRAD.BMP's ramps smooth. But the BIOS now offered 800x600 at 24 bit (115h), whose
+picture came out as stripes: the next build's 8-bit register index takes that back.
+
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
 X0Y1..X1Y2, rows 50..149):

@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 64 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
-The current version is **v0.1-preview** (see
+The current version is **v0.2** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -17,7 +17,10 @@ The current version is **v0.1-preview** (see
 - Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
 
 **Video**
-- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included)
+- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included);
+  High Color (32K and 64K colours) up to 800x600 and True Color at 640x480,
+  through a HiColor DAC as Tseng's BIOS expects it, so the VESA modes report
+  correctly
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
   resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
   as a VGA card sends them)
@@ -40,7 +43,8 @@ The current version is **v0.1-preview** (see
   - ISO images, raw BIN images, and BIN/CUE discs, including multiple files,
     WAVE audio, pregaps and mixed sector sizes
   - Up to 99 tracks, with CD audio
-  - Works with DOS CD-ROM drivers and MSCDEX, and Windows' Media Player
+  - Works with DOS CD-ROM drivers and MSCDEX, Windows 3.11's Media Player, and
+    Windows 95's own CD-ROM driver (AutoRun, CD Player, video from the CD)
 - Disc and disk images mount automatically at start-up, or from the menu at any
   time
 
@@ -67,7 +71,9 @@ The current version is **v0.1-preview** (see
 
 ## Tested
 
-On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
+On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA up to 1024x768 in 256 colours
+and 800x600 in 16, Media Player CD audio), Windows 95 (High Color, its own
+CD-ROM driver: AutoRun, CD Player, AVIs from the CD), DOOM,
 SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
 Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
 of Monkey Island (CD, with its CD music), and Quake (slowly: 7.8 fps in
@@ -201,6 +207,14 @@ printed on the MEGA65's keycaps:
   jumping between the screen edges when a program starts or quits while the
   mouse is moving: load the mouse driver again (`ctmouse`).
 - The MEGA65's own floppy drive isn't used.
+- Games that bring SciTech's UniVBE engine take the ET4000 for an ET4000/W32
+  and can show a black screen while they run (The Eleventh Hour, with sound).
+- Windows draws the mouse pointer itself (the ET4000AX has no hardware
+  cursor), so it can flicker when the picture under it changes.
+- In native HDMI mode the picture is measured one line short: the top line
+  can be missing.
+- 800x600 in True Color (24 bit) isn't offered: the display shows 24-bit
+  pictures 640 pixels wide.
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 
