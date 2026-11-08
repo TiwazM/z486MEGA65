@@ -337,6 +337,7 @@ wire [10:0] vga_height;
 wire  [8:0] vga_stride;
 wire  [3:0] vga_flags;
 wire        vga_off;
+wire        vga_565;      // the HiColor DAC is in 16-bit 565 (vga.v's DAC registers, z486_sources.py)
 wire  [7:0] vga_pal_a;
 wire [17:0] vga_pal_d;
 wire        vga_pal_we;
@@ -541,6 +542,7 @@ system #(
     .video_stride        (vga_stride),
     .video_flags         (vga_flags),
     .video_off           (vga_off),
+    .video_565           (vga_565),
     .video_pal_a         (vga_pal_a),
     .video_pal_d         (vga_pal_d),
     .video_pal_we        (vga_pal_we),
@@ -670,6 +672,9 @@ assign video_ce = core_ce_pixel;
 // 32K colours, what z486_mister.sv's menu defaults to ({~status[5], ~status[6]}, both 0).
 // Until 2026-11-07 RGB and 565 here: Windows 95's High Color showed dark blue as dark red,
 // teal as orange-brown, white as pale yellow-green, and True Color had red and blue swapped.
+// Bit 3 follows the HiColor DAC's mode (vga.v's command and extended registers, as Tseng's
+// BIOS programs them, z486_sources.py): 565 when it is in 16-bit mode (VESA 111h, 114h, 117h),
+// 1555 otherwise. Until 2026-11-08 always 1555: 16-bit pictures had their greens off.
 // ------------------------------------------------------------------------------------------
 
 always @(posedge clk_sys) begin
@@ -681,7 +686,7 @@ always @(posedge clk_sys) begin
     fb_height      <= vga_flags[3] ? {2'b0, vga_height[10:1]} : {1'b0, vga_height};
     fb_format[2:0] <= (vga_flags[1:0] == 2'd3) ? 3'b101 :
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
-    fb_format[4:3] <= 2'b11;
+    fb_format[4:3] <= {1'b1, ~vga_565};
 end
 
 // ------------------------------------------------------------------------------------------

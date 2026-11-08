@@ -126,6 +126,13 @@ PATCHES = {
          "assign dbg_sb_req = {dma_sb_req_16, dma_sb_req_8};\n"
          "assign dbg_sb_irq = irq_5;\n\n"
          "// IO Bus Adapter (z486 IO cycles to byte-sequential peripheral bus)"),
+        # vga.v's HiColor DAC (below): its 565 flag out to the wrapper's framebuffer format
+        ("\toutput wire        video_off,",
+         "\toutput wire        video_off,\n"
+         "\toutput wire        video_565,         // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)"),
+        ("\t.vga_off           (video_off),",
+         "\t.vga_off           (video_off),\n"
+         "\t.vga_565           (video_565),       // MEGA65 (z486_sources.py)"),
     ],
     # sound_dsp.v: the write status port (2xCh) reads busy for 3 us after a DMA request starts,
     # not for as long as it is up. The DSP holds a request until the DMA controller answers it,
@@ -327,6 +334,77 @@ PATCHES = {
          "    end\n"
          "end\n\n"
          "endmodule"),
+    ],
+    # vga.v: a HiColor DAC's command and extended registers, as Tseng's BIOS V8.00N programs and
+    # reads them for its DAC type 20h (the type it detects on z486; Sierra SC1502x-like: 86Box
+    # pairs that BIOS family with one). int 10h AX=10F0h sets a HiColor mode through them,
+    # 10F2h reads it back, and the VESA call 4F03h (the current mode) asks 10F2h. vga.v had no
+    # such registers: after 4F02h set 110h or 111h (640x480, 15 or 16 bit), 4F03h answered 101h
+    # (8 bit), and The Eleventh Hour stopped with "unable to set requested graphic mode"; and
+    # every 16-bit picture went out as 555. After four reads of 3C6h in a row the next access is
+    # the command register; a fifth read with its bit 4 set opens the extended registers: the
+    # next write is an index, the one after it is skipped, further writes go to the indexed
+    # register on (the index counts up), reads return it; an access to 3C7h-3C9h ends a
+    # sequence. Register 3 holds the mode the BIOS set: 02h 15 bit, 03h 16 bit, 09h 24 bit.
+    # vga_565 tells the wrapper to read 16-bit pixels as 565 (CORE/sim/build/vbe/VBEPROBE.COM
+    # shows what the BIOS reads back)
+    "z486_MiSTer/src/soc/vga.v": [
+        ("\toutput reg          scanline_done\n);",
+         "\toutput reg          scanline_done,\n\n"
+         "\toutput              vga_565            // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)\n"
+         ");"),
+        ("always @(posedge clk_sys) if(~rst_n) dac_mask <= 8'hFF; else if(io_c_write && io_address == 4'h6) dac_mask <= io_writedata[7:0];",
+         "// MEGA65: the HiColor DAC's command and extended registers (z486_sources.py)\n"
+         "reg  [2:0] hdac_cnt;                   // reads of 3C6h in a row, up to 4\n"
+         "reg  [7:0] hdac_cr;                    // the command register\n"
+         "reg  [1:0] hdac_ext;                   // 0 off, 1 the index next, 2 a byte to skip, 3 data\n"
+         "reg  [2:0] hdac_idx;\n"
+         "reg  [7:0] hdac_reg [0:7];\n"
+         "wire       hdac_rd6     = io_c_read_valid && io_address == 4'h6;\n"
+         "wire       hdac_wr6     = io_c_write && io_address == 4'h6;\n"
+         "wire       hdac_end     = (io_c_read_valid || io_c_write) && (io_address == 4'h7 || io_address == 4'h8 || io_address == 4'h9);\n"
+         "wire       hdac_mask_wr = hdac_wr6 && hdac_ext == 2'd0 && hdac_cnt != 3'd4;\n"
+         "wire [7:0] hdac_read    = (hdac_ext == 2'd3) ? hdac_reg[hdac_idx] : (hdac_cnt == 3'd4) ? hdac_cr : dac_mask;\n"
+         "\n"
+         "integer hdac_i;\n"
+         "always @(posedge clk_sys) begin\n"
+         "\tif(~rst_n) begin\n"
+         "\t\thdac_cnt <= 3'd0;\n"
+         "\t\thdac_cr  <= 8'd0;\n"
+         "\t\thdac_ext <= 2'd0;\n"
+         "\t\thdac_idx <= 3'd0;\n"
+         "\t\tfor(hdac_i = 0; hdac_i < 8; hdac_i = hdac_i + 1) hdac_reg[hdac_i] <= 8'd0;\n"
+         "\tend\n"
+         "\telse if(hdac_end) begin\n"
+         "\t\thdac_cnt <= 3'd0;\n"
+         "\t\thdac_ext <= 2'd0;\n"
+         "\tend\n"
+         "\telse if(hdac_rd6) begin\n"
+         "\t\tif(hdac_ext == 2'd0) begin\n"
+         "\t\t\tif(hdac_cnt != 3'd4) hdac_cnt <= hdac_cnt + 3'd1;\n"
+         "\t\t\telse if(hdac_cr[4])  hdac_ext <= 2'd1;\n"
+         "\t\tend\n"
+         "\tend\n"
+         "\telse if(hdac_wr6) begin\n"
+         "\t\tcase(hdac_ext)\n"
+         "\t\t\t2'd1: begin hdac_idx <= io_writedata[2:0]; hdac_ext <= 2'd2; end\n"
+         "\t\t\t2'd2: hdac_ext <= 2'd3;\n"
+         "\t\t\t2'd3: begin hdac_reg[hdac_idx] <= io_writedata[7:0]; hdac_idx <= hdac_idx + 3'd1; end\n"
+         "\t\t\tdefault: begin\n"
+         "\t\t\t\tif(hdac_cnt == 3'd4) hdac_cr <= io_writedata[7:0];\n"
+         "\t\t\t\thdac_cnt <= 3'd0;\n"
+         "\t\t\tend\n"
+         "\t\tendcase\n"
+         "\tend\n"
+         "end\n"
+         "\n"
+         "// 16-bit pixels are 565 in extended mode (command bit 3) with register 3 at 03h, or with\n"
+         "// command bits 7:5 = 110 (C0h, 16 bit on the BIOS's other path, as on AT&T/Sierra DACs)\n"
+         "assign vga_565 = hdac_cr[3] ? (hdac_reg[3] == 8'h03) : (hdac_cr[7:5] == 3'b110);\n"
+         "\n"
+         "always @(posedge clk_sys) if(~rst_n) dac_mask <= 8'hFF; else if(hdac_mask_wr) dac_mask <= io_writedata[7:0];"),
+        ("\t(io_c_read_valid && io_address == 4'h6)                      ? dac_mask : //pel mask",
+         "\t(io_c_read_valid && io_address == 4'h6)                      ? hdac_read : //pel mask; MEGA65: the HiColor DAC's registers"),
     ],
     # ps2.v: status bit 5 said "mouse data" whenever the mouse's FIFO held a byte, also while the
     # byte in the output buffer (port 60h) was a key; on an 8042 it says where that byte came
