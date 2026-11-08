@@ -19,48 +19,70 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - **Keyboard and mouse:** MEGA65 keyboard and joystick-port mouse as PS/2
   devices, after PCXT-EGA-MEGA65's `keyboard.vhd` and `m65_mouse_ps2.vhd`.
 - **Later:**
-  - a complete x87 FPU; FPU rows in the CPU speed test (FADD, FDIV, FLD/FSTP,
-    FISTP, conversions); perhaps a Voodoo 1.
-  - An HDMI mode at the PC's own 70 Hz (720×400 at 70 Hz, which most
-    monitors take): native mode keeps the PC's picture size but runs at 60 Hz,
-    so the scaler drops about one frame in seven, and fast animation judders
-    (King's Quest VI's boat scene: frames seem to play out of order).
-  - King's Quest VI's intro movie: the lower part of the picture sometimes
-    shows an older frame than the top (tearing), worse in some runs and
-    builds than in others. Ruled out: the CD reads (the same sectors, sizes
-    and pace on `hand` and v0.1-preview, IDE trace; KQ6's read pattern is
-    byte-exact in `tb_cdrom`), the Sound Blaster switches, and video memory
-    speed (Dr. Hardware: 35.7 MB/s). The 70 Hz mode above may cure it.
+  - The x87's speed and accuracy ([x87](x87.md): what it costs per
+    instruction, what it gets wrong, the order to fix it); perhaps a Voodoo 1.
+  - Programs that bring SciTech's UniVBE engine (UVBELib) take z486's VGA for
+    an ET4000/W32: The Eleventh Hour prints "Tseng Labs SuperVGA (ET4000/W32
+    unknown revision) with 2 Mb, VBE 1.2" and "RAM DAC: Normal 8 bit DAC",
+    then runs with its sound but a black screen. z486's ET4000 has W32
+    traits (2 MB, the extended segment register 3CBh, CRTC 31h-37h kept but
+    mostly without effect) but no linear framebuffer (CRTC 30h/36h), which
+    UniVBE's W32 driver most likely draws into (not traced). Either a plain
+    AX to such detection (an AX had at most 1 MB) or the W32's linear window;
+    the second goes with a W32 hardware cursor (Windows' software cursor
+    flickers when the picture under it changes, as on a real ET4000AX).
   - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
     position about every 10 ms, and packets at the 40 per second Windows
     sets take two or three of those steps in turn (an I/O trace while moving
     steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
     each step over the time to the next one would even it out.
-  - An Amiga mouse's right and middle buttons (pins 9 and 5) where the
-    mouse can drive the lines: a pull-up to +5 V in the mouse or an adapter
-    (AExp: about 2 kΩ from pin 7), or a mouSTer with firmware 3.23.5313 or
-    newer and `activepotlines=true` in `[mouse]`. Released, the paddle line
-    reads driven (a SID value near 0); pressed, open (255). Take a line as
-    a button only once it has read released (MegaST does the same), else a
-    mouse without the pull-up holds the button down; F13 stays. Such a
-    mouse probably freezes the pointer today: its driven lines look like a
-    1351's (`pc_mouse.vhd`, driven = under 254) and the quadrature is no
-    longer counted. Count only mid-range values (4..251, as the MEGA65's
-    own `mouse_input.vhdl` does) as a 1351's, and a step on pins 2-4 (which
-    a 1351 never pulls) as an Amiga mouse at once. Read pin 9 unswapped
-    (`qmon.py c1351 swap`). Measure first: `qmon.py mouse` with such a
-    mouse, for the thresholds (a weak pull-up may read mid-range).
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
-  - Softer pops at the end of game speech (King's Quest VI): z486's DSP
-    holds its last sample when a transfer ends and drops to 0 when the driver
-    pauses the DMA (`sound_dsp.v`), a step that goes to HDMI as it is; a real
-    card's output capacitors round it off. A DC filter in the mix would.
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
-    taking interrupts; where it is then is not known.
+    taking interrupts; where it is then is not known. With the Pro option
+    some sound effects may not play (not certain: to compare with DOSBox
+    first; then `qmon.py iotrace start quiet` while one should play). One of
+    DOOM's demo sounds also feels off (the same with `sbsoft` on and off),
+    likewise to compare with DOSBox.
   - CD music while a game loads from the hard disk, not tried on the board.
+  - Chris's 3D Benchmark (Phil's DOS Benchmark Pack, `MARKS/CHRISB/BENCH.EXE`,
+    DJGPP: invalid, zero divide and overflow unmasked) stops with "Floating Point
+    exception at eip=00003df5", the FLD m32 after an FSTP m32 (BENCH.EXE
+    3DD1..3DF5: two products, FSUBP, FSTP m32). In z486's simulation an x87
+    instruction with a memory operand does not take a pending unmasked exception
+    while the x87 is still busy with the one before: it runs, and the exception
+    comes at the next instruction (`z486/tests/programs/x87_pending_direct.asm`:
+    WAIT and the register forms pass, every memory form fails). That explains
+    where it is reported, not what raised it: BENCH.EXE's sequence over 128 value
+    sets (`x87_chris3d.asm`) is bit-exact with no exception, and stores that page
+    fault (`x87_store_page_fault.asm`) restart cleanly. v0.1-preview stops the
+    same way (the same EIP and registers, 2026-11-07): older than this round's
+    x87 work, so a bisect over the fpu cores would find nothing.
+  - SpeedSys 4.78 stops after its system box, polling port 61h at
+    4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
+    (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
+    still (I/O trace `timer` option, `natdbg`). DEBUG's `o 61 21` / `i 61` give
+    21h and 31h, and pit.v alone (Verilator) reads back the gate, flips refresh
+    every 15 us and dips OUT2 for 843 ns: so only SpeedSys's way of reaching the
+    port goes wrong. SPEEDSYS.EXE is packed; its loop needs unpacking to read.
+    CACHECHK's "Timer messed up!" may be the same, and Norton System
+    Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
+    2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
+    timer. CACHECHK's clock (26.1 MHz) is a BSR loop: z486 runs BSR/BSF with
+    the 386's bit-by-bit microcode. SI 8.0's CPU index is 121.7 (its 486DX-33
+    71.2, Pentium-66 211.4), the overall index 82.0 with that disk figure.
+  - Native mode measures the PC's picture a line short (640x479, 720x399 at
+    the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
+    screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
+    a wrong size into Windows (rows dropped) until a reset. After v0.2: first
+    in simulation, native's count against the lines and pixels ascal takes in
+    (p_main_native counts a line where its display enable ends), then the fix.
+  - After v0.2, in this order: native's measurement (above); the x87's
+    memory forms taking a pending exception, then what raises Chris's 3D
+    Benchmark's ([CPU](cpu.md) 6); SpeedSys's port 61h loop (unpack it
+    first); BSF/BSR in a clock or two ([CPU](cpu.md) 5).
 
 ## What the shell does now
 
@@ -84,8 +106,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   bridge's z486 side resets with HyperRAM too, and the PC waits for it.
   ascal shows the framebuffer
   from HyperRAM (M2M-UPSTREAM rtg-framebuffer). Below `0x300000` ascal keeps
-  three frames of the VGA picture (triple buffering): the PC's 70 Hz text mode
-  on 60 Hz HDMI otherwise showed half-old, half-new frames where the screen
+  three frames of the VGA picture (triple buffering): the PC's frames (60 Hz
+  but not locked to the HDMI output's, or 70 Hz text with "Refresh: Original")
+  otherwise showed half-old, half-new frames where the screen
   changed (a flickering clock, stray lines, the cursor). The scaler
   interpolates sharp bilinear by default: the 720x400 text mode scales by 1.2
   (480p, 720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes
@@ -130,7 +153,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   Amiga mode, is the PC's PS/2 mouse (`CORE/vhdl/pc_mouse.vhd`): its
   quadrature lines as MegaMac decodes them, the left button on pin 6. The
   right button (pin 9) is invisible to the MEGA65's paddle circuit (Megamiga
-  measured it, and the R6 is no different), so F13 stands in for it. For a
+  measured it, and the R6 is no different), so F13 stands in for it. A mouSTer
+  (firmware 3.23.5313 on) with `activepotlines=true` drives pins 9 and 5 high
+  while its right and middle buttons are up: they read as a SID value of 0,
+  and 255 (open) while held, nothing in between (measured 2026-11-07). A line
+  that has read driven is a button from then on; both open for 2 s (unplugged)
+  drops that. Such lines used to make the core take the mouse for a 1351
+  (driven = under 254) and stop counting its quadrature; a 1351 is now only
+  mid-range values (4..251, as `mouse_input.vhdl` takes it), and a step on pins
+  2..4, which a 1351 never moves, makes it an Amiga mouse at once
+  (`CORE/sim/run_pc_mouse.sh`). For a
   real right button, use a Commodore 1351 or a mouSTer in its C64 mode
   (`c1351`, `mode=mouse` in its INI): its position on the paddle lines, the
   right button on pin 1. The core finds a 1351 by itself (its paddle lines
@@ -182,14 +214,31 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
-  (equipment, base memory, checksum, the date and time from the MEGA65's RTC);
+  (equipment, base memory, checksum, the date and time from the MEGA65's RTC,
+  again when the RTC's first read arrives and whenever the PC restarts: the reset
+  button, "Reset the PC", and the keyboard controller's reset, port 64h <- FEh,
+  which Bochs' BIOS uses for Ctrl+Alt+Del and Windows for a restart; the PC's
+  CMOS clock otherwise runs on from whatever it was set to);
   then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
   requests) and the hard disk, the master of the first IDE channel (`ide.v`:
   IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
   types following the images; the CD-ROM drive, an ATAPI device on the second
   channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does, with
   `cd_audio.vhd` for CD audio and the firmware's `cdimage.asm` for cue sheets),
-  which `pc_mgmt` lets onto the management bus when it is idle. `disk_sd` reads and writes straight in the
+  which `pc_mgmt` lets onto the management bus when it is idle. Windows 95's
+  own driver for the channel, `esdi_506.pdr`, hung in its init of the CD-ROM's
+  channel (normal boot only: no disk I/O, the VMM on the timer; with the
+  controller removed it used OAKCDROM/MSCDEX). Every good status the drive gave
+  had bit 4 set (58h, 5Ch, 5Eh, 54h), which is DSC on a hard disk but SERVICE
+  on a packet device: an overlapped command wanting service. Main_MiSTer found
+  `esdi_506` rejects the channel then (its #1221 and #1224, Code 10 there);
+  bit 4 is now 0 (48h, 4Ch, 4Eh, 44h), except DSC when SEEK is done, which
+  VIDE-CDD.SYS waits for (#1239). Windows 95 then finds the drive: AutoRun,
+  AVIs from the CD, CD Player (`z486-R6-cdsvc`, 2026-11-08). The rest of what
+  the drive answers matches Main_MiSTer's choices (DEVICE RESET status 00h,
+  the diagnostic code 01h after a reset, INQUIRY and REQUEST SENSE exempt from
+  a pending UNIT ATTENTION); Main_MiSTer's `ide.cpp`/`ide_cdrom.cpp` are the
+  reference for these. `disk_sd` reads and writes straight in the
   image file through the SD host controller's engine port (Megamiga's
   sd-host), with the file's extent map from the firmware (fragmented files are
   fine); reads come in runs of one SD command each through a 32-sector ring
@@ -202,7 +251,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
   BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
-  scanlines, the joystick's fire 2 (pin 9 or pin 5), help, "Reset the PC". An image mounted at start-up
+  scanlines, refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
+  help, "Reset the PC". An image mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard
@@ -222,8 +272,24 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   mode, as a real VGA monitor does. On an R6 with a 1280x1024 monitor the DOS
   prompt came out as 720x480 and The 7th Guest's VESA screens as 640x480,
   switching by themselves. The HDMI modes all exist already; the
-  PC's 70 Hz text mode goes out at 60 Hz (ascal's triple buffering). 1280x1024 is a 5:4 monitor's own
-  resolution: the picture is 1280x960 between bars and the monitor scales
+  PC's frames go out at the HDMI mode's 60 Hz (ascal's triple buffering).
+  With "Refresh: Original (VGA)" the PC runs its 400- and 350-line modes at
+  70 Hz, and native mode follows with a VGA card's own 640x400 or 720x400 at
+  70 Hz (M2M-UPSTREAM vga70: new modes in `video_modes_pkg.vhd`; `mega65.vhd`
+  counts main_clk's clocks from one vblank to the next and calls a frame
+  shorter than 1/65 s "70 Hz", held for the same eight frames as the size),
+  instead of 640x480 or 720x480 at 60 Hz, which dropped one PC frame in
+  seven. 720x400 at 70 Hz is an EDID established timing, so VGA-era monitors
+  list it; TVs may refuse both. The PC's and the HDMI's 70 Hz come from
+  different clocks, so the scaler still repeats or drops a frame about once a
+  minute. 640x400 uses the HDMI clock's 25.175 MHz entry and 720x400 a new
+  28.333 MHz one (28.322 MHz on a VGA card, +0.04 %) in place of 27.027 MHz,
+  which no mode used. Both unused entries had the NO_COUNT bit set on the
+  serialiser clock's divider, which made it the VCO's 881 or 1081 MHz
+  instead of five times the pixel clock: `CORE/sim/run_video_clock.sh`
+  programs every entry into Vivado's MMCME2_ADV model and measures both
+  clocks (all eight right now; the six the modes used already were).
+  1280x1024 is a 5:4 monitor's own resolution: the picture is 1280x960 between bars and the monitor scales
   nothing, where 480p or 720p are scaled twice (by the core and by the
   monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's
   CVT-RB) at 90 MHz: VESA's DMT timing needs 108 MHz, at which the HDMI
@@ -242,6 +308,94 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   one. On a 5:4 monitor 1280x1024 is the sharpest mode by far: 800x600 is
   1.25x (every fourth pixel doubled, then smoothed) and the monitor scales
   it again.
+- The scaler's own HyperRAM traffic: the PC's VGA picture (text, VGA and the
+  planar Super VGA modes; the 256-colour and HiColor modes are a framebuffer
+  ascal reads directly) is written into ascal's buffer and read back for
+  HDMI, at 24 bit. 800x600 at 60 Hz is 86 MB/s each way, 172 MB/s, where the
+  HyperRAM gives about 160 MB/s (100 MHz, 16 bit, 128-byte bursts): Windows
+  3.11's "Super VGA (800x600, 16 colors)" flickered, jumped and drew stray
+  lines (on v0.1 too), though the PC drew it right (the full-system
+  simulation and QEMU agree). Pictures wider than 720 pixels now go through
+  at 16 bit, 565 (`scaler_16bpp` in `z486_mega65.sv`, M2M-UPSTREAM
+  scaler-16bpp): 115 MB/s at 800x600, and red and blue at 5 bits leave the
+  16 colours at most 3/255 off. 640x480 and text stay at 24 bit (110 MB/s).
+  ascal's 16-bit mode had a bug of its own: at the end of a line its burst
+  count's step and the next line's reset came in the same clock, so every
+  other line was never written (M2M-UPSTREAM 16bpp-eol). `scaler_16bpp`
+  changes only with the PC's mode; `CORE.xdc` cuts its crossing into
+  hdmi_clk as it does the framebuffer descriptor's.
+- The HiColor DAC. Tseng's VGA BIOS (V8.00N) sets HiColor and TrueColor modes
+  through the DAC's registers (int 10h AX=10F0h) and reads the mode back
+  (10F2h), which the VESA call 4F03h (the current mode) asks. vga.v had no DAC
+  registers: after 4F02h set 110h or 111h (640x480, 15 or 16 bit) 4F03h said
+  101h (256 colours), and every 16-bit picture went out as 555, red and green
+  ramps restarting halfway. vga.v now has the command register behind four
+  reads of 3C6h and the extended registers its bit 4 opens, as the BIOS
+  programs them for its DAC type 20h (Sierra SC1502x-like; 86Box pairs
+  Tseng's V8 BIOS with that DAC), patched in by `tools/z486_sources.py`; the
+  framebuffer format follows it, 565 for 16 bit, 1555 for 15 bit. Register
+  index 8 bits, only 0..7 kept: at power-on the BIOS loads 34 bytes from
+  index 20h, which a 3-bit index wrapped onto register 1, and the BIOS then
+  took the DAC for type 24h and offered 800x600 at 24 bit (115h), which the
+  display (24-bit pictures 640 wide) cannot show. `CORE/sim/build/vbe/` (not
+  in git) has the checks: VBEPROBE.COM (what the VESA BIOS offers and reads
+  back), HICOL.COM (ramps in any 15/16/24-bit mode), GRAD.BMP.
+- VGA connector: the PC's own picture (the framework's analog pipeline, not
+  the scaler). An analog monitor has to work out each line's pixel count from
+  the timing, and a VGA card helps it with the sync polarity (the misc output
+  register, port 3C2h: +/- 350 lines, -/+ 400, -/- 480). Two things broke
+  that: MiSTer's `video_cleaner` makes both syncs active-high (as the scaler
+  wants), and z486's `video_f60` retimes every mode to 60 Hz, so DOS text had
+  26.9 kHz lines instead of 31.5 kHz. A Dell called it "640x350 at 60 Hz",
+  sampled the 720-pixel lines with the wrong clock (strokes of uneven width,
+  a shimmer, edges cut off) and its auto adjust could not fix it. The menu's
+  "Refresh" now chooses: "60 Hz (HDMI)" (the default, as before) or
+  "Original (VGA)" (`video_f60` off: the VGA's own timing, DOS text at 70 Hz),
+  and the connector carried the polarity the PC wrote to 3C2h (M2M-UPSTREAM
+  vga-polarity: `mega65.vhd` takes the bits from the PC's I/O writes,
+  `analog_pipeline.vhd` turned the connector's syncs). On the board
+  (`z486-R6-vgasdb`) the Dell and an Eizo both took it as 70 Hz text, and
+  both still shimmered, flickered and cut the first column. The analog
+  pipeline runs on the PC's video clock, main_clk's 64 MHz, with z486's
+  clock enable: a 28.322 MHz pixel lasts 2 or 3 of its clocks (31.3 or 46.9
+  ns, not 35.3), so every pixel edge, and the syncs, land up to 15.6 ns (half
+  a pixel) off, differently on each line. A CRT barely shows it; an LCD
+  samples each pixel at a fixed time after the sync, sometimes on an edge.
+  So the connector now shows the HDMI picture (M2M-UPSTREAM vga-from-hdmi,
+  `digital_pipeline.vhd`): the scaler's output with the menu on it, on the
+  HDMI clock (an MMCM's), black outside the picture, the syncs in the mode's
+  polarity, the DAC clocked by the HDMI clock (`pblock_vga` in
+  `MEGA65-R6.xdc` keeps the output registers by the pins). In native mode
+  with "Original (VGA)" that is what a VGA card sends (720x400 or 640x400 at
+  70 Hz; 640x480, 800x600 and 1024x768 at 60 Hz; their polarities) on a
+  steady clock; in the other HDMI modes the VGA connector carries those
+  (720p, 480p, ...). The analog pipeline's VGA outputs are unused. On the
+  board (`z486-R6-vga70b`) the Dell shows DOS text as 720x400 at 70 Hz, clean,
+  the first column whole; HDMI is at 70 Hz in DOS too.
+- The MEGA65's clock: the framework reads the RTC once when it starts and
+  keeps a running copy, which the core copies into the PC's CMOS. Straight
+  after power-on, on an R6, that read came back as junk twice (day 00, month
+  06, year B1/E1, time 00:00) while a read a minute later was right, and
+  `rtc_master.vhd`'s check (day and month both 00) let it through: DOS started
+  at midnight. Every field is checked now (BCD, in range), a bad read is tried
+  again every 20 ms, and after 100 (2 s) it starts from 2000-01-01
+  (M2M-UPSTREAM rtc-verify; `CORE/sim/run_rtc_master.sh` feeds it that junk).
+- Drive LED (`mega65.vhd`): the PC's disk accesses, as a case LED shows a
+  drive's activity line: amber while the hard disk or the CD-ROM drive has a
+  command or a block in hand, green for the floppies, at least 40 ms each.
+- Sound Blaster pops: z486's DSP holds its last sample when it stops (a DMA
+  pause, the end of a transfer) and drops to 0 when it mutes (speaker off in
+  SB Pro mode, the 80h silence), so a level a sound ends on stays until the
+  next sound jumps away from it, or a mute steps from it (King's Quest VI's
+  speech: the driver pauses with D0h after the last block; the end of a WAV in
+  an editor). The I/O trace now also logs the DSP's own output jumps and why
+  (`qmon.py iotrace`), and an output stage (`CORE/sv/sb_soft.sv`, before the
+  mix) passes samples as they are while the DSP plays, lets a level held 20 ms
+  glide to 0 (21 ms time constant) and fades a mute (2.7 ms). DOOM's stream,
+  back-to-back effects with gaps under 20 ms, a sharp attack and a 10 ms pause
+  come out sample for sample unchanged (`CORE/sim/run_sb_soft.sh`);
+  `qmon.py sbsoft off` turns it off on the board, to listen both ways. Not on
+  the board yet.
 - L2 cache (`CORE/sv/guest_l2.sv`, after MegaMac's): 256 KB of block RAM
   between the CPU's memory port and the SDRAM, as on a 486 board:
   direct-mapped, 16-byte lines, write-through. A line fill that hits is
@@ -293,3 +447,22 @@ comes while nobody reads port 60h. `tools/z486_sources.py` patches `pic.v`:
 after ICW1 an input that is already high counts as a new edge, so it is
 served once (the same for the mouse's IRQ12). `tb_pic.sv` replays the race;
 upstream's `pic.v` fails it.
+
+## Shift lost for good (2026-11-07)
+
+After tapping Shift+F7 (F8) at "Starting Windows 95…", Shift did nothing any
+more, `:` came out as `;` and `*` as `8`, in DOS and Windows, across resets,
+until F7 was pressed on its own. For F8 `pc_keyboard.vhd` releases the PC's
+Shift and holds it back until F7 comes up; F7's release never arrived. Its
+32-entry event FIFO waits while the PC does not take bytes (the 8042's FIFO
+full at 60, typematic F8s filling it). When the FIFO was full, a release
+overwrote the newest entry, so that entry's release was lost whenever it was
+one. And nothing cleared it: the module is not reset with the PC, and the BIOS
+sends the keyboard no command at all (the log of a whole boot). Now a change
+the full FIFO cannot take stays out of the module's matrix copy and is seen at
+the key's next scan; a sweep releases any key the module holds that the matrix
+has up while no event waits; the module is reset with the PC; and `qmon.py
+status` shows the key that holds Shift back and the sweep's releases.
+`CORE/sim/run_kbd_stress.sh` (nvc) plays random presses of the keys that move
+Shift while the PC stops reading; with long stops the old code failed half of
+10 seeds (keys the PC kept down, `:` without Shift, Shift+A as `a`).

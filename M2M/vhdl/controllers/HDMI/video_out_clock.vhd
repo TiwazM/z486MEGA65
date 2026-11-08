@@ -53,8 +53,8 @@ entity video_out_clock is
           -- 001 =  27.000 MHz. E.g.  720x480 @ 59.94 Hz
           -- 010 =  74.250 MHz. E.g. 1280x720 @ 60.00 Hz
           -- 011 =  65.000 MHz. E.g. 1024x768 @ 60 Hz (M2M-UPSTREAM rtg-native-modes; was 148.500 MHz)
-          -- 100 =  25.175 MHz. E.g.  640x480 @ 59.94 Hz
-          -- 101 =  27.027 MHz. E.g.  720x480 @ 60.00 Hz
+          -- 100 =  25.175 MHz. E.g.  640x400 @ 70.09 Hz (M2M-UPSTREAM vga70; was 640x480 @ 59.94 Hz)
+          -- 101 =  28.333 MHz. E.g.  720x400 @ 70.11 Hz (M2M-UPSTREAM vga70; was 27.027 MHz)
           -- 110 =  90.000 MHz. E.g. 1280x1024 @ 59.79 Hz, reduced blanking (M2M-UPSTREAM sxga-mode; was 74.176 MHz)
           -- 111 = undefined
     rsto    : out   std_logic;                    -- output clock synchronous reset
@@ -81,7 +81,9 @@ architecture synth of video_out_clock is
   signal clko_b       : std_logic;                     -- buffered pixel clock
   signal clko_u_x5    : std_logic;                     -- unbuffered serializer clock
 
-  signal clki_div     : std_logic;                     -- Input clock divided by 2
+  -- M2M-UPSTREAM video-clock-sim (z486 for MEGA65): '0' as the FPGA's registers start, so that
+  -- a simulation's clock mux and backup clock start too (with 'U' they never run)
+  signal clki_div     : std_logic := '0';              -- Input clock divided by 2
 
   signal cfg_tbl_addr : std_logic_vector(7 downto 0);  -- 8 x 32 entries
   signal cfg_tbl_data : std_logic_vector(39 downto 0); -- 8 bit address + 16 bit write data + 16 bit read mask
@@ -107,7 +109,7 @@ architecture synth of video_out_clock is
     lock_wait                                          -- wait for reconfig to complete
   );
   signal cfg_state    : cfg_state_t;
-  signal clk_mux      : std_logic;
+  signal clk_mux      : std_logic := '0';              -- M2M-UPSTREAM video-clock-sim
 
 
 begin
@@ -285,6 +287,10 @@ begin
           -- when x"75" => data := x"4E" & x"0900" & x"66FF";  -- Filter Register 1
           -- when x"76" => data := x"CF" & x"1000" & x"666F";  -- Filter Register 2
 
+          -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): CLKOUT0 Register 2 was x"00C0", whose
+          -- NO_COUNT bit bypasses CLKOUT0's divider: the serialiser clock came out at the VCO's
+          -- 881.25 MHz (unisim MMCME2_ADV, CORE/sim/tb_video_clock.vhd). No video mode used it.
+          -- x"0080": EDGE for the odd divide 7, as XAPP888's count_calc gives.
           -- Desired frequency = 25.175 MHz
           -- CLKFBOUT_MULT_F   = 17.625
           -- DIVCLK_DIVIDE     = 2
@@ -294,7 +300,7 @@ begin
           when x"80" => data := x"06" & x"1145" & x"1000";  -- CLKOUT5 Register 1
           when x"81" => data := x"07" & x"0000" & x"8000";  -- CLKOUT5 Register 2
           when x"82" => data := x"08" & x"10C4" & x"1000";  -- CLKOUT0 Register 1
-          when x"83" => data := x"09" & x"00C0" & x"8000";  -- CLKOUT0 Register 2
+          when x"83" => data := x"09" & x"0080" & x"8000";  -- CLKOUT0 Register 2
           when x"84" => data := x"0A" & x"1452" & x"1000";  -- CLKOUT1 Register 1
           when x"85" => data := x"0B" & x"0080" & x"8000";  -- CLKOUT1 Register 2
           when x"86" => data := x"0C" & x"1145" & x"1000";  -- CLKOUT2 Register 1
@@ -315,18 +321,25 @@ begin
           when x"95" => data := x"4E" & x"9900" & x"66FF";  -- Filter Register 1
           when x"96" => data := x"CF" & x"1100" & x"666F";  -- Filter Register 2
 
-          -- Desired frequency = 27.027 MHz
-          -- CLKFBOUT_MULT_F   = 21.625
+          -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): 28.333 MHz for 720x400 @ 70.11 Hz,
+          -- VGA's text mode (28.322 MHz: +0.04 %), instead of 27.027 MHz, which no video mode used
+          -- (its CLKOUT0 Register 2 had NO_COUNT set too, as the 25.175 MHz entry's: its serialiser
+          -- clock came out at 1081 MHz). Counters, lock and filter by clk_wiz_v6_0's
+          -- mmcm_pll_drp_func_7s_mmcm.vh (count_calc, lock_lookup, filter_lookup OPTIMIZED, M=17;
+          -- the lock registers written like the other entries'); CORE/sim/tb_video_clock.vhd
+          -- measures every entry in the unisim MMCME2_ADV.
+          -- Desired frequency = 28.322 MHz
+          -- CLKFBOUT_MULT_F   = 17.000
           -- DIVCLK_DIVIDE     = 2
-          -- CLKOUT0_DIVIDE_F  = 8.000
-          -- CLKOUT1_DIVIDE    = 40
-          -- Actual frequency  = 27.031 MHz
+          -- CLKOUT0_DIVIDE_F  = 6.000
+          -- CLKOUT1_DIVIDE    = 30
+          -- Actual frequency  = 28.333 MHz
           when x"A0" => data := x"06" & x"1145" & x"1000";  -- CLKOUT5 Register 1
           when x"A1" => data := x"07" & x"0000" & x"8000";  -- CLKOUT5 Register 2
-          when x"A2" => data := x"08" & x"1104" & x"1000";  -- CLKOUT0 Register 1
-          when x"A3" => data := x"09" & x"00C0" & x"8000";  -- CLKOUT0 Register 2
-          when x"A4" => data := x"0A" & x"1514" & x"1000";  -- CLKOUT1 Register 1
-          when x"A5" => data := x"0B" & x"0080" & x"8000";  -- CLKOUT1 Register 2
+          when x"A2" => data := x"08" & x"10C3" & x"1000";  -- CLKOUT0 Register 1
+          when x"A3" => data := x"09" & x"0000" & x"8000";  -- CLKOUT0 Register 2
+          when x"A4" => data := x"0A" & x"13CF" & x"1000";  -- CLKOUT1 Register 1
+          when x"A5" => data := x"0B" & x"0000" & x"8000";  -- CLKOUT1 Register 2
           when x"A6" => data := x"0C" & x"1145" & x"1000";  -- CLKOUT2 Register 1
           when x"A7" => data := x"0D" & x"0000" & x"8000";  -- CLKOUT2 Register 2
           when x"A8" => data := x"0E" & x"1145" & x"1000";  -- CLKOUT3 Register 1
@@ -334,16 +347,16 @@ begin
           when x"AA" => data := x"10" & x"1145" & x"1000";  -- CLKOUT4 Register 1
           when x"AB" => data := x"11" & x"0000" & x"8000";  -- CLKOUT4 Register 2
           when x"AC" => data := x"12" & x"1145" & x"1000";  -- CLKOUT6 Register 1
-          when x"AD" => data := x"13" & x"3000" & x"8000";  -- CLKOUT6 Register 2
-          when x"AE" => data := x"14" & x"128A" & x"1000";  -- CLKFBOUT Register 1
-          when x"AF" => data := x"15" & x"5800" & x"8000";  -- CLKFBOUT Register 2
+          when x"AD" => data := x"13" & x"0000" & x"8000";  -- CLKOUT6 Register 2
+          when x"AE" => data := x"14" & x"1209" & x"1000";  -- CLKFBOUT Register 1
+          when x"AF" => data := x"15" & x"0080" & x"8000";  -- CLKFBOUT Register 2
           when x"B0" => data := x"16" & x"0041" & x"C000";  -- DIVCLK Register
-          when x"B1" => data := x"18" & x"00DB" & x"FC00";  -- Lock Register 1
+          when x"B1" => data := x"18" & x"013F" & x"FC00";  -- Lock Register 1
           when x"B2" => data := x"19" & x"7C01" & x"8000";  -- Lock Register 2
           when x"B3" => data := x"1A" & x"7DE9" & x"8000";  -- Lock Register 3
           when x"B4" => data := x"28" & x"FFFF" & x"0000";  -- Power Register
-          when x"B5" => data := x"4E" & x"9000" & x"66FF";  -- Filter Register 1
-          when x"B6" => data := x"CF" & x"0100" & x"666F";  -- Filter Register 2
+          when x"B5" => data := x"4E" & x"9900" & x"66FF";  -- Filter Register 1
+          when x"B6" => data := x"CF" & x"1100" & x"666F";  -- Filter Register 2
 
           -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): 90 MHz for 1280x1024 @ 59.79 Hz
           -- with reduced blanking (a 5:4 monitor's own resolution: the scaler is the only one)

@@ -374,11 +374,13 @@ module tb_cdrom #(
         outb(16'h177, 8'ha0);
         wait_ready(16'h170, st);
         inb(16'h172, ir);
-        if ((st & 8'h89) != 8'h08 || ir[1:0] != 2'b01) $fatal(1, "packet: status %02x, reason %02x", st, ir);
+        // status bit 4 is SERVICE for a packet device: 0 throughout (Windows 9x's esdi_506.pdr)
+        if ((st & 8'h99) != 8'h08 || ir[1:0] != 2'b01) $fatal(1, "packet: status %02x, reason %02x", st, ir);
         for (k = 0; k < 6; k++) outw(16'h170, {cdb[2 * k + 1], cdb[2 * k]});
         forever begin
             wait_ready(16'h170, st);
             if (!st[3]) break;
+            if (st[4]) $fatal(1, "data block: status %02x, SERVICE set", st);
             inb(16'h172, ir);
             inb(16'h174, lo); inb(16'h175, hi);
             n = {hi, lo};
@@ -404,12 +406,13 @@ module tb_cdrom #(
         r_irqs = irqs - i0;
     endtask
 
-    // the end: done (status 40h, DRDY) or CHECK CONDITION (ERR, the sense key); interrupt
-    // reason IO + CoD; an interrupt per block and one at the end
-    task automatic expect_end(input string what, input integer key = 0);
+    // the end: done (status 40h, DRDY; 50h with DSC after SEEK, `dsc`) or CHECK CONDITION (ERR,
+    // the sense key); SERVICE (bit 4) clear otherwise; interrupt reason IO + CoD; an interrupt
+    // per block and one at the end
+    task automatic expect_end(input string what, input integer key = 0, input bit dsc = 0);
         bit ok;
-        if (key == 0) ok = (r_st & 8'hC9) == 8'h40;
-        else ok = (r_st & 8'h89) == 8'h01 && r_err[7:4] == key[3:0];
+        if (key == 0) ok = (r_st & 8'hD9) == (dsc ? 8'h50 : 8'h40);
+        else ok = (r_st & 8'h99) == 8'h01 && r_err[7:4] == key[3:0];
         check(ok && r_ir[1:0] == 2'b11 && r_irqs == blocks + 1,
               $sformatf("%s: status %02x, error %02x, reason %02x, %0d blocks, %0d interrupts",
                         what, r_st, r_err, r_ir, blocks, r_irqs));
@@ -590,10 +593,10 @@ module tb_cdrom #(
         // IDENTIFY PACKET DEVICE
         outb(16'h177, 8'ha1);
         wait_ready(16'h170, st);
-        if ((st & 8'h89) != 8'h08) $fatal(1, "IDENTIFY PACKET DEVICE: status %02x", st);
+        if ((st & 8'h99) != 8'h08) $fatal(1, "IDENTIFY PACKET DEVICE: status %02x", st);
         for (k = 0; k < 256; k++) inw(16'h170, id[k]);
         wait_ready(16'h170, st);
-        check(id[0] == 16'h85C0 && id[27] == 16'h7A34 && id[49] == 16'h0200 && (st & 8'hC9) == 8'h40,
+        check(id[0] == 16'h85C0 && id[27] == 16'h7A34 && id[49] == 16'h0200 && (st & 8'hD9) == 8'h40,
               $sformatf("IDENTIFY PACKET DEVICE: %04x, model %04x, caps %04x, status %02x", id[0], id[27], id[49], st));
 
         // no disc: NOT READY, MEDIUM NOT PRESENT
@@ -831,7 +834,7 @@ module tb_cdrom #(
         // drive is, then plays from there: FF:FF:FF); past the lead-out: out of range
         set_cdb(8'h2b, 0, 0, 0, 300 >> 8, 300 & 255, 0, 0, 0, 0, 0, 0);
         packet(16'hfffe);
-        expect_end("SEEK 300");
+        expect_end("SEEK 300", 0, 1);
         subq(0);
         check(q_st == 8'h15 && q_trk == 2 && q_abs == 300,
               $sformatf("  READ SUB-CHANNEL: %02x, track %0d, at %0d", q_st, q_trk, q_abs));

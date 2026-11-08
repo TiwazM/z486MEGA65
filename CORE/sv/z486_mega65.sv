@@ -47,6 +47,7 @@ module z486_mega65 #(
     output wire  [7:0] fb_pal_a,
     output wire [23:0] fb_pal_d,
     output wire        fb_pal_wr,
+    output reg         scaler_16bpp,       // the scaler keeps this picture at 16bpp (below)
 
     // MiSTer DDR3 port (clk_sys): boot image and SVGA framebuffer
     input  wire        ddram_busy,
@@ -99,8 +100,11 @@ module z486_mega65 #(
     // The game port (201h): joystick 1, digital, active high (MiSTer's layout: 0 right, 1 left,
     // 2 down, 3 up, 4..7 buttons 1..4); a 4-button joystick, joystick 2 absent
     input  wire  [7:0] joy_dig,
+    input  wire        joy_off,            // joystick 1 absent too: the game port reads FFh
 
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
+    input  wire        video_f60,          // every VGA mode retimed to 60 Hz (MiSTer's default);
+                                           // 0 = the VGA's own timing (the menu's "Refresh")
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
     // The L2 cache (guest_l2.sv; clk_sys): on (a 0 -> 1 empties it first), and its line fills
@@ -139,6 +143,10 @@ module z486_mega65 #(
     output wire        dbg_sb_smp_stb,     // the Sound Blaster took a DMA output sample:
     output wire [15:0] dbg_sb_smp_dif,     // its distance from the one before (left channel),
     output wire [15:0] dbg_sb_smp_pos,     // its index in the DSP's block
+    output wire        dbg_sb_out_stb,     // the DSP's output (left) changed (before sb_soft's
+    output wire [15:0] dbg_sb_out_dif,     // stage): by how much, and why (0 a DMA sample,
+    output wire  [1:0] dbg_sb_out_why,     // 1 held at 0, 2 direct output or ADPCM)
+    input  wire        sb_soft,            // the DSP's output stage on (main clock)
     output wire [47:0] dbg_pic,            // the PICs: IRR, ISR, IMR of the master, the slave
     output wire [15:0] dbg_irq,            // the IRQ lines into them
     output wire [15:0] dbg_ps2,            // the 8042: IRQs, output buffer, enables, states
@@ -329,6 +337,7 @@ wire [10:0] vga_height;
 wire  [8:0] vga_stride;
 wire  [3:0] vga_flags;
 wire        vga_off;
+wire        vga_565;      // the HiColor DAC is in 16-bit 565 (vga.v's DAC registers, z486_sources.py)
 wire  [7:0] vga_pal_a;
 wire [17:0] vga_pal_d;
 wire        vga_pal_we;
@@ -337,6 +346,8 @@ wire  [8:0] sample_cms_l;
 wire  [8:0] sample_cms_r;
 wire [15:0] sample_sb_l;
 wire [15:0] sample_sb_r;
+wire        sample_sb_new;     // toggles with each sample the DSP outputs (clk_audio)
+wire        sample_sb_mute;    // the DSP holds its output at 0 (clk_audio)
 wire [15:0] sample_opl_l;
 wire [15:0] sample_opl_r;
 wire        speaker_out;
@@ -353,8 +364,6 @@ wire  [4:0] vol_line_l;
 wire  [4:0] vol_line_r;
 wire  [1:0] vol_spk;
 wire  [4:0] vol_en;
-
-wire        video_f60 = 1'b1;           // MiSTer's default: VGA timing forced to 60 Hz
 
 system #(
     .SYS_FREQ(CLK_HZ),
@@ -376,7 +385,8 @@ system #(
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
     .floppy_wp           (2'b00),
-    .joystick_dis        (2'b10),          // joystick 2 absent: its axes and buttons read 1
+    .joystick_dis        ({1'b1, joy_off}), // joystick 2 absent (its axes and buttons read 1),
+                                            // joystick 1 too with the menu's "Joystick: Off"
     .joystick_dig_1      ({6'd0, joy_dig}),
     .joystick_dig_2      (14'd0),
     .joystick_ana_1      (16'd0),          // no stick movement: the axes follow the directions
@@ -532,6 +542,7 @@ system #(
     .video_stride        (vga_stride),
     .video_flags         (vga_flags),
     .video_off           (vga_off),
+    .video_565           (vga_565),
     .video_pal_a         (vga_pal_a),
     .video_pal_d         (vga_pal_d),
     .video_pal_we        (vga_pal_we),
@@ -541,6 +552,8 @@ system #(
     .sample_cms_r        (sample_cms_r),
     .sample_sb_l         (sample_sb_l),
     .sample_sb_r         (sample_sb_r),
+    .sample_sb_new       (sample_sb_new),
+    .sample_sb_mute      (sample_sb_mute),
     .sample_opl_l        (sample_opl_l),
     .sample_opl_r        (sample_opl_r),
     .sound_fm_mode       (1'b1),           // OPL3
@@ -585,6 +598,9 @@ system #(
     .dbg_sb_smp_stb      (dbg_sb_smp_stb),
     .dbg_sb_smp_dif      (dbg_sb_smp_dif),
     .dbg_sb_smp_pos      (dbg_sb_smp_pos),
+    .dbg_sb_out_stb      (dbg_sb_out_stb),
+    .dbg_sb_out_dif      (dbg_sb_out_dif),
+    .dbg_sb_out_why      (dbg_sb_out_why),
     .inta_hold           (inta_hold),
     .dbg_pic             (dbg_pic),
     .dbg_irq             (dbg_irq),
@@ -651,7 +667,14 @@ assign video_ce = core_ce_pixel;
 // ------------------------------------------------------------------------------------------
 // SVGA framebuffer descriptor (z486_mister.sv, MISTER_FB): ET4000 linear hi-colour modes set
 // vga_flags[1:0] != 0 with PELWIDTH (vga_flags[2]) = 0; the scaler then reads the pixels from
-// the framebuffer instead of the VGA stream. Format bits 4:3 as ao486's defaults (RGB, 565).
+// the framebuffer instead of the VGA stream. Format bits 4:3 = BGR, 1555: a PC's pixel order
+// (a 16-bit word's blue in bits 4..0, red in the top; 24 bit blue, green, red in memory) and
+// 32K colours, what z486_mister.sv's menu defaults to ({~status[5], ~status[6]}, both 0).
+// Until 2026-11-07 RGB and 565 here: Windows 95's High Color showed dark blue as dark red,
+// teal as orange-brown, white as pale yellow-green, and True Color had red and blue swapped.
+// Bit 3 follows the HiColor DAC's mode (vga.v's command and extended registers, as Tseng's
+// BIOS programs them, z486_sources.py): 565 when it is in 16-bit mode (VESA 111h, 114h, 117h),
+// 1555 otherwise. Until 2026-11-08 always 1555: 16-bit pictures had their greens off.
 // ------------------------------------------------------------------------------------------
 
 always @(posedge clk_sys) begin
@@ -663,8 +686,20 @@ always @(posedge clk_sys) begin
     fb_height      <= vga_flags[3] ? {2'b0, vga_height[10:1]} : {1'b0, vga_height};
     fb_format[2:0] <= (vga_flags[1:0] == 2'd3) ? 3'b101 :
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
-    fb_format[4:3] <= 2'b00;
+    fb_format[4:3] <= {1'b1, ~vga_565};
 end
+
+// ------------------------------------------------------------------------------------------
+// The scaler (ascal) writes the VGA picture into HyperRAM and reads it back for HDMI, at 24bpp
+// unless told otherwise. 800x600 at 60 Hz is 86 MB/s each way, 172 MB/s, more than the
+// HyperRAM gives (~160 MB/s with its 128-byte bursts): Windows 3.11's Super VGA 16 colours
+// came out in shifted lines and stray pixel runs. Pictures wider than 90 characters (720
+// pixels: 800x600 16 colours, 132-column text) go at 16bpp 565 instead, 115 MB/s; 640x480,
+// 720-pixel text and the 320-pixel games keep 24bpp, the VGA DAC's 6 bits per colour.
+// The SVGA framebuffer modes (fb_en) do not use this: the scaler reads the PC's framebuffer.
+// ------------------------------------------------------------------------------------------
+
+always @(posedge clk_sys) scaler_16bpp <= (vga_width > 9'd90);
 
 assign fb_pal_a  = vga_pal_a;
 assign fb_pal_d  = {vga_pal_d[17:12], vga_pal_d[17:16],
@@ -705,6 +740,28 @@ always @(posedge clk_audio) begin
     spk_out <= spk >> ~vol_spk;
 end
 
+// The Sound Blaster DSP's output stage (sb_soft.sv): the DSP's samples as they are while it
+// plays; its held level glides to 0 when it stops or mutes (a pop otherwise)
+wire        sb_soft_audio;
+wire [15:0] sbs_l, sbs_r;
+
+synchronizer sb_soft_sync (
+    .clk(clk_audio),
+    .in (sb_soft),
+    .out(sb_soft_audio)
+);
+
+sb_soft sb_soft_inst (
+    .clk   (clk_audio),
+    .on    (sb_soft_audio),
+    .in_l  (sample_sb_l),
+    .in_r  (sample_sb_r),
+    .newt  (sample_sb_new),
+    .mute  (sample_sb_mute),
+    .out_l (sbs_l),
+    .out_r (sbs_r)
+);
+
 reg  [15:0] mix_dry_l;
 reg  [15:0] mix_dry_r;
 reg  [16:0] mix_tmp_l;
@@ -723,7 +780,7 @@ sb_volume #(
                   vol_midi_l,   vol_midi_r,
                   vol_cd_l,     vol_cd_r}),
     .samples_in ({mix_dry_l,    mix_dry_r,
-                  sample_sb_l,  sample_sb_r,
+                  sbs_l,        sbs_r,             // the DSP through its output stage
                   sample_opl_l, sample_opl_r,
                   cdda_l,       cdda_r}),
     .samples_out({master_l, master_r,

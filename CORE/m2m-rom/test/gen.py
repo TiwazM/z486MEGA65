@@ -200,6 +200,11 @@ def cases():
                           "x.bin": pattern(15, 2352)}, code=E_CUE))
     cs.append(dict(dir="/ERR7", file="badiso.iso", files={"badiso.iso": b"\x00" * 3000},
                    code=E_SIZE))
+    # an ISO whose first bytes are text (as a disc's system area may be): an ISO, not a cue
+    txt = b"Some game disc, its system area written as plain text. " * 8
+    tiso = txt + pattern(16, 20 * 2048 - len(txt))
+    cs.append(dict(dir="/ISOTXT", file="text.iso", files={"text.iso": tiso}, code=OK,
+                   single=("text.iso", "MODE1/2048")))
     return cs
 
 

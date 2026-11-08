@@ -51,6 +51,8 @@ entity av_pipeline is
       video_vblank_i          : in  std_logic;
       -- M2M-UPSTREAM interlace (AExp 2026-07-04): interlace field flag for ascal
       video_fl_i              : in  std_logic := '0';
+      -- M2M-UPSTREAM vga-polarity: the VGA connector's sync polarity (framework.vhd)
+      video_vga_pol_i         : in  std_logic_vector(1 downto 0) := "00";
       -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): ascal's framebuffer mode, driven
       -- by the core (an RTG graphics card: the scaler shows a framebuffer in HyperRAM instead
       -- of the core's video). Slowly changing values from the core clock domain - ascal
@@ -67,6 +69,7 @@ entity av_pipeline is
       fb_pal_dw_i             : in  std_logic_vector(23 downto 0) := (others => '0');  -- R G B
       fb_pal_wr_i             : in  std_logic := '0';
       fb_pal_dr_o             : out std_logic_vector(23 downto 0);
+      video_16bpp_i           : in  std_logic := '0';  -- M2M-UPSTREAM scaler-16bpp
       audio_clk_i             : in  std_logic; -- 12.288 MHz
       audio_rst_i             : in  std_logic;
       audio_left_i            : in  std_logic_vector(15 downto 0);
@@ -697,6 +700,7 @@ begin
          video_red_i             => video_red_i,
          video_green_i           => video_green_i,
          video_blue_i            => video_blue_i,
+         video_vga_pol_i         => video_vga_pol_i,  -- M2M-UPSTREAM vga-polarity
          video_hs_i              => video_hs_i,
          video_vs_i              => video_vs_i,
          -- M2M-UPSTREAM screen-center: VGA soft-blanked window (raw when offsets=0)
@@ -721,12 +725,14 @@ begin
          video_pan_y_i           => vid_vga_pan_y,
 
          -- Analog output (VGA and audio jack)
-         vga_red_o               => vga_red,
-         vga_green_o             => vga_green,
-         vga_blue_o              => vga_blue,
-         vga_hs_o                => vga_hs,
-         vga_vs_o                => vga_vs,
-         vdac_clk_o              => vdac_clk,
+         -- M2M-UPSTREAM vga-from-hdmi: the VGA pins come from the digital pipeline (the HDMI
+         -- picture on its clean clock); this pipeline's VGA outputs are unused
+         vga_red_o               => open,
+         vga_green_o             => open,
+         vga_blue_o              => open,
+         vga_hs_o                => open,
+         vga_vs_o                => open,
+         vdac_clk_o              => open,
          vdac_syncn_o            => vdac_sync_n,
          vdac_blankn_o           => vdac_blank_n,
 
@@ -867,6 +873,7 @@ begin
          fb_pal_dw_i             => fb_pal_dw_i,
          fb_pal_wr_i             => fb_pal_wr_i,
          fb_pal_dr_o             => fb_pal_dr_o,
+         video_16bpp_i           => video_16bpp_i,  -- M2M-UPSTREAM scaler-16bpp
          video_hdmax_o            => video_hdmax,
          video_vdmax_o            => video_vdmax,
          video_interlaced_o       => video_interlaced,   -- M2M-UPSTREAM screen-center
@@ -883,6 +890,13 @@ begin
          tmds_data_n_o            => tmds_data_n_o,
          tmds_clk_p_o             => tmds_clk_p_o,
          tmds_clk_n_o             => tmds_clk_n_o,
+         -- M2M-UPSTREAM vga-from-hdmi: the VGA connector shows the HDMI picture
+         vga_red_o                => vga_red,
+         vga_green_o              => vga_green,
+         vga_blue_o               => vga_blue,
+         vga_hs_o                 => vga_hs,
+         vga_vs_o                 => vga_vs,
+         vdac_clk_o               => vdac_clk,
 
          -- Connect to QNICE and Video RAM
          hdmi_dvi_i               => qnice_dvi_i, -- proper clock domain crossing for this very signal happens inside vga_to_hdmi.vhd

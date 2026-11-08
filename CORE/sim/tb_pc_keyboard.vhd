@@ -107,7 +107,8 @@ begin
          tx_data_o       => tx_data,
          tx_ready_i      => tx_ready,
          rx_valid_i      => rx_valid,
-         rx_data_i       => rx_data
+         rx_data_i       => rx_data,
+         dbg_o           => open
       );
 
    i_device : entity work.ps2_device

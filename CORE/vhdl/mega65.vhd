@@ -121,6 +121,9 @@ port (
    video_hblank_o          : out std_logic;
    video_vblank_o          : out std_logic;
    video_fl_o              : out std_logic;  -- interlace field flag for ascal weave deinterlacing
+   -- M2M-UPSTREAM vga-polarity: the VGA connector's sync polarity as the PC's VGA sets it
+   -- (bit 0 HSYNC, bit 1 VSYNC; 1 = negative). video_hs_o/video_vs_o stay active-high.
+   video_vga_pol_o         : out std_logic_vector(1 downto 0);
 
    -- M2M-UPSTREAM rtg-framebuffer (Megamiga 2026-10-09): the RTG graphics card - ascal shows
    -- the framebuffer in HyperRAM instead of the Amiga picture while fb_ena_o = '1' (HDMI only:
@@ -135,6 +138,10 @@ port (
    fb_pal_a_o              : out std_logic_vector( 7 downto 0);
    fb_pal_dw_o             : out std_logic_vector(23 downto 0);
    fb_pal_wr_o             : out std_logic;
+   -- M2M-UPSTREAM scaler-16bpp: the scaler keeps the core picture at 16bpp 565 instead of
+   -- 24bpp (z486_mega65.sv: pictures wider than 720 pixels, for the HyperRAM's bandwidth).
+   -- Core clock domain (= the video clock), slowly changing.
+   video_16bpp_o           : out std_logic;
    fb_pal_dr_i             : in  std_logic_vector(23 downto 0) := (others => '0');
 
    --------------------------------------------------------------------------------------------------------
@@ -355,8 +362,10 @@ constant C_MENU_FLT_SMOOTH    : natural := 22;  -- (21: Sharp, the default)
 constant C_MENU_FLT_PIXELS    : natural := 23;
 constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
 constant C_MENU_SL_50         : natural := 31;
-constant C_MENU_JOY_P5        : natural := 38;  -- the game port's fire 2 on pin 5 (37: pin 9)
-constant C_MENU_RESET         : natural := 43;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_RF_ORIG       : natural := 38;  -- the VGA's own refresh (37: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 45;  -- the game port's fire 2 on pin 5 (44: pin 9)
+constant C_MENU_JOY_OFF       : natural := 46;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 51;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -371,6 +380,11 @@ signal video_clk              : std_logic;
 signal video_rst              : std_logic;
 signal audio_clk              : std_logic;
 signal main_pc_reset          : std_logic;
+signal main_pc_reset_d        : std_logic := '0';
+signal main_led_hd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;   -- drive LED hold
+signal main_led_fd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;
+signal main_led_req_d         : std_logic := '0';                  -- main_disk_req a clock ago
+signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS time again
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
 signal main_joy_dig           : std_logic_vector(7 downto 0);    -- the game port's joystick
@@ -410,6 +424,7 @@ signal main_dbg_log_we        : std_logic;
 signal main_dbg_mem_busy      : std_logic;
 signal main_dbg_io_rd         : std_logic_vector(23 downto 0);   -- the last I/O read: port, byte
 signal main_dbg_io_wr         : std_logic_vector(23 downto 0);   -- the last I/O write
+signal main_vga_pol           : std_logic_vector(1 downto 0) := "00";  -- VSYNC, HSYNC negative
 signal main_dbg_sb_req        : std_logic_vector(1 downto 0);    -- the SB's DMA requests
 signal main_dbg_sb_irq        : std_logic;
 signal main_dbg_io_rd_stb     : std_logic;                       -- main_dbg_io_rd/wr are new
@@ -418,6 +433,9 @@ signal main_dbg_sb_cmd_wait   : std_logic;                       -- a DSP DMA co
 signal main_dbg_sb_smp_stb    : std_logic;                       -- a DSP DMA output sample:
 signal main_dbg_sb_smp_dif    : std_logic_vector(15 downto 0);   -- its jump from the last one
 signal main_dbg_sb_smp_pos    : std_logic_vector(15 downto 0);   -- its index in the block
+signal main_dbg_sb_out_stb    : std_logic;                       -- the DSP's output changed:
+signal main_dbg_sb_out_dif    : std_logic_vector(15 downto 0);   -- by how much,
+signal main_dbg_sb_out_why    : std_logic_vector(1 downto 0);    -- for what
 signal main_dbg_pic           : std_logic_vector(47 downto 0);   -- the PICs' IRR, ISR, IMR
 signal main_dbg_irq           : std_logic_vector(15 downto 0);   -- the IRQ lines into them
 signal main_dbg_ps2           : std_logic_vector(15 downto 0);   -- the 8042's state
@@ -451,15 +469,21 @@ signal main_iot_clong_p       : std_logic := '0';
 signal main_iot_jump_p        : std_logic := '0';
 signal main_iot_jump          : std_logic_vector(7 downto 0) := (others => '0');
 signal main_iot_jpos          : std_logic_vector(15 downto 0) := (others => '0');
+signal main_iot_ojump_p       : std_logic := '0';                 -- the DSP's output jumped:
+signal main_iot_ojump         : std_logic_vector(7 downto 0) := (others => '0');  -- by this,
+signal main_iot_owhy          : std_logic_vector(1 downto 0) := (others => '0');  -- for this
 -- 7..0 changed: start again, 8: stop at a 1 ms wait, 9: stop now, 10: the Sound Blaster's
 -- stalled-transfer fix off (sound_dsp.v's dma_take_starved), 11: stop when full, 19..12: the
 -- smallest sample jump logged, in 256ths (default 0x40, a quarter of the full range), 20: the
 -- PIC's vector hold from the first INTA off (pic_inta_bridge.sv's vector_hold), 22..21: a 1351
--- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x)
-signal main_iot_arm           : std_logic_vector(23 downto 0);
-signal main_iot_arm_d         : std_logic_vector(23 downto 0) := (others => '0');
+-- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x),
+-- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft), 25: the trace
+-- quiet: no DMA flip-flop clears (0Ch, D8h) or DMA status reads (08h, D0h), which a driver
+-- polling its position writes and reads every few hundred microseconds
+signal main_iot_arm           : std_logic_vector(26 downto 0);
+signal main_iot_arm_d         : std_logic_vector(26 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(23 downto 0) := x"040000";
+signal qnice_iot_arm          : std_logic_vector(26 downto 0) := "000" & x"040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -505,9 +529,13 @@ signal main_nat_lines         : unsigned(11 downto 0) := (others => '0');
 signal main_nat_w             : unsigned(11 downto 0) := (others => '0');
 signal main_nat_h             : unsigned(11 downto 0) := (others => '0');
 signal main_nat_same          : natural range 0 to 7 := 0;
-signal main_nat_size          : std_logic_vector(23 downto 0) := (others => '0');
-signal qnice_nat_size         : std_logic_vector(23 downto 0);
+signal main_nat_size          : std_logic_vector(24 downto 0) := (others => '0');  -- 70 Hz, w, h
+signal main_nat_per           : unsigned(20 downto 0) := (others => '0');          -- clocks this frame
+signal main_nat_slow          : std_logic := '0';     -- this frame is longer than 1/65 s
+signal main_nat_f             : std_logic := '0';     -- the last frame was shorter
+signal qnice_nat_size         : std_logic_vector(24 downto 0);
 signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
+signal qnice_hdmi_mode        : video_mode_type;   -- the HDMI mode (native's or the menu's)
 signal qnice_nat_on           : std_logic := '0';
 signal qnice_nat_w            : natural range 0 to 4095 := 640;
 signal qnice_nat_h            : natural range 0 to 4095 := 480;
@@ -521,6 +549,7 @@ signal main_kbd_tx_data       : std_logic_vector(7 downto 0);
 signal main_kbd_tx_ready      : std_logic;
 signal main_kbd_rx_valid      : std_logic;
 signal main_kbd_rx_data       : std_logic_vector(7 downto 0);
+signal main_dbg_kbd           : std_logic_vector(31 downto 0);   -- pc_keyboard.vhd's readout
 signal main_kbd_dev_clk       : std_logic;     -- the keyboard's lines
 signal main_kbd_dev_dat       : std_logic;
 signal main_kbd_host_clk      : std_logic;     -- the 8042's lines
@@ -639,6 +668,7 @@ component z486_mega65 is
       fb_pal_a           : out   std_logic_vector(7 downto 0);
       fb_pal_d           : out   std_logic_vector(23 downto 0);
       fb_pal_wr          : out   std_logic;
+      scaler_16bpp       : out   std_logic;
       ddram_busy         : in    std_logic;
       ddram_burstcnt     : out   std_logic_vector(7 downto 0);
       ddram_addr         : out   std_logic_vector(28 downto 0);
@@ -678,7 +708,9 @@ component z486_mega65 is
       ps2_mouse_clk_out  : out   std_logic;
       ps2_mouse_data_out : out   std_logic;
       joy_dig            : in    std_logic_vector(7 downto 0);
+      joy_off            : in    std_logic;
       cpu_slow           : in    std_logic;
+      video_f60          : in    std_logic;
       ram_size           : in    std_logic_vector(1 downto 0);
       l2_enable          : in    std_logic;
       cache_off          : in    std_logic;
@@ -708,6 +740,10 @@ component z486_mega65 is
       dbg_sb_smp_stb     : out   std_logic;
       dbg_sb_smp_dif     : out   std_logic_vector(15 downto 0);
       dbg_sb_smp_pos     : out   std_logic_vector(15 downto 0);
+      dbg_sb_out_stb     : out   std_logic;
+      dbg_sb_out_dif     : out   std_logic_vector(15 downto 0);
+      dbg_sb_out_why     : out   std_logic_vector(1 downto 0);
+      sb_soft            : in    std_logic;
       inta_hold          : in    std_logic;
       dbg_pic            : out   std_logic_vector(47 downto 0);
       dbg_irq            : out   std_logic_vector(15 downto 0);
@@ -848,11 +884,62 @@ begin
    main_pc_reset <= main_rst or main_hr_rst or main_reset_m2m_i or main_reset_core_i or
                     not main_pc_roms_ok(0);
 
-   -- Power LED: green; blue while the reset button is held long. Drive LED: off (no drives yet).
+   -- The PC's CMOS clock again from the MEGA65's RTC whenever the PC restarts (pc_mgmt.vhd): the
+   -- reset button and "Reset the PC" (main_pc_reset rises), and the keyboard controller's reset
+   -- (port 64h <- FEh: Bochs' BIOS does Ctrl+Alt+Del so, and Windows restarts so). On a PC the
+   -- CMOS clock is the RTC; here the PC's runs on from whatever it was set to, so a wrong time at
+   -- power-on (the framework's first RTC read, 2026-11-06) stayed until the core restarted.
+   p_main_rtc_sync : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         main_pc_reset_d <= main_pc_reset;
+         main_rtc_sync   <= '0';
+         if main_pc_reset = '1' and main_pc_reset_d = '0' then
+            main_rtc_sync <= '1';
+         end if;
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr = x"0064FE" then
+            main_rtc_sync <= '1';
+         end if;
+      end if;
+   end process p_main_rtc_sync;
+
+   -- Power LED: green; blue while the reset button is held long.
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
-   main_drive_led_o     <= '0';
-   main_drive_led_col_o <= x"00FF00";
+
+   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line:
+   -- amber while the hard disk or the CD-ROM drive has a command or a block in hand (ide.v asks
+   -- pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), green for the floppy
+   -- drives (the floppy wins when both). Each access keeps it lit for 40 ms at least, so that a
+   -- one-sector access still shows. main_disk_req is a toggle (one change per request,
+   -- pc_mgmt.vhd), not a level: its changes count (rtcsnd took the level, and an odd count of
+   -- requests left the LED on for good).
+   p_main_drive_led : process (main_clk)
+      constant C_HOLD : natural := CORE_CLK_SPEED / 25;      -- 40 ms
+      variable v_hd   : boolean;
+      variable v_fd   : boolean;
+   begin
+      if rising_edge(main_clk) then
+         main_led_req_d <= main_disk_req;
+         v_hd := main_ide0_request /= "000" or main_ide1_request /= "000" or
+                 (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '1');  -- units 2, 3
+         v_fd := main_fdd_request /= "00" or
+                 (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '0');  -- units 0, 1
+         if v_hd then
+            main_led_hd <= C_HOLD;
+         elsif main_led_hd /= 0 then
+            main_led_hd <= main_led_hd - 1;
+         end if;
+         if v_fd then
+            main_led_fd <= C_HOLD;
+         elsif main_led_fd /= 0 then
+            main_led_fd <= main_led_fd - 1;
+         end if;
+      end if;
+   end process p_main_drive_led;
+
+   main_drive_led_o     <= '1' when main_led_hd /= 0 or main_led_fd /= 0 else '0';
+   main_drive_led_col_o <= x"00FF00" when main_led_fd /= 0 else x"FF8000";
 
    i_z486 : z486_mega65
       generic map (
@@ -882,6 +969,7 @@ begin
          fb_pal_a           => fb_pal_a_o,
          fb_pal_d           => fb_pal_dw_o,
          fb_pal_wr          => fb_pal_wr_o,
+         scaler_16bpp       => video_16bpp_o,
 
          ddram_busy         => main_ddram_busy,
          ddram_burstcnt     => main_ddram_burstcnt,
@@ -924,7 +1012,15 @@ begin
          ps2_mouse_clk_in   => main_mouse_dev_clk,
          ps2_mouse_data_in  => main_mouse_dev_dat,
          joy_dig            => main_joy_dig,
+         -- "Joystick: Off": the game port without a stick, as a PC with none plugged in (the
+         -- MEGA65 can't tell a released digital stick from an empty port, and DOS Quake, finding
+         -- one, stops to calibrate it with its prompts off screen)
+         joy_off            => main_osm_control_i(C_MENU_JOY_OFF),
          cpu_slow           => main_cpu_slow,
+         -- the menu's "Refresh": 60 Hz (the default) or the VGA's own timing, which analog
+         -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
+         -- 26.9 kHz lines)
+         video_f60          => not main_osm_control_i(C_MENU_RF_ORIG),
          ps2_mouse_clk_out  => main_mouse_host_clk,
          ps2_mouse_data_out => main_mouse_host_dat,
 
@@ -958,6 +1054,10 @@ begin
          dbg_sb_smp_stb     => main_dbg_sb_smp_stb,
          dbg_sb_smp_dif     => main_dbg_sb_smp_dif,
          dbg_sb_smp_pos     => main_dbg_sb_smp_pos,
+         dbg_sb_out_stb     => main_dbg_sb_out_stb,
+         dbg_sb_out_dif     => main_dbg_sb_out_dif,
+         dbg_sb_out_why     => main_dbg_sb_out_why,
+         sb_soft            => not main_iot_arm(24),   -- the DSP's output stage (default on)
          inta_hold          => not main_iot_arm(20),
          dbg_pic            => main_dbg_pic,
          dbg_irq            => main_dbg_irq,
@@ -987,6 +1087,7 @@ begin
          ide_request_i     => main_ide0_request,
          ide1_request_i    => main_ide1_request,
          rtc_i             => main_rtc_i,
+         rtc_sync_i        => main_rtc_sync,
          mnt_i             => qnice_disk_mnt,
          sd_req_o          => main_disk_req,
          sd_req_wr_o       => main_disk_req_wr,
@@ -1048,22 +1149,24 @@ begin
          dst_data_o => qnice_cd_stat
       ); -- i_cdc_cd_stat
 
-   -- The MEGA65 keyboard as the PC's PS/2 keyboard. Not reset with the PC, as a real one
-   -- is not: the BIOS resets it with command FF.
+   -- The MEGA65 keyboard as the PC's PS/2 keyboard, reset with the PC: the BIOS sends the
+   -- keyboard nothing (no FF reset; the log of a whole boot, 2026-11-07), so a key this module
+   -- held for good would otherwise have stayed held until the core was loaded again.
    i_pc_keyboard : entity work.pc_keyboard
       generic map (
          G_CLK_HZ        => CORE_CLK_SPEED
       )
       port map (
          clk_i           => main_clk,
-         rst_i           => main_rst,
+         rst_i           => main_pc_reset,
          key_num_i       => main_kb_key_num_i,
          key_pressed_n_i => main_kb_key_pressed_n_i,
          tx_valid_o      => main_kbd_tx_valid,
          tx_data_o       => main_kbd_tx_data,
          tx_ready_i      => main_kbd_tx_ready,
          rx_valid_i      => main_kbd_rx_valid,
-         rx_data_i       => main_kbd_rx_data
+         rx_data_i       => main_kbd_rx_data,
+         dbg_o           => main_dbg_kbd
       ); -- i_pc_keyboard
 
    i_ps2_keyboard : entity work.ps2_device
@@ -1148,6 +1251,8 @@ begin
          pot_y_i         => main_m1351_y,
          flip_i          => main_iot_arm(22 downto 21),
          c1351_o         => main_c1351,
+         pin9_i          => main_pot1_x_i,             -- an Amiga mouse's right button
+         pin5_i          => main_pot1_y_i,             -- and middle (a mouSTer's activepotlines)
          key_num_i       => main_kb_key_num_i,
          key_pressed_n_i => main_kb_key_pressed_n_i,
          tx_valid_o      => main_mouse_tx_valid,
@@ -1212,9 +1317,17 @@ begin
             -- the PICs and the 8042 (z486_sources.py): master ISR:IRR, slave ISR:IRR, slave
             -- IMR:master IMR, the IRQ lines, the 8042's state and FIFOs, the INTAs the PIC
             -- acknowledged with another vector than the CPU took, the last one's two vectors;
-            -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd)
-            main_dbg_snap2 <= x"0000" & x"0000" & x"0000" & x"0000" & x"0000" &
-                              x"000" & "000" & main_c1351 &
+            -- the paddle values of port 1 (Y:X) and port 2, a 1351 on port 1 (pc_mouse.vhd);
+            -- the keyboard translator's state (pc_keyboard.vhd, words 12:11); native's
+            -- measurement (p_main_native): word 15 the last frame's width, its 70 Hz flag, the
+            -- framebuffer on; 14 its lines, the frames alike so far; 13 the accepted width and
+            -- 70 Hz flag; word 10's top the accepted lines
+            main_dbg_snap2 <= std_logic_vector(main_nat_w) & main_nat_f & main_fb_en & "00" &
+                              std_logic_vector(main_nat_h) &
+                              std_logic_vector(to_unsigned(main_nat_same, 3)) & '0' &
+                              main_nat_size(23 downto 12) & main_nat_size(24) & "000" &
+                              main_dbg_kbd &
+                              main_nat_size(11 downto 0) & "000" & main_c1351 &
                               main_pot2_y_i & main_pot2_x_i & main_pot1_y_i & main_pot1_x_i &
                               main_dbg_inta_last & main_dbg_inta_bad &
                               main_dbg_ps2_fifo & main_dbg_ps2 & main_dbg_irq &
@@ -1318,14 +1431,20 @@ begin
    --   kind 6  a new DMA command has been held back for 1 ms
    --   kind 7  a DMA output sample jumped from the one before (left channel) by the threshold
    --           or more (main_iot_arm(19..12), in 256ths; bits 7..0 the jump in 256ths, 31..16
-   --           its index in the DSP's block: a late buffer half jumps at index 0)
+   --           its index in the DSP's block: a late buffer half jumps at index 0); with bit 12
+   --           set, the DSP's output itself jumped so (before z486_mega65.sv's output stage),
+   --           bits 9..8 why: 0 a DMA sample, 1 the DSP holds it at 0 (speaker off in SB Pro
+   --           mode, 80h), 2 a direct output or ADPCM
    -- QNICE can also stop it (main_iot_arm(9)), or start it to stop when full (main_iot_arm(11):
-   -- the first 1024 entries instead of the last).
+   -- the first 1024 entries instead of the last). Started with main_iot_arm(26) ("timer"), kinds
+   -- 0 and 1 take the timer and port 61h too: writes to 40-43h and 61h, reads of 40-42h and
+   -- 61h (a program waiting on the speaker timer's output or the refresh bit, SpeedSys).
    -- Bits 63..32 the time, 31..16 the port, 15..13 the kind, 7..0 the byte.
    p_main_iot : process (main_clk)
-      function wr_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      function wr_ok (p : std_logic_vector(15 downto 0); tmr : std_logic) return boolean is
       begin
-         return p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
+         return (tmr = '1' and (p(15 downto 2) = "00000000010000" or p = x"0061")) or
+                p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
                 (p(15 downto 4) = x"008" and p /= x"0080") or
                 p = x"0060" or p = x"0064" or
                 (p(15 downto 4) = x"022" and p(3 downto 2) /= "00" and p(3 downto 1) /= "100");
@@ -1336,9 +1455,10 @@ begin
          return ((p = x"0020" or p = x"00A0") and v /= x"20" and v(4 downto 3) /= "01") or
                 (p = x"0021" and v /= imr);
       end function pic_ok;
-      function rd_ok (p : std_logic_vector(15 downto 0)) return boolean is
+      function rd_ok (p : std_logic_vector(15 downto 0); tmr : std_logic) return boolean is
       begin
-         return p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
+         return (tmr = '1' and (p = x"0040" or p = x"0041" or p = x"0042" or p = x"0061")) or
+                p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
                 p = x"00D0" or p = x"0060" or p = x"0064";
       end function rd_ok;
    begin
@@ -1389,18 +1509,28 @@ begin
             main_iot_jump   <= main_dbg_sb_smp_dif(15 downto 8);
             main_iot_jpos   <= main_dbg_sb_smp_pos;
          end if;
+         if main_dbg_sb_out_stb = '1' and
+            unsigned(main_dbg_sb_out_dif(15 downto 8)) >= unsigned(main_iot_arm(19 downto 12)) then
+            main_iot_ojump_p <= '1';
+            main_iot_ojump   <= main_dbg_sb_out_dif(15 downto 8);
+            main_iot_owhy    <= main_dbg_sb_out_why;
+         end if;
 
          main_iot_we <= '0';
          -- stopping when full: the 1024th entry may be on its way (main_iot_we)
          if main_iot_run = '1' and (main_iot_arm(11) = '0' or main_iot_cnt < 1023 or
                                     (main_iot_cnt = 1023 and main_iot_we = '0')) then
-            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8)) or
-               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) then
+            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8), main_iot_arm(26)) or
+               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) and
+               not (main_iot_arm(25) = '1' and (main_dbg_io_wr(23 downto 8) = x"000C" or
+                                                main_dbg_io_wr(23 downto 8) = x"00D8")) then
                main_iot_entry <= std_logic_vector(main_iot_us) & main_dbg_io_wr(23 downto 8) &
                                  "000" & "00000" & main_dbg_io_wr(7 downto 0);
                main_iot_we    <= '1';
-            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8)) and
-                  main_dbg_io_rd /= main_iot_last_rd then
+            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8), main_iot_arm(26)) and
+                  main_dbg_io_rd /= main_iot_last_rd and
+                  not (main_iot_arm(25) = '1' and (main_dbg_io_rd(23 downto 8) = x"0008" or
+                                                   main_dbg_io_rd(23 downto 8) = x"00D0")) then
                main_iot_entry  <= std_logic_vector(main_iot_us) & main_dbg_io_rd(23 downto 8) &
                                   "001" & "00000" & main_dbg_io_rd(7 downto 0);
                main_iot_we     <= '1';
@@ -1434,6 +1564,11 @@ begin
                                   main_iot_jump;
                main_iot_we     <= '1';
                main_iot_jump_p <= '0';
+            elsif main_iot_ojump_p = '1' then
+               main_iot_entry   <= std_logic_vector(main_iot_us) & x"0000" & "111" & "100" &
+                                   main_iot_owhy & main_iot_ojump;
+               main_iot_we      <= '1';
+               main_iot_ojump_p <= '0';
             end if;
          end if;
          if main_iot_we = '1' then
@@ -1488,7 +1623,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 24,
+         G_DATA_SIZE    => 27,
          G_REGISTER_SRC => false
       )
       port map (
@@ -1510,16 +1645,47 @@ begin
          dst_data_o => qnice_iot_stat
       ); -- i_cdc_iot_stat
 
+   -- M2M-UPSTREAM vga-polarity: a VGA card tells an analog monitor how many lines its mode has by
+   -- the sync polarity, from the misc output register (port 3C2h: bit 6 HSYNC, bit 7 VSYNC, 1 =
+   -- negative): +/- 350 lines (EGA modes), -/+ 400 (DOS text, 320x200), -/- 480. z486's vga.v
+   -- keeps those bits (general_hsync/general_vsync) but makes active-high syncs, and MiSTer's
+   -- video_cleaner makes them active-high in any case, which the scaler wants; so on the VGA
+   -- connector every mode had +/+ and a monitor had to guess: a Dell took DOS text for 640x350,
+   -- sampled the 720-pixel lines with the wrong clock (uneven strokes, shimmer, edges cut off)
+   -- and its auto adjust could not fix it. The bits come from the PC's writes to 3C2h (as
+   -- vga.v takes them: no reset), the analog pipeline turns the connector's syncs to match.
+   p_main_vga_pol : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr(23 downto 8) = x"03C2" then
+            main_vga_pol <= main_dbg_io_wr(7) & main_dbg_io_wr(6);
+         end if;
+      end if;
+   end process p_main_vga_pol;
+
+   video_vga_pol_o <= main_vga_pol;
+
    -- Native (M2M-UPSTREAM native): the PC's picture size as ascal sees it: the pixels (ce) of
    -- the widest line's display enable, the lines of a frame; the SVGA framebuffer's size while
    -- ascal shows it. A size counts once it held for eight frames (mode changes pass through
-   -- odd frames).
+   -- odd frames). Bit 24: the frames are shorter than 1/65 s (main_clk's clocks from one
+   -- vblank to the next), as a VGA's 400- and 350-line modes at 70 Hz with "Refresh: Original
+   -- (VGA)"; with "60 Hz (HDMI)" (video_f60) every mode runs at 60 Hz. Held for the same eight
+   -- frames as the size.
    p_main_native : process (main_clk)
+      constant C_PER_65HZ : natural := 984615;   -- 64 MHz / 65 Hz
       variable v_de : std_logic;
       variable v_w  : unsigned(11 downto 0);
       variable v_l  : unsigned(11 downto 0);
+      variable v_f  : std_logic;
    begin
       if rising_edge(main_clk) then
+         if main_nat_per /= (main_nat_per'range => '1') then
+            main_nat_per <= main_nat_per + 1;
+         end if;
+         if main_nat_per = C_PER_65HZ then
+            main_nat_slow <= '1';
+         end if;
          if video_ce_o = '1' then
             v_de := not (video_hblank_o or video_vblank_o);
             v_w  := main_nat_wmax;
@@ -1536,17 +1702,21 @@ begin
                main_nat_cnt <= (others => '0');
             end if;
             if video_vblank_o = '1' and main_nat_vb_d = '0' then   -- a frame ended
-               if v_w = main_nat_w and v_l = main_nat_h then
+               v_f := not main_nat_slow;
+               if v_w = main_nat_w and v_l = main_nat_h and v_f = main_nat_f then
                   if main_nat_same = 7 then
-                     main_nat_size <= std_logic_vector(v_w & v_l);
+                     main_nat_size <= v_f & std_logic_vector(v_w & v_l);
                   else
                      main_nat_same <= main_nat_same + 1;
                   end if;
                else
                   main_nat_same <= 0;
                end if;
-               main_nat_w <= v_w;
-               main_nat_h <= v_l;
+               main_nat_w    <= v_w;
+               main_nat_h    <= v_l;
+               main_nat_f    <= v_f;
+               main_nat_per  <= (others => '0');
+               main_nat_slow <= '0';
                v_w := (others => '0');
                v_l := (others => '0');
             end if;
@@ -1554,14 +1724,14 @@ begin
             main_nat_lines <= v_l;
          end if;
          if main_fb_en = '1' then
-            main_nat_size <= fb_hsize_o & fb_vsize_o;
+            main_nat_size <= '0' & fb_hsize_o & fb_vsize_o;
          end if;
       end if;
    end process p_main_native;
 
    i_cdc_native : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE => 24
+         G_DATA_SIZE => 25
       )
       port map (
          src_data_i => main_nat_size,
@@ -1726,6 +1896,10 @@ begin
 
    -- Native: the smallest HDMI mode the PC's picture fits into at its own size: 640x480 at
    -- 60 Hz for 640x480 and 640x400, 720x480 for 720x400 text, 800x600 and 1024x768 for SVGA.
+   -- A 400- or 350-line picture at 70 Hz ("Refresh: Original (VGA)") gets a VGA card's own
+   -- 640x400 or 720x400 at 70 Hz (M2M-UPSTREAM vga70), so that HDMI, and VGA, which shows the
+   -- HDMI picture, keep its rate; the scaler repeats or drops a frame about once a minute (the
+   -- PC's 70.09 Hz and the HDMI clock's 70.09/70.11 Hz come from different clocks).
    -- The core gives 320/360-pixel lines without the VGA's pixel doubling and 200-line modes
    -- without line doubling: those come doubled (320x200 as 640x400). The scaler copies pixels
    -- into a window of that size in the middle; the monitor scales. Nothing sensible yet (the
@@ -1753,6 +1927,10 @@ begin
          if v_w < 256 or v_h < 160 then
             qnice_nat_mode <= C_VIDEO_HDMI_640_60;
             qnice_nat_on   <= '0';
+         elsif v_tw <= 640 and v_th <= 400 and qnice_nat_size(24) = '1' then
+            qnice_nat_mode <= C_VIDEO_VGA_640_70;
+         elsif v_tw <= 720 and v_th <= 400 and qnice_nat_size(24) = '1' then
+            qnice_nat_mode <= C_VIDEO_VGA_720_70;
          elsif v_tw <= 640 and v_th <= 480 then
             qnice_nat_mode <= C_VIDEO_HDMI_640_60;
          elsif v_tw <= 720 and v_th <= 480 then
@@ -1777,12 +1955,13 @@ begin
                             when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
                          (others => '0');
 
-   qnice_video_mode_o <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+   qnice_hdmi_mode    <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
                          C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
                          C_VIDEO_SVGA_1024_60  when qnice_osm_control_i(C_MENU_HDMI_1024) = '1' else
                          C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_HDMI_800)  = '1' else
                          C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
                          C_VIDEO_HDMI_16_9_60;
+   qnice_video_mode_o <= qnice_hdmi_mode;
 
    qnice_dvi_o                <= '0';         -- HDMI with sound
    qnice_scandoubler_o        <= '0';         -- the PC's VGA is 31 kHz already
@@ -1791,7 +1970,16 @@ begin
    qnice_audio_mute_o         <= '0';
    qnice_audio_filter_o       <= '0';
    qnice_zoom_crop_o          <= '0';
-   qnice_osm_cfg_scaling_o    <= (others => '1');
+   -- The menu's size on HDMI (vga_osm.vhd draws cells of 16 - S pixels for the lowest set bit S,
+   -- kept in the top right corner, M2M-UPSTREAM osm-anchor): half size in the 640- and 720-pixel
+   -- modes (480p and native's 400/480-line ones), where at full size the file browser filled the
+   -- picture: 8-pixel cells, the 8x8 font 1:1 and crisp (75 %, 12-pixel cells, looked soft on
+   -- the board, 2026-11-07); full size (the font doubled) in the others
+   qnice_osm_cfg_scaling_o    <= "100000000" when qnice_hdmi_mode = C_VIDEO_HDMI_640_60   or
+                                                  qnice_hdmi_mode = C_VIDEO_HDMI_720_5994 or
+                                                  qnice_hdmi_mode = C_VIDEO_VGA_640_70    or
+                                                  qnice_hdmi_mode = C_VIDEO_VGA_720_70    else
+                                 "000000001";
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
    -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
    qnice_ascal_mode_o         <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
@@ -1820,7 +2008,8 @@ begin
    --                access goes uncached; back on, reset the PC: lines may be stale)
    --    0x0004      read: the I/O trace's entries written (p_main_iot); write: start it again
    --                (empty, running; bit 0 = stop at the Sound Blaster's first 1 ms DMA wait,
-   --                bit 1 = stop when full)
+   --                bit 1 = stop when full, bit 2 = quiet: no DMA flip-flop clears or status
+   --                reads, a polling driver's)
    --    0x0005      read: bit 1 = it is running, bit 0 = it has wrapped (1024 or more);
    --                write: stop it
    --    0x0006      bit 0 = the Sound Blaster takes a new DMA command over a stalled transfer
@@ -1834,6 +2023,8 @@ begin
    --                acknowledge (pic_inta_bridge.sv's vector_hold, z486_sources.py; default on)
    --    0x000D      bit 0 = a 1351 mouse's x reversed, bit 1 its y (pc_mouse.vhd's flip_i);
    --                bit 2 = its x and y swapped (main_m1351_x)
+   --    0x000E      bit 0 = the Sound Blaster DSP's output stage (z486_mega65.sv's sb_soft:
+   --                its output glides to 0 when it stops or holds it at 0; default on)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
@@ -1872,6 +2063,8 @@ begin
                qnice_iot_arm(9 downto 0) <= '0' & qnice_dev_data_i(0) &
                                             std_logic_vector(unsigned(qnice_iot_arm(7 downto 0)) + 1);
                qnice_iot_arm(11) <= qnice_dev_data_i(1);
+               qnice_iot_arm(25) <= qnice_dev_data_i(2);
+               qnice_iot_arm(26) <= qnice_dev_data_i(3);
             elsif qnice_dev_addr_i = x"0000005" then
                qnice_iot_arm(9) <= '1';
             elsif qnice_dev_addr_i = x"0000006" then
@@ -1882,6 +2075,8 @@ begin
                qnice_iot_arm(20) <= not qnice_dev_data_i(0);
             elsif qnice_dev_addr_i = x"000000D" then
                qnice_iot_arm(23 downto 21) <= qnice_dev_data_i(2 downto 0);
+            elsif qnice_dev_addr_i = x"000000E" then
+               qnice_iot_arm(24) <= not qnice_dev_data_i(0);
             end if;
          end if;
          if qnice_rst_i = '1' then
@@ -1934,6 +2129,7 @@ begin
       end loop;
       put(v_blk0 and v_low = 12, x"000" & "000" & not qnice_iot_arm(20));
       put(v_blk0 and v_low = 13, x"000" & "0" & qnice_iot_arm(23 downto 21));
+      put(v_blk0 and v_low = 14, x"000" & "000" & not qnice_iot_arm(24));
       for k in 0 to 7 loop
          put(v_blk0 and v_low = 16 + k, qnice_dbg_snap(16 * k + 15 downto 16 * k));
          put(v_blk0 and v_low = 24 + k, qnice_dbg_snap(16 * k + 143 downto 16 * k + 128));

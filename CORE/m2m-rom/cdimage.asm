@@ -162,8 +162,20 @@ _CDP_SY         CMP     0x00FF, @R4++
                 CMP     0, @R4
                 RBRA    _CDP_BIN, Z
 
-                ; text (tab, LF, CR, 20h..7Eh, a UTF-8 byte order mark): a cue
-_CDP_NSYNC      MOVE    CDI_HDR, R4
+                ; text (tab, LF, CR, 20h..7Eh, a UTF-8 byte order mark) in a
+                ; file under 32K: a cue. An ISO 9660 image is 18 sectors (36K)
+                ; at least, and its first 16 bytes may well be text.
+_CDP_NSYNC      MOVE    CDI_HFDH, R0
+                MOVE    @R0, R0
+                MOVE    R0, R1
+                ADD     FAT32$FDH_SIZE_HI, R1
+                CMP     0, @R1
+                RBRA    _CDP_ISO, !Z
+                MOVE    R0, R1
+                ADD     FAT32$FDH_SIZE_LO, R1
+                CMP     @R1, 0x7FFF             ; 32K or more
+                RBRA    _CDP_ISO, N
+                MOVE    CDI_HDR, R4
                 MOVE    16, R5
                 CMP     0x00EF, @R4
                 RBRA    _CDP_TX, !Z

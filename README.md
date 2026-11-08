@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 64 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
-The current version is **v0.1-preview** (see
+The current version is **v0.2** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -17,11 +17,20 @@ The current version is **v0.1-preview** (see
 - Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
 
 **Video**
-- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included)
+- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included);
+  High Color (32K and 64K colours) up to 800x600 and True Color at 640x480,
+  through a HiColor DAC as Tseng's BIOS expects it, so the VESA modes report
+  correctly
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
-  resolution
+  resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
+  as a VGA card sends them)
 - Scaling filters (Sharp, Smooth, Pixels) and optional scanlines (25 % or 50 %)
-- No tearing when the PC's 70 Hz text mode goes out at 60 Hz
+- No tearing on HDMI (the scaler keeps three frames)
+- VGA out: the HDMI picture, menu included, on the same steady clock, so LCDs
+  sample it cleanly. For an analog monitor or a CRT, set HDMI to "Native" and
+  "Refresh" to "Original (VGA)": DOS text then comes as 720x400 and 320x200 as
+  640x400 at 70 Hz, SVGA at 60 Hz, as from a VGA card. "60 Hz (HDMI)", the
+  default, retimes every mode to 60 Hz, which suits HDMI
 
 **Sound**
 - Sound Blaster 16 with OPL3 FM music
@@ -34,7 +43,8 @@ The current version is **v0.1-preview** (see
   - ISO images, raw BIN images, and BIN/CUE discs, including multiple files,
     WAVE audio, pregaps and mixed sector sizes
   - Up to 99 tracks, with CD audio
-  - Works with DOS CD-ROM drivers and MSCDEX, and Windows' Media Player
+  - Works with DOS CD-ROM drivers and MSCDEX, Windows 3.11's Media Player, and
+    Windows 95's own CD-ROM driver (AutoRun, CD Player, video from the CD)
 - Disc and disk images mount automatically at start-up, or from the menu at any
   time
 
@@ -44,27 +54,49 @@ The current version is **v0.1-preview** (see
 - PS/2 mouse on joystick port 1:
   - Commodore 1351, or a mouSTer in C64 mode: both buttons, detected
     automatically
-  - Amiga mouse, or a mouSTer in Amiga mode: F13 is the right button
+  - mouSTer in Amiga mode with `activepotlines=true` (firmware 3.23.5313 or
+    newer): all three buttons
+  - Amiga mouse (or a mouSTer in Amiga mode without that): F13 is the right
+    button
 - Game port joystick on port 2 with up to three buttons. The second fire button
   can be on pin 9 (C64GS style) or pin 5, set in the menu.
 
 **Core**
-- Menu on HELP: disks, HDMI mode, filter, scanlines, joystick, reset; settings
-  are saved to the SD card
-- The reset button and Ctrl+Alt+Del restart the PC cleanly
+- Menu on HELP: disks, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
+  joystick, reset; settings are saved to the SD card
+- The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
+  from the MEGA65's again
+- The drive LED shows the PC's disk accesses: amber for the hard disk and the
+  CD-ROM, green for the floppies
 
 ## Tested
 
-On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
+On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA up to 1024x768 in 256 colours
+and 800x600 in 16, Media Player CD audio), Windows 95 (High Color, its own
+CD-ROM driver: AutoRun, CD Player, AVIs from the CD), DOOM,
 SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
 Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
-of Monkey Island (CD, with its CD music), and Quake (slowly: about 6 fps in
-`timedemo demo1`).
+of Monkey Island (CD, with its CD music), and Quake (slowly: 7.8 fps in
+`timedemo demo1`; 486Quake, a build tuned for 486s, 8.5 fps).
 
 Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
 Blaster option it hangs. Wing Commander III runs best without EMM386
 (`HIMEM.SYS` only): with it, a video can hang the game on a black screen.
+King's Quest VI's intro movie tears (the lower part of the picture an older
+frame) and judders in the boat scene with the game's own VGA driver: the VGA
+driver from a later Sierra game (the Gabriel Knight demo's), a known fix for
+KQ6, cures both.
+DOS Quake (and 486Quake) always finds the joystick on port 2 (the MEGA65
+can't tell a released stick from an empty port) and stops after "Playing
+registered version." to calibrate it, with its prompts on a console that
+isn't on screen yet: press fire on port 2 at each step, or Esc to skip it,
+or start Quake with `-nojoy`.
+Windows 3.11 runs at up to 1024x768 in 256 colours with Microsoft's generic
+"Super VGA 256 colors" driver (`SVGA.EXE` from the Windows Driver Library,
+through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
+(Options, Change System Settings, Display). Its own drivers stop at 800x600 in
+16 colours.
 
 ## Getting started
 
@@ -89,6 +121,41 @@ BIOS, which matches the core's ET4000 and is Tseng's code: neither is part of
 this repository. The firmware takes them from the card the settings file is on;
 without one, from the external microSD slot if it has a card, else from the
 internal SD card.
+
+For an empty hard disk, make a 2 GB file of zeros and copy it to the card as
+`/z486/hdd.img`. On Windows, in PowerShell:
+
+```powershell
+$f = [System.IO.File]::Create("$PWD\hdd.img"); $f.SetLength(2GB); $f.Close()
+```
+
+or in a Command Prompt (`fsutil` may need "Run as administrator"):
+
+```bat
+fsutil file createnew hdd.img 2147483648
+```
+
+On macOS:
+
+```bash
+mkfile -n 2g hdd.img
+```
+
+On Linux:
+
+```bash
+truncate -s 2G hdd.img
+```
+
+Then boot a DOS install floppy from A: (FreeDOS's, for example) and let it
+partition and format C:. A FAT32 card can't hold a file of 4 GB or more, so
+keep the image below that. More in [Disks](doc/disks.md).
+
+Mounting an image walks its cluster chain on the card, so it takes longer the
+smaller the card's clusters are: a 2 GB `hdd.img` mounts in about 20 seconds
+on a card with 4 KB clusters and about 5 seconds with 16 KB. Format the card
+with 16 or 32 KB clusters (`qmon.py disks` shows the card's as "shift", the
+log2 of its sectors per cluster: 5 for 16 KB, 6 for 32 KB).
 
 3. Press HELP for the menu, to mount images and pick the HDMI mode.
 
@@ -117,10 +184,13 @@ printed on the MEGA65's keycaps:
 ## Mouse and joystick
 
 - **Mouse on port 1.** A Commodore 1351, or a USB mouse behind a mouSTer set to
-  C64 mode (`c1351` and `mode=mouse` in its INI), has both buttons. An Amiga
-  mouse, or a mouSTer in Amiga mode, works too, but the MEGA65 can't read its
-  right button (pin 9): F13 stands in for it. The core tells them apart by
-  itself. Load a PS/2 mouse driver (CuteMouse, or Windows' "Microsoft or IBM
+  C64 mode (`c1351` and `mode=mouse` in its INI), has both buttons. A mouSTer in
+  Amiga mode with firmware 3.23.5313 or newer and `activepotlines=true` in its
+  INI has all three (right and middle): it drives the button lines, which the
+  MEGA65 can read. A plain Amiga mouse works too, but the MEGA65 can't read its
+  right button (pin 9): F13 stands in for it. The core tells them all apart by
+  itself. (Edit the INI the mouSTer writes, not one copied over with a new
+  firmware: the update writes its defaults.) Load a PS/2 mouse driver (CuteMouse, or Windows' "Microsoft or IBM
   PS/2"). There is no scroll wheel.
 - **Joystick on port 2** is the PC's game port joystick. Fire is button 1. A C64
   two- or three-button stick's extra buttons are buttons 2 and 3: the second on
@@ -137,6 +207,14 @@ printed on the MEGA65's keycaps:
   jumping between the screen edges when a program starts or quits while the
   mouse is moving: load the mouse driver again (`ctmouse`).
 - The MEGA65's own floppy drive isn't used.
+- Games that bring SciTech's UniVBE engine take the ET4000 for an ET4000/W32
+  and can show a black screen while they run (The Eleventh Hour, with sound).
+- Windows draws the mouse pointer itself (the ET4000AX has no hardware
+  cursor), so it can flicker when the picture under it changes.
+- In native HDMI mode the picture is measured one line short: the top line
+  can be missing.
+- 800x600 in True Color (24 bit) isn't offered: the display shows 24-bit
+  pictures 640 pixels wide.
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 
@@ -145,6 +223,8 @@ printed on the MEGA65's keycaps:
 - [Design notes](doc/design.md): how the core is put together, part by part
 - [Disks](doc/disks.md): the floppy, IDE and CD-ROM drives and the SD card path
 - [SDRAM clock](doc/sdram-clock.md): how the SDRAM clock's phase was measured
+- [x87](doc/x87.md): the FPU's clocks per instruction and its accuracy gaps
+- [CPU](doc/cpu.md): where the integer core is slower than a 486, and what changed
 - [Building](doc/building.md): the repository's layout and how to build the core
 - [Results](doc/results.md): build and timing results
 - [M2M provenance](doc/m2m-provenance.md): the framework's origin

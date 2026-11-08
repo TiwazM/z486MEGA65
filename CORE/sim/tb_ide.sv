@@ -10,6 +10,7 @@
 // read cylinder FFFFh), IDENTIFY, LBA28 reads across the image file's two extents, writes, SET
 // MULTIPLE and READ MULTIPLE, an unknown command (aborted); and the CMOS's hard disk bytes. Then
 // a reset on the clock that starts a sector's copy: the next read's copy still checked.
+// SLOT/CARD0/CARD1: the image on the back card, or a slot without a card (sdslots' ready).
 // CORE/sim/run_disks.sh runs it with xsim.
 //
 // Licensed under GPL v3
@@ -23,7 +24,13 @@ module tb_ide #(
     // must copy it again)
     parameter int FAULT = 0,
     // disk_sd's G_LUTRAM: 1, the ring and the write buffer in LUT RAM
-    parameter int LUTRAM = 0
+    parameter int LUTRAM = 0,
+    // the image's card (MODE bit 1: 0 the bottom tray, 1 the back slot), and which slots have a
+    // card: sdslots holds a slot's controller in reset without one, so the engine port shows
+    // that slot not ready while its slot bit names it
+    parameter int SLOT = 0,
+    parameter int CARD0 = 1,
+    parameter int CARD1 = 1
 );
     reg clk = 0;
     always #7.8125 clk = ~clk;              // the PC's 64 MHz
@@ -103,13 +110,14 @@ module tb_ide #(
     wire [7:0] buf_wd, buf_rd;
     wire buf_bad, sd_req_fresh;
     wire [159:0] mnt;
-    wire [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
+    reg  [64:0] rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h10, 8'h30, 8'h12, 8'h34, 8'h56};
+    reg         rtc_sync = 1'b0;   // the PC restarts (mega65.vhd p_main_rtc_sync)
 
     pc_mgmt #(.G_CLK_HZ(6400000)) mgmt (
         .clk_i(clk), .rst_i(!reset_n),
         .mgmt_address_o(mgmt_address), .mgmt_read_o(mgmt_read), .mgmt_write_o(mgmt_write),
         .mgmt_writedata_o(mgmt_writedata), .mgmt_readdata_i(mgmt_readdata),
-        .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .mnt_i(mnt),
+        .fdd_request_i(2'b00), .ide_request_i(ide_request), .ide1_request_i(3'b000), .rtc_i(rtc_word), .rtc_sync_i(rtc_sync), .mnt_i(mnt),
         .sd_req_o(sd_req), .sd_req_wr_o(sd_req_wr), .sd_req_unit_o(sd_req_unit),
         .sd_req_lba_o(sd_req_lba), .sd_req_cnt_o(sd_req_cnt), .sd_req_fresh_o(sd_req_fresh), .sd_done_i(sd_done), .sd_err_i(sd_err),
         .buf_addr_o(buf_addr), .buf_we_o(buf_we), .buf_wd_o(buf_wd), .buf_rd_i(buf_rd), .buf_bad_i(buf_bad)
@@ -150,19 +158,27 @@ module tb_ide #(
         pattern = 16'(lba * 1000 + w * 3 + 16'h1234);
     endfunction
 
-    // The SD engine port: ready; a START moves COUNT blocks from ADDR on (a write: one), each
-    // after a while; block k only once k < LIMIT (it waits), ABORT ends a read at the next block
-    // boundary. RDBLK: the block within the transfer. preempt_after ends a read early after
-    // that many blocks (as QNICE's own SD access does), err_block fails the transfer that
-    // reaches that SD block once.
+    // The SD engine port: ready; a START moves COUNT blocks from ADDR on, each after a while;
+    // block k only once k < LIMIT (it waits), ABORT ends the transfer at the next block
+    // boundary. RDBLK / WRBLK: the block within the transfer. preempt_after ends a transfer
+    // early after that many blocks (as QNICE's own SD access does), err_block fails the transfer
+    // that reaches that SD block once. A write block takes WR_BUSY clocks after its data (the
+    // card programming it), so the PC gets ahead of the card.
     reg e_busy = 0, e_done = 0, e_err = 0, e_blk = 0, e_rdwe = 0;
     reg [8:0] e_rdidx = 0, e_wridx = 0;
     reg [7:0] e_rddata = 0;
-    reg [15:0] e_rdblk = 0;
-    assign q2c = {e_wridx, 16'd0, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
-                  e_busy, 1'b1};
+    reg [15:0] e_rdblk = 0, e_wrblk = 0;
+    // sdslots: during a transfer the port is its slot's controller, else the one the slot bit
+    // names (C2Q_SLOT, bit 75)
+    reg eng_slot = 0;
+    wire eng_cur = e_busy ? eng_slot : c2q[75];
+    wire e_ready = eng_cur ? CARD1 != 0 : CARD0 != 0;
+    assign q2c = {e_wridx, e_wrblk, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
+                  e_busy, e_ready};
     integer eng_reads = 0, eng_blocks = 0, eng_writes = 0, eng_aborts = 0, write_errors = 0;
+    integer eng_wblocks = 0, eng_wwait = 0, wr_busy = 200;
     integer preempt_after = -1, err_block = -1, max_ahead = 0;
+    integer written [integer];                  // SD block: how many times it was written
     integer expect_write_lba [integer];
     always begin
         integer b, i, k, n;
@@ -172,6 +188,9 @@ module tb_ide #(
             b = c2q[34:3];
             wr = c2q[1];
             n = c2q[50:35];
+            if (c2q[75] != SLOT) $fatal(1, "engine: a transfer on slot %0d, the image is on %0d", c2q[75], SLOT);
+            if (!e_ready) $fatal(1, "engine: a START to slot %0d, which has no card", c2q[75]);
+            eng_slot <= c2q[75];
             e_busy <= 1;
             repeat (40) @(posedge qclk);
             if (!wr) begin
@@ -206,24 +225,47 @@ module tb_ide #(
                 if (c2q[2]) eng_aborts++;
                 repeat (10) @(posedge qclk);
             end else begin
-                if (n != 1) $fatal(1, "engine: write count %0d", n);
-                for (i = 0; i < 512; i++) begin
-                    e_wridx <= i;
-                    @(posedge qclk);
-                    @(negedge qclk);
-                    if (!expect_write_lba.exists(b)) begin
-                        if (i == 0) $error("engine: write to unexpected block %0d", b);
-                        write_errors++;
-                    end else if (c2q[74:67] !== (i[0] ? pattern(expect_write_lba[b], i / 2) >> 8
-                                                      : pattern(expect_write_lba[b], i / 2) & 8'hff)) begin
-                        if (write_errors < 5)
-                            $error("engine: block %0d byte %0d = %02x", b, i, c2q[74:67]);
-                        write_errors++;
+                eng_writes++;
+                stop = 0;
+                for (k = 0; k < n && !stop; k++) begin
+                    // between blocks the card waits (clock stopped) until the block is there
+                    if (!c2q[2] && k >= c2q[66:51]) eng_wwait++;
+                    while (!c2q[2] && k >= c2q[66:51]) @(posedge qclk);
+                    if (c2q[2]) begin
+                        stop = 1;
+                    end else if (b + k == err_block) begin
+                        err_block = -1;
+                        e_err <= 1;
+                        stop = 1;
+                    end else begin
+                        e_wrblk <= k;
+                        for (i = 0; i < 512; i++) begin
+                            e_wridx <= i;
+                            @(posedge qclk);
+                            @(negedge qclk);
+                            if (!expect_write_lba.exists(b + k)) begin
+                                if (i == 0) $error("engine: write to unexpected block %0d", b + k);
+                                write_errors++;
+                            end else if (c2q[74:67] !== (i[0] ? pattern(expect_write_lba[b + k], i / 2) >> 8
+                                                              : pattern(expect_write_lba[b + k], i / 2) & 8'hff)) begin
+                                if (write_errors < 5)
+                                    $error("engine: block %0d byte %0d = %02x", b + k, i, c2q[74:67]);
+                                write_errors++;
+                            end
+                        end
+                        @(posedge qclk);
+                        repeat (wr_busy) @(posedge qclk);
+                        written[b + k] = written.exists(b + k) ? written[b + k] + 1 : 1;
+                        eng_wblocks++;
+                        e_blk <= 1; @(posedge qclk); e_blk <= 0;
+                        if (preempt_after > 0) begin
+                            preempt_after--;
+                            if (preempt_after == 0) begin preempt_after = -1; stop = 1; end
+                        end
                     end
                 end
-                @(posedge qclk);
-                eng_writes++;
-                e_blk <= 1; @(posedge qclk); e_blk <= 0;
+                if (c2q[2]) eng_aborts++;
+                repeat (10) @(posedge qclk);
             end
             e_done <= 1; @(posedge qclk); e_done <= 0; e_err <= 0;
             e_busy <= 0;
@@ -341,18 +383,27 @@ module tb_ide #(
         check(bad == 0 && (st & 8'hC9) == 8'h40,
               $sformatf("read %02x LBA %0d-%0d (%0d words wrong, status %02x)", cmd, lba, lba + n - 1, bad, st));
     endtask
+    // ... and when the command ends, its data is on the card (the run over, every block once)
     task automatic write_sectors(input integer lba, input integer n);
         reg [7:0] st;
-        integer s, k;
-        for (s = 0; s < n; s++) expect_write_lba[blk(lba + s)] = lba + s;
+        integer s, k, once;
+        integer w_prev [integer];
+        for (s = 0; s < n; s++) begin
+            expect_write_lba[blk(lba + s)] = lba + s;
+            w_prev[s] = written.exists(blk(lba + s)) ? written[blk(lba + s)] : 0;
+        end
         ata_cmd(8'h30, lba, n);
         for (s = 0; s < n; s++) begin
             wait_drq("write");
             for (k = 0; k < 256; k++) outw(pattern(lba + s, k));
         end
         wait_ready(st);
-        check((st & 8'hC9) == 8'h40 && write_errors == 0,
-              $sformatf("write LBA %0d-%0d (status %02x, %0d bytes wrong)", lba, lba + n - 1, st, write_errors));
+        once = 0;
+        for (s = 0; s < n; s++)
+            if (written.exists(blk(lba + s)) && written[blk(lba + s)] == w_prev[s] + 1) once++;
+        check((st & 8'hC9) == 8'h40 && write_errors == 0 && once == n && !e_busy,
+              $sformatf("write LBA %0d-%0d (status %02x, %0d bytes wrong, %0d of %0d blocks written once, engine %s)",
+                        lba, lba + n - 1, st, write_errors, once, n, e_busy ? "busy" : "idle"));
     endtask
 
     initial begin
@@ -374,7 +425,7 @@ module tb_ide #(
         qwr(28'h0000041, 16'(TOTAL)); qwr(28'h0000042, 16'(TOTAL >> 16));
         qwr(28'h0000043, 16'd9000); qwr(28'h0000044, 16'd0);
         qwr(28'h0000045, 16'd3);
-        qwr(28'h0000040, 16'd1);
+        qwr(28'h0000040, 16'(1 | (SLOT << 1)));
 
         // the CMOS: 12h F0h, 19h 2Fh, the checksum
         for (k = 0; k < 200; k++) begin
@@ -461,7 +512,67 @@ module tb_ide #(
         check((st & 8'h01) && er == 8'h04, $sformatf("unknown command FAh: status %02x, error %02x", st, er));
         // the reads still work after it
         read_sectors(8'h21, 0, 1);
-        check(eng_writes == 2, $sformatf("engine: %0d writes", eng_writes));
+        check(eng_writes == 1 && eng_wblocks == 2,
+              $sformatf("engine: %0d SD writes, %0d blocks (the 2 sectors in one run)", eng_writes, eng_wblocks));
+
+        // write runs: one multi-block SD write per command, the PC ahead of a slow card (its
+        // four slots full: an answer waits for a slot)
+        k = eng_writes; sum = eng_wblocks; wr_busy = 4000;
+        write_sectors(2000, 64);
+        wr_busy = 200;
+        check(eng_writes - k == 1 && eng_wblocks - sum == 64,
+              $sformatf("64 sectors written: %0d SD writes, %0d blocks", eng_writes - k, eng_wblocks - sum));
+        // a fast card: it waits for the PC between blocks
+        k = eng_writes; sum = eng_wwait; wr_busy = 2;
+        write_sectors(2100, 16);
+        wr_busy = 200;
+        check(eng_writes - k == 1 && eng_wwait - sum > 0,
+              $sformatf("16 sectors to a fast card: %0d SD writes, it waited for the PC %0d times",
+                        eng_writes - k, eng_wwait - sum));
+        // across the extents (76..79 in the first, 80..83 in the second): two runs
+        k = eng_writes;
+        write_sectors(76, 8);
+        check(eng_writes - k == 2, $sformatf("a write across the extents: %0d SD writes", eng_writes - k));
+        // QNICE takes the card after 5 blocks: the rest in a second transfer
+        k = eng_writes; preempt_after = 5;
+        write_sectors(4000, 12);
+        check(eng_writes - k == 2, $sformatf("a preempted write run: %0d SD writes", eng_writes - k));
+        // a failing block: tried again from it
+        k = eng_writes; sum = eng_wblocks; err_block = blk(5003);
+        write_sectors(5000, 8);
+        check(err_block == -1 && eng_writes - k == 2 && eng_wblocks - sum == 8,
+              $sformatf("an SD error in a write run: %0d SD writes, %0d blocks", eng_writes - k, eng_wblocks - sum));
+        // one sector: a run of one
+        k = eng_writes; sum = eng_wblocks;
+        write_sectors(5100, 1);
+        check(eng_writes - k == 1 && eng_wblocks - sum == 1,
+              $sformatf("one sector: %0d SD writes, %0d blocks", eng_writes - k, eng_wblocks - sum));
+        // the PC abandons a write of 8 after 3 (a soft reset), then reads: the 3 go to the card,
+        // then the run ends at that block boundary, and the read works
+        begin
+            integer s, w, a0, b0;
+            reg [7:0] st2;
+            for (s = 0; s < 8; s++) expect_write_lba[blk(6000 + s)] = 6000 + s;
+            a0 = eng_aborts; b0 = eng_wblocks; wr_busy = 3000;
+            ata_cmd(8'h30, 6000, 8);
+            for (s = 0; s < 3; s++) begin
+                wait_drq("abandoned write");
+                for (w = 0; w < 256; w++) outw(pattern(6000 + s, w));
+            end
+            repeat (50) @(posedge clk);
+            outb(16'h3f6, 8'h04); repeat (50) @(posedge clk); outb(16'h3f6, 8'h00);
+            wait_ready(st2);
+            read_sectors(8'h20, 7000, 2);
+            wr_busy = 200;
+            w = 0;
+            for (s = 0; s < 3; s++) if (written.exists(blk(6000 + s)) && written[blk(6000 + s)] == 1) w++;
+            for (s = 3; s < 8; s++) if (written.exists(blk(6000 + s))) w = -100;
+            check(w == 3 && eng_wblocks - b0 == 3 && eng_aborts - a0 == 1 && write_errors == 0,
+                  $sformatf("an abandoned write: %0d of its 3 sectors on the card (once), %0d blocks, %0d aborts",
+                            w, eng_wblocks - b0, eng_aborts - a0));
+        end
+        // and the next write still runs
+        write_sectors(6100, 4);
         // a reset (pc_mgmt's, with the PC's) on the clock that starts a copy: pc_mgmt's ring
         // address stays 0 through it, as at power-up. The next read's copy must still be
         // checked (disk_sd checks a copy that moves to 0): with FAULT it is the wrong one, and
@@ -500,6 +611,25 @@ module tb_ide #(
                            (ck_bad > 0 && ck_fixed == ck_bad && ck_fresh == ck_bad),
               $sformatf("ring checksums: %0d copies matched, %0d did not, %0d right when fresh from the card (%0d fresh reads)",
                         ck_good, ck_bad, ck_fixed, ck_fresh));
+        // The CMOS clock from the RTC word (pc_mgmt at its start). A new RTC time without the
+        // framework's toggle is not copied; a PC restart (rtc_sync) copies it.
+        begin
+            reg [7:0] mi, hr, dy, mo, yr;
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h10, 8'h30, 8'h12, 8'h34},
+                  $sformatf("CMOS clock from the RTC at the start: 20%02x-%02x-%02x %02x:%02x", yr, mo, dy, hr, mi));
+            rtc_word = {1'b0, 8'h40, 8'h04, 8'h26, 8'h11, 8'h06, 8'h23, 8'h59, 8'h00};
+            repeat (2000) @(posedge clk);
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h10, 8'h30, 8'h12, 8'h34},
+                  "  a new RTC time without the framework's toggle: not copied");
+            @(negedge clk) rtc_sync = 1'b1;
+            @(negedge clk) rtc_sync = 1'b0;
+            repeat (2000) @(posedge clk);
+            cmos_rd(7'h02, mi); cmos_rd(7'h04, hr); cmos_rd(7'h07, dy); cmos_rd(7'h08, mo); cmos_rd(7'h09, yr);
+            check({yr, mo, dy, hr, mi} == {8'h26, 8'h11, 8'h06, 8'h23, 8'h59},
+                  $sformatf("  after a PC restart (rtc_sync): 20%02x-%02x-%02x %02x:%02x", yr, mo, dy, hr, mi));
+        end
         if (errors == 0) $display("PASS: all checks");
         else $display("FAILED: %0d checks", errors);
         $finish;

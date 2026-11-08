@@ -26,13 +26,20 @@
 #                             DMA requests' long waits and the DMA commands its DSP held back,
 #                             with microseconds, and its samples' big jumps; stops it first
 #                             ("peek": reads it running)
-#   qmon.py iotrace start [freeze] [once]
+#   qmon.py iotrace start [freeze] [once] [quiet] [timer]
 #                             start it again (empty); "freeze": stop at the card's first 1 ms
-#                             wait; "once": stop when full (the first 1024 entries)
+#                             wait; "once": stop when full (the first 1024 entries); "quiet":
+#                             leave out DMA flip-flop clears and status reads (a driver polling
+#                             its position fills the trace with them in a tenth of a second);
+#                             "timer": the PIT (40-43h) and port 61h too, writes and reads that
+#                             change (what a program waits on there)
 #   qmon.py iotrace jump [N]  the smallest sample jump it logs, N/256 of the full range
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
 #                             dma_take_starved, z486_sources.py; on after the core loads)
+#   qmon.py sbsoft [on|off]   the Sound Blaster DSP's output stage (z486_mega65.sv's sb_soft:
+#                             its output glides to 0 when it stops or mutes; on after the
+#                             core loads), for listening both ways
 #   qmon.py joy [secs]        port 2's joystick (the game port) over secs seconds (default
 #                             30): every change of its directions and buttons; fire 2 and 3
 #                             are its paddle lines (pins 9 and 5, or as the menu says)
@@ -452,6 +459,24 @@ def iot_port(port, val, wr, dsp):
         return name
     if port in IOT_PAGE:
         return "DMA page ch%d" % IOT_PAGE[port]
+    if port == 0x61:
+        if wr:
+            return "port 61h: speaker %s, timer 2 gate %s" % ("on" if val & 2 else "off",
+                                                              "on" if val & 1 else "off")
+        return "port 61h: timer 2 output %d, refresh %d, speaker %s, gate %s" % (
+            val >> 5 & 1, val >> 4 & 1, "on" if val & 2 else "off", "on" if val & 1 else "off")
+    if 0x40 <= port <= 0x43:
+        if port == 0x43 and wr:
+            if val >> 6 == 3:
+                return "PIT read-back: %s%s, counters %s" % (
+                    "" if val & 0x20 else "count ", "" if val & 0x10 else "status",
+                    ",".join(str(i) for i in range(3) if val >> (1 + i) & 1))
+            if val >> 4 & 3 == 0:
+                return "PIT counter %d latched" % (val >> 6)
+            return "PIT counter %d: mode %d, %s%s" % (
+                val >> 6, (val >> 1) & 7, {1: "LSB", 2: "MSB", 3: "LSB+MSB"}[val >> 4 & 3],
+                ", BCD" if val & 1 else "")
+        return "PIT counter %d %s" % (port - 0x40, "<-" if wr else "->")
     name = IOT_PORT.get(port, "port %03X" % port)
     if wr and port == 0x22C:
         if dsp["left"]:
@@ -483,11 +508,15 @@ def iotrace(opts):
               ("?" if v is None else v & 0xFF))
         return
     if opts[:1] in (["start"], ["freeze"]):
-        freeze, once = "freeze" in opts, "once" in opts
-        poke(0x8004, (1 if freeze else 0) | (2 if once else 0))
-        print("I/O trace started%s%s" % (
+        freeze, once, quiet = "freeze" in opts, "once" in opts, "quiet" in opts
+        timer = "timer" in opts
+        poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0) |
+             (8 if timer else 0))
+        print("I/O trace started%s%s%s%s" % (
             ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
-            ", stops when full" if once else ""))
+            ", stops when full" if once else "",
+            ", without DMA polling" if quiet else "",
+            ", with the timer and port 61h" if timer else ""))
         return
     if opts[:1] != ["peek"]:
         poke(0x8005, 0)                    # stop it: a running trace changes while it is read
@@ -532,8 +561,20 @@ def iotrace(opts):
             print(head + "--- the DSP started a new DMA command it held back for %d us" % port)
         elif kind == 6:
             print(head + "--- the DSP has held a new DMA command back for 1 ms")
+        elif kind == 7 and w[3] >> 12 & 1:
+            print(head + "--- DSP output jump of %3d/256: %s" %
+                  (val, ("a DMA sample", "held at 0 (speaker off in SB Pro mode, or 80h)",
+                         "a direct output or ADPCM", "?")[w[3] >> 8 & 3]))
         elif kind == 7:
             print(head + "--- sample jump of %3d/256 at sample %d of the block" % (val, port))
+
+
+def sbsoft(arg):
+    pc_dev()
+    if arg in ("on", "off"):
+        poke(0x800E, 1 if arg == "on" else 0)
+    v = dump(0x800E, 0x800E)[0]
+    print("Sound Blaster DSP output stage: %s" % ("?" if v is None else "on" if v & 1 else "off"))
 
 
 def sbfix(arg):
@@ -563,6 +604,78 @@ def joy_watch(secs):
             print("%6.1f s  %s" % (time.time() - t0, ", ".join(held) or "centred, no button"),
                   flush=True)
             last = j
+
+
+# the MEGA65's keys by M2M's numbers (pc_keyboard.vhd), for kbd_line
+KEY_NAMES = {0: "INST/DEL", 1: "RETURN", 2: "cursor right", 3: "F7", 4: "F1", 5: "F3", 6: "F5",
+             7: "cursor down", 15: "left Shift", 40: "+", 43: "-", 45: ":", 46: "@", 48: "GBP",
+             49: "*", 50: ";", 51: "CLR/HOME", 52: "right Shift", 53: "=", 54: "arrow up",
+             57: "arrow left", 58: "CTRL", 60: "SPACE", 61: "MEGA", 63: "RUN/STOP",
+             64: "NO SCROLL", 65: "TAB", 66: "ALT", 67: "HELP", 68: "F9", 69: "F11", 70: "F13",
+             71: "ESC", 72: "CAPS LOCK", 73: "cursor up", 74: "cursor left", 75: "RESTORE"}
+
+
+def key_name(n):
+    return KEY_NAMES.get(n, "key %d" % n)
+
+
+def native_mode(w, h, f70):
+    # mega65.vhd p_qnice_native: the HDMI mode native picks for an accepted size
+    tw = 2 * w if w <= 400 else w
+    th = 2 * h if h <= 300 else h
+    if w < 256 or h < 160:
+        return "640x480 60 Hz, the picture scaled (nothing sensible measured)"
+    for cond, name in ((tw <= 640 and th <= 400 and f70, "640x400 70 Hz"),
+                       (tw <= 720 and th <= 400 and f70, "720x400 70 Hz"),
+                       (tw <= 640 and th <= 480, "640x480 60 Hz"),
+                       (tw <= 720 and th <= 480, "720x480 59.94 Hz"),
+                       (tw <= 800 and th <= 600, "800x600 60 Hz"),
+                       (tw <= 1024 and th <= 768, "1024x768 60 Hz")):
+        if cond:
+            return "%s, a %dx%d window 1:1" % (name, tw, th)
+    return "1280x1024 60 Hz, the picture scaled (larger than 1024x768)"
+
+
+def native_line():
+    # native's measurement (mega65.vhd p_main_native, snapshot words 0x803F..0x803D, 0x803A):
+    # the size it accepted (eight frames alike), the last frame's, the framebuffer
+    w = dump(0x803A, 0x803A) + dump(0x803D, 0x803F)
+    if None in w:
+        return "native: ?"
+    acc_h, (acc_w16, last_h16, last_w16) = w[0] >> 4, w[1:]
+    if (acc_w16 | last_h16 | last_w16) == 0 and acc_h == 0:
+        return "native: this core has no readout"
+    acc_w, acc_70 = acc_w16 >> 4, acc_w16 >> 3 & 1
+    last_h, alike = last_h16 >> 4, last_h16 >> 1 & 7
+    last_w, last_70, fb = last_w16 >> 4, last_w16 >> 3 & 1, last_w16 >> 2 & 1
+    return ("native: accepted %dx%d%s -> %s; last frame %dx%d%s, %d frames alike%s" %
+            (acc_w, acc_h, " (70 Hz)" if acc_70 else "", native_mode(acc_w, acc_h, acc_70),
+             last_w, last_h, " (70 Hz)" if last_70 else "", alike,
+             "; the SVGA framebuffer is shown (its size counts)" if fb else ""))
+
+
+def kbd_line():
+    # the keyboard translator (pc_keyboard.vhd dbg_o, snapshot words 0x803C:0x803B): the key that
+    # holds the PC's Shift back (a key whose release went missing held it for good, 2026-11-07),
+    # and the releases its sweep had to send itself
+    w = dump(0x803B, 0x803C)
+    if None in w:
+        return "keyboard: ?"
+    lo, hi = w
+    if not lo & 0x8000:
+        return "keyboard: this core has no translator readout"
+    supp = lo & 0x7F
+    held = ("Shift held back while %s is down (%s)" %
+            (key_name(supp), "the keyboard has it down" if lo & 0x80 else
+             "the keyboard has it UP: stuck") if supp != 80 else "no Shift held back")
+    shifts = "Shift: keys %s%s, the PC has %s%s" % (
+        "L" if lo & 0x100 else "-", "R" if lo & 0x200 else "-",
+        "L" if lo & 0x400 else "-", "R" if lo & 0x800 else "-")
+    heals = hi & 0xFF
+    return ("keyboard: %s; %s%s%s%s; releases the sweep sent: %d%s" %
+            (held, shifts, ", MEGA down" if lo & 0x1000 else "",
+             "" if lo & 0x2000 else ", scanning off (F5)", ", events waiting" if lo & 0x4000 else "",
+             heals, " (the last: %s)" % key_name(hi >> 8 & 0x7F) if heals else ""))
 
 
 def mouse_line():
@@ -637,6 +750,8 @@ def pic_8042():
     out.append("INTAs the PIC acknowledged with another vector than the CPU took: %d%s" %
                (w[6], "  (the last: CPU %02Xh, PIC %02Xh)" % (w[7] >> 8, w[7] & 0xFF) if w[6] else ""))
     out.append(mouse_line())
+    out.append(kbd_line())
+    out.append(native_line())
     return "\n".join(out)
 
 
@@ -688,6 +803,8 @@ elif args and args[0] == "iotrace":
     iotrace(args[1:])
 elif args and args[0] == "sbfix":
     sbfix(args[1] if len(args) > 1 else "")
+elif args and args[0] == "sbsoft":
+    sbsoft(args[1] if len(args) > 1 else "")
 elif args and args[0] == "joy":
     joy_watch(float(args[1]) if len(args) > 1 else 30)
 elif args and args[0] == "c1351":

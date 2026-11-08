@@ -381,7 +381,8 @@ add_cells_to_pblock pblock_sdcard [get_cells [list i_framework/i_qnice_wrapper/Q
 resize_pblock pblock_sdcard -add {SLICE_X66Y178:SLICE_X99Y193}
 
 # Place phase-shifted VGA output registers near the actual output buffers
+# (M2M-UPSTREAM vga-from-hdmi: the digital pipeline's, the HDMI picture on the HDMI clock)
 create_pblock pblock_vga
-add_cells_to_pblock pblock_vga [get_cells [list i_framework/i_av_pipeline/i_analog_pipeline/VGA_OUT_PHASE_SHIFTED.*]]
+add_cells_to_pblock pblock_vga [get_cells [list i_framework/i_av_pipeline/i_digital_pipeline/VGA_OUT_HDMI.*]]
 resize_pblock pblock_vga -add SLICE_X0Y75:SLICE_X5Y99
 

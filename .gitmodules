@@ -1,6 +1,7 @@
 [submodule "z486"]
 	path = z486
-	url = https://github.com/nand2mario/z486.git
+	url = https://github.com/TiwazM/z486.git
+	branch = fpu
 [submodule "z486_MiSTer"]
 	path = z486_MiSTer
 	url = https://github.com/nand2mario/z486_MiSTer.git

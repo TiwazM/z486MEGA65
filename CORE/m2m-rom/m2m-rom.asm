@@ -1007,7 +1007,7 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "9"
+CFG_SIG_VAL     .ASCII_W "11"                   ; 11: the joystick's "Off" (54 lines)
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -1127,13 +1127,15 @@ DAN_PEND        .BLOCK  4
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 46-line menu: 20 + 453 item characters + 1 + 5 x 46 (the line
-; arrays and the dependency array) + 1 + (4 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 939 words. The Shell checks it when the menu first opens
+; for this 54-line menu: 20 + 548 item characters + 1 + 5 x 54 (the line
+; arrays and the dependency array) + 1 + (5 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 1100 words (the 53-line one before the joystick's "Off":
+; 1081). The Shell checks it when the menu first opens
 ; (ERR_FATAL_HEAP1/2; with 768, the 38-line menu was 13 short: "Heap
-; corruption", error code 000D; with 832, the 46-line one 107: 006B).
+; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
+; 46-line one needed 939 of 960, before the "Refresh" submenu).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 960
+MENU_HEAP_SIZE  .EQU 1120
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -1141,8 +1143,8 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 19040
-HEAP            .BLOCK 1
+HEAP_SIZE       .EQU 18880                      ; (19040 before MENU_HEAP_SIZE
+HEAP            .BLOCK 1                        ; grew by 160: the same end)
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's
                                                 ; larger device handle (main_vars.asm)

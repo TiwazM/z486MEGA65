@@ -22,9 +22,11 @@
 --   * Data in DRQ blocks of at most 2048 bytes and the byte count limit the PC gave (the
 --     cylinder register; 0 counts as FFFEh), each with an interrupt (interrupt reason IO, the
 --     block's bytes in the cylinder register); then the end: interrupt reason IO + CoD, DRDY,
---     an interrupt. An error: ERR, the sense key in the error register's high nibble (ABRT
---     with ILLEGAL REQUEST), the sense data for REQUEST SENSE. A new disc: UNIT ATTENTION
---     (6/28h) once; none: NOT READY, MEDIUM NOT PRESENT (2/3Ah).
+--     an interrupt. Status bit 4 (SERVICE for a packet device) stays 0, except DSC when SEEK
+--     is done (Main_MiSTer's choices, made for Windows 9x and VIDE-CDD.SYS). An error: ERR,
+--     the sense key in the error register's high nibble (ABRT with ILLEGAL REQUEST), the
+--     sense data for REQUEST SENSE. A new disc: UNIT ATTENTION (6/28h) once; none: NOT READY,
+--     MEDIUM NOT PRESENT (2/3Ah).
 --
 -- The disc: the firmware (m2m-rom.asm's cdimage.asm) writes its track table (QNICE device
 -- C_DEV_PC_CDTOC, mega65.vhd; read here through tab_addr_o / tab_q_i, the data two clocks after
@@ -140,11 +142,15 @@ architecture synthesis of pc_cdrom is
    constant C_T_ENT  : natural := 16#800#;
 
    -- register 5's high byte as ide.v takes it (pc_mgmt's w_st): 15..14 BSY, DRDY, 12 DSC, 11 DRQ,
-   -- 10 the interrupt, 9 the last block (ide.v then goes ready by itself), 8 ERR
-   constant C_ST_PKT  : std_logic_vector(7 downto 0) := x"58";   -- DRQ for the packet
-   constant C_ST_DATA : std_logic_vector(7 downto 0) := x"5C";   -- a data block: DRQ, interrupt
-   constant C_ST_ATA  : std_logic_vector(7 downto 0) := x"5E";   -- IDENTIFY's block, the last
-   constant C_ST_OK   : std_logic_vector(7 downto 0) := x"54";   -- done, interrupt
+   -- 10 the interrupt, 9 the last block (ide.v then goes ready by itself), 8 ERR.
+   -- For a packet device status bit 4 (12 here) is SERVICE, not DSC: an overlapped command wants
+   -- service. It stays 0 (Main_MiSTer #1221/#1224: with it set, Windows 9x's esdi_506.pdr
+   -- rejects the CD-ROM's channel), except when SEEK is done (#1239: VIDE-CDD.SYS waits for DSC)
+   constant C_ST_PKT  : std_logic_vector(7 downto 0) := x"48";   -- DRQ for the packet
+   constant C_ST_DATA : std_logic_vector(7 downto 0) := x"4C";   -- a data block: DRQ, interrupt
+   constant C_ST_ATA  : std_logic_vector(7 downto 0) := x"4E";   -- IDENTIFY's block, the last
+   constant C_ST_OK   : std_logic_vector(7 downto 0) := x"44";   -- done, interrupt
+   constant C_ST_SEEK : std_logic_vector(7 downto 0) := x"54";   -- SEEK done: DSC, interrupt
    constant C_ST_ERR  : std_logic_vector(7 downto 0) := x"45";   -- ERR, interrupt
 
    -- audio status (READ SUB-CHANNEL)
@@ -1426,6 +1432,7 @@ begin
                            h_lba  <= v_lba;
                            v_seek := true;
                            finish;
+                           w_st   <= C_ST_SEEK;
                         end if;
 
                      when x"43" =>                   -- READ TOC (the format: byte 2, or the

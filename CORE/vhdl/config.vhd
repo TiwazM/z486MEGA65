@@ -192,7 +192,8 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    14    1280x1024 60 Hz 5:4   C_MENU_HDMI_1280 (a 5:4 monitor's own resolution, reduced
 --                                blanking: 1280x960 between bars, the monitor scales nothing)
 --    15    Native resolution     C_MENU_HDMI_NATIVE: the PC's own resolution, the monitor
---                                scales (720x400 text in 720x480, 640x480, SVGA 1:1)
+--                                scales (720x400 text in 720x400 at 70 Hz with "Refresh:
+--                                Original", else in 720x480; 640x480, SVGA 1:1)
 --    16    ----
 --    17    Back to main menu
 --    18  Filter: %s              submenu: ascal's interpolation
@@ -211,24 +212,33 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    31    50%                   C_MENU_SL_50
 --    32    ----
 --    33    Back to main menu
---    34  Joystick fire 2: %s     submenu: the game port's second fire button
---    35    Joystick fire 2       headline
+--    34  Refresh: %s             submenu: the PC's refresh rate (z486's video_f60)
+--    35    PC refresh rate       headline
 --    36    ----
---    37    Pin 9                 (default) POT X, as the C64GS's second button
---    38    Pin 5                 C_MENU_JOY_P5: POT Y, as some sticks have it
+--    37    60 Hz (HDMI)          (default) every mode retimed to 60 Hz: smooth on 60 Hz HDMI
+--    38    Original (VGA)        C_MENU_RF_ORIG: the VGA's own timing (DOS text 70 Hz,
+--                                31.5 kHz); native HDMI, and VGA (the HDMI picture), follow
 --    39    ----
 --    40    Back to main menu
---    41  ----
---    42  Help
---    43  Reset the PC            C_MENU_RESET
---    44  ----
---    45  Close Menu
+--    41  Joystick: %s            submenu: the game port's joystick (port 2)
+--    42    Joystick (port 2)     headline
+--    43    ----
+--    44    Pin 9 fire 2          (default) fire 2 on POT X, as the C64GS's second button
+--    45    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
+--    46    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
+--    47    ----
+--    48    Back to main menu
+--    49  ----
+--    50  Help
+--    51  Reset the PC            C_MENU_RESET
+--    52  ----
+--    53  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
--- layout change.
-constant OPTM_SIZE         : natural := 46;
+-- layout change (and MENU_HEAP_SIZE there when the menu grows).
+constant OPTM_SIZE         : natural := 54;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 16;   -- the main menu's lines (0-7, 18, 26, 34, 41-45)
+constant OPTM_DY           : natural := 17;   -- the main menu's lines (0-7, 18, 26, 34, 41, 49-53)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -265,11 +275,19 @@ constant OPTM_ITEMS        : string :=
    " 50%\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
-   " Joystick fire 2: %s\n"   &
-   " Joystick fire 2\n"       &
+   " Refresh: %s\n"           &
+   " PC refresh rate\n"       &
    "\n"                       &
-   " Pin 9\n"                 &
-   " Pin 5\n"                 &
+   " 60 Hz (HDMI)\n"          &
+   " Original (VGA)\n"        &
+   "\n"                       &
+   " Back to main menu\n"     &
+   " Joystick: %s\n"          &
+   " Joystick (port 2)\n"     &
+   "\n"                       &
+   " Pin 9 fire 2\n"          &
+   " Pin 5 fire 2\n"          &
+   " Off\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
    "\n"                       &
@@ -288,6 +306,7 @@ constant OPTM_G_FILTER     : integer := 6;
 constant OPTM_G_SCAN       : integer := 7;
 constant OPTM_G_CD         : integer := 8;
 constant OPTM_G_JOY        : integer := 9;
+constant OPTM_G_REFRESH    : integer := 10;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -325,18 +344,26 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_SCAN,                              -- 31 50%
                                              OPTM_G_LINE,                              -- 32
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 33 Back
-                                             OPTM_G_SUBMENU,                           -- 34 Joystick fire 2: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 35 Joystick fire 2
+                                             OPTM_G_SUBMENU,                           -- 34 Refresh: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 35 PC refresh rate
                                              OPTM_G_LINE,                              -- 36
-                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 37 Pin 9
-                                             OPTM_G_JOY,                               -- 38 Pin 5
+                                             OPTM_G_REFRESH + OPTM_G_STDSEL,           -- 37 60 Hz (HDMI)
+                                             OPTM_G_REFRESH,                           -- 38 Original (VGA)
                                              OPTM_G_LINE,                              -- 39
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 40 Back
-                                             OPTM_G_LINE,                              -- 41
-                                             OPTM_G_HELP,                              -- 42 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 43 Reset the PC
-                                             OPTM_G_LINE,                              -- 44
-                                             OPTM_G_CLOSE                              -- 45 Close Menu
+                                             OPTM_G_SUBMENU,                           -- 41 Joystick: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 42 Joystick (port 2)
+                                             OPTM_G_LINE,                              -- 43
+                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 44 Pin 9 fire 2
+                                             OPTM_G_JOY,                               -- 45 Pin 5 fire 2
+                                             OPTM_G_JOY,                               -- 46 Off
+                                             OPTM_G_LINE,                              -- 47
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 48 Back
+                                             OPTM_G_LINE,                              -- 49
+                                             OPTM_G_HELP,                              -- 50 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 51 Reset the PC
+                                             OPTM_G_LINE,                              -- 52
+                                             OPTM_G_CLOSE                              -- 53 Close Menu
                                            );
 
 begin

@@ -49,6 +49,13 @@ An empty hard disk, on macOS (or `truncate -s 2G hdd.img` on Linux):
 mkfile -n 2g hdd.img
 ```
 
+On Windows, in PowerShell (or `fsutil file createnew hdd.img 2147483648` in a
+Command Prompt, which may need "Run as administrator"):
+
+```powershell
+$f = [System.IO.File]::Create("$PWD\hdd.img"); $f.SetLength(2GB); $f.Close()
+```
+
 Copy it to the card as `/z486/hdd.img`, boot FreeDOS's boot floppy from A:,
 and let the installer partition and format C: (it restarts the PC in between)
 and install, swapping the floppies through the menu's "Floppy A:" line. To
@@ -63,11 +70,28 @@ command. A read elsewhere ends the run. Before, every sector was an SD
 command of its own, about 440 µs: Dr. Hardware measured 997 KB/s with 64 KB
 blocks; with the runs 2989 KB/s (10 KB blocks: 1036 -> 2624 KB/s), the
 average sector 456 -> 146 µs. Its access time stayed 6.1-6.2 ms. A CD-ROM
-READ is one run too: its 2048-byte sectors are four of the image's. Writes still go to
-the card one sector at a time (DOS without a disk cache rewrites the FAT for
-every file). `tools/qmon.py disks` shows the sector counts, the time per
-sector and the SD transfers (`disks clear` zeroes them, `disks watch 10`
-counts sectors per second over 10 seconds).
+READ is one run too: its 2048-byte sectors are four of the image's.
+
+Writes come in runs as well (2026-11-07). Before, every sector was an SD
+write of its own (CMD24), and the card programmed each one before taking the
+next: about 6 ms a sector on the board, 83 KB/s, over ten minutes for a 50 MB
+game install. Now an IDE write command is one multi-block SD write (CMD25) of
+its sectors, within the image's extent: `pc_mgmt` says how many sectors the
+command still writes, the write buffer has four slots, a sector is answered
+as soon as the next one has a free slot, and the card waits between blocks
+(its clock stopped) until the PC has the next one. The command's last sector
+is answered only once the whole run is on the card, so the command ends with
+its data written. Any other request first lets the run write every sector it
+has. A floppy still writes one sector at a time. `tb_ide.sv` checks runs of
+1 to 64 sectors with a slow and a fast card, across two extents, with QNICE
+taking the card and with an SD error in the middle, and a write the PC
+abandons after 3 of 8 sectors: every block reaches the card once. On the
+board a write is answered in about 50 us on average instead of 6.1 ms, and
+copies compare equal with `fc /b`.
+
+`tools/qmon.py disks` shows the sector counts, the time per sector and the SD
+transfers (`disks clear` zeroes them, `disks watch 10` counts sectors per
+second over 10 seconds).
 
 Checked on the board with MS-DOS 6.22 (`fc /b` of a file against itself and
 against fresh copies, 25,151 sectors read and 2,325 written): no wrong data,
@@ -112,10 +136,12 @@ the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
 - `VTEST.COM`: the SVGA video memory through VESA's bank window, conventional
   RAM, XMS and reads through DOS (`CDPAT.BIN` on the CD; `VTEST W` writes it),
   with the timer at 10 kHz and Sound Blaster DMA running, as during a game.
-- `CPUSPEED.COM [MHz]`: the CPU's clocks per instruction in real mode (about
-  30 kinds, the PIT's counter 2 as the clock), beside a 486's, and the MHz a
-  speed test that times each one would report (64 unless given). A row well
-  under 64 is an instruction z486 takes longer for than a 486.
+- `CPUSPEED.COM [MHz] [F]`: the CPU's clocks per instruction in real mode (about
+  30 integer kinds and 41 of the FPU, the PIT's counter 2 as the clock), beside a
+  486's, and the MHz a speed test that times each one would report (64 unless
+  given). A row well under 64 is an instruction z486 takes longer for than a
+  486. `F` shows only the FPU's rows; all of them are more than a screen
+  (`CPUSPEED > SPEED.TXT`).
 
 `tools/floppy-packer.html`, a page that runs in any browser without a server,
 packs files into a FAT12 floppy image of any of the five sizes, with DOS's

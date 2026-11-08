@@ -48,9 +48,13 @@ constant QNICE_CLK_SPEED      : natural := 50_000_000;   -- a change here has de
 -- Video Mode
 ----------------------------------------------------------------------------------------------------------
 
--- The On-Screen-Menu canvas: 640 x 480 = 40 x 30 characters, the VGA picture.
+-- The On-Screen-Menu canvas: 640 x 400 = 40 x 25 characters, drawn 1:1 into the HDMI picture's
+-- top right. 400 lines so that it fits the 400-line HDMI modes (720x400 and 640x400 at 70 Hz,
+-- M2M-UPSTREAM vga70): with 480 the file browser's last five rows were off the screen
+-- (z486-R6-rtcsnd, 2026-11-07). The firmware sizes its windows from it (SYS_DXDY); the menu
+-- needs 19 rows, the help and welcome screens 9.
 constant VGA_DX               : natural := 640;
-constant VGA_DY               : natural := 480;
+constant VGA_DY               : natural := 400;
 
 -- The PC's VGA is 31 kHz already: the scandoubler stays off (mega65.vhd); this only matters
 -- for the analog 15 kHz path (M2M-UPSTREAM line-doubler).
