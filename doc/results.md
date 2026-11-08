@@ -243,7 +243,7 @@ folders, the palette's rainbow; True Color (24 bit), 640x480, too. Display
 Properties' sample bar shows the same stepped two rainbows at 16 and 24 bit (coarser
 at 256 colours): Windows' picture, not the colour depth.
 Benchmarks on hicol (2026-11-07): 3DBench 1.0 47.9 fps, where Phil's Computer Lab
-lists 48.1 for a 486DX2-66 (its benchmark sheet's 29 DX2-66s: median 43.4, 20.9 to
+lists 48.1 for a 486DX2-66 (its [benchmark sheet](https://docs.google.com/spreadsheets/d/1lvF9nOAMKLeCpHR_SaA48M7sUXItwIi72gHRcw0wpNU/)'s 29 DX2-66s: median 43.4, 20.9 to
 51.7; Quake 6.7, at most 7.5, where z486 has 7.8; DX2-80s 56.1 and 8.1, DX4-100s
 60.6 and 9.1); PC Player Benchmark (VGA 320x200) 13.2 fps (DX2-66s: median 10.9, at
 most 12.5; DX2-80s 13.4; DX4-100s 14.7); Landmark System Speed Test 6.00: an
@@ -257,6 +257,54 @@ measurement in `qmon.py status`, the I/O trace's timer option): placed from hico
 (98.5 % of nets kept, 30 minutes; 86,785 LUTs, 43,943 registers) it closes with 0.532 ns
 to spare at 64 MHz and 0.232 ns at the implementation target, qnice_clk +0.741 ns,
 hr_rwds +0.066 ns, hold +0.036 ns, every clock met. Not on the board yet.
+
+Super VGA 16 colours (`z486-R6-svga16.cor`, 418ab4c and dd5cfab on top of natdbg: the
+scaler at 16 bit for pictures wider than 720 pixels and ascal's 16-bit line fix; with
+e85c57f, an ISO that starts with text is no cue sheet): placed from natdbg's
+checkpoint, its only failures were `scaler_16bpp`'s crossing into hdmi_clk (-2.343 ns,
+timed as synchronous with 0.347 ns). With `CORE.xdc`'s cut on the same layout it has
+0.580 ns to spare at 64 MHz and 0.280 ns at the implementation target, hdmi_clk
++0.731 ns, hr_rwds +0.217 ns, hold +0.036 ns, every clock met (86,915 LUTs, 44,011
+registers). On the board (2026-11-08) PAT.COM's 800x600 and 640x480 16-colour
+pictures are right and steady, and Windows 3.11 at "Super VGA (800x600, 16 colors)"
+no longer flickers, jumps or draws stray lines. Native mode leaves out PAT's top
+frame line: the line it measures short. The Eleventh Hour's ISO, whose first sector
+starts with text and which the firmware refused as a cue sheet over 16K, now mounts
+and its installer runs.
+
+Windows 95's CD-ROM driver (`z486-R6-cdsvc.cor`, b3413b4 on top of svga16: status
+bit 4, SERVICE on a packet device, no longer set): placed from svga16's layout (99.8 %
+of nets kept) it closes with 0.307 ns to spare at 64 MHz and 0.007 ns at the
+implementation target, hdmi_clk +0.439 ns, hold +0.025 ns, every clock met (86,701
+LUTs, 44,111 registers). On the board (2026-11-08) Windows 95 with its second IDE
+controller back finds the CD-ROM drive and uses its own driver: AutoRun starts
+Phantasmagoria's installer, Media Player plays Gabriel Knight 2's AVI from the CD, CD
+Player plays King's Quest VI's audio tracks.
+
+The HiColor DAC (`z486-R6-hdac.cor`, b87655c on top of cdsvc): placed from cdsvc's
+layout (98.5 % of nets kept). Post-route phys_opt left two nets of the x87's command
+ROM partially routed (DRC RTSTAT-2: no bitstream); `route_design` on the same
+checkpoint finished them, and it closes with 0.131 ns to spare at 64 MHz, hdmi_clk
++0.519 ns, hr_rwds +0.209 ns, hold +0.025 ns, every clock met (86,759 LUTs, 44,193
+registers). On the board (2026-11-08) VBEPROBE reads 4F03h as 0110h and 0111h after
+setting them (cdsvc: 0101h for both), HICOL's 16-bit ramps are one ramp each (cdsvc:
+red and green twice), 15- and 24-bit ramps right; Windows 95 at High Color shows
+GRAD.BMP's ramps smooth. But the BIOS now offered 800x600 at 24 bit (115h), whose
+picture came out as stripes: the next build's 8-bit register index takes that back.
+
+v0.2 (`z486-R6-v0.2.cor`, built as `z486-R6-v02`: fcac637, the DAC's 8-bit register
+index, on top of hdac): placed from hdac's finished layout (99.8 % of nets kept, 25
+minutes) it closes with 0.411 ns to spare at 64 MHz and 0.111 ns at the implementation
+target, hdmi_clk +0.519 ns, hr_rwds +0.216 ns, qnice_clk +0.844 ns, hold +0.025 ns,
+every clock met, every net routed (86,795 LUTs, 44,199 registers). In the full-system
+simulation the BIOS marks 115h unavailable again and still reads 110h/111h back. On the
+board (2026-11-08, loaded over JTAG, then flashed with MEGAFLASH and started cold):
+VBEPROBE reads 110h/111h back and lists 115h as unavailable (`a1A`), `HICOL 115` is
+refused; The 7th Guest, Windows 3.11 at 800x600 in 16 colours, Phantasmagoria and King's
+Quest VI as before, Quake's `timedemo demo1` as before (7.8 fps); SBMIX after a cold start shows every mixer volume at its reset value
+(29 of 31). Once speech sounded quiet against the music (The 7th Guest, Phantasmagoria,
+KQ6); it did not come back, on JTAG or flashed, and the Sound Blaster's path has not
+changed since v0.1 apart from the output stage, which passes a playing sound as it is.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions

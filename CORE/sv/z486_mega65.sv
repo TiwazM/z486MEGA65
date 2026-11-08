@@ -47,6 +47,7 @@ module z486_mega65 #(
     output wire  [7:0] fb_pal_a,
     output wire [23:0] fb_pal_d,
     output wire        fb_pal_wr,
+    output reg         scaler_16bpp,       // the scaler keeps this picture at 16bpp (below)
 
     // MiSTer DDR3 port (clk_sys): boot image and SVGA framebuffer
     input  wire        ddram_busy,
@@ -343,6 +344,7 @@ wire [10:0] vga_height;
 wire  [8:0] vga_stride;
 wire  [3:0] vga_flags;
 wire        vga_off;
+wire        vga_565;      // the HiColor DAC is in 16-bit 565 (vga.v's DAC registers, z486_sources.py)
 wire  [7:0] vga_pal_a;
 wire [17:0] vga_pal_d;
 wire        vga_pal_we;
@@ -553,6 +555,7 @@ system #(
     .video_stride        (vga_stride),
     .video_flags         (vga_flags),
     .video_off           (vga_off),
+    .video_565           (vga_565),
     .video_pal_a         (vga_pal_a),
     .video_pal_d         (vga_pal_d),
     .video_pal_we        (vga_pal_we),
@@ -682,6 +685,9 @@ assign video_ce = core_ce_pixel;
 // 32K colours, what z486_mister.sv's menu defaults to ({~status[5], ~status[6]}, both 0).
 // Until 2026-11-07 RGB and 565 here: Windows 95's High Color showed dark blue as dark red,
 // teal as orange-brown, white as pale yellow-green, and True Color had red and blue swapped.
+// Bit 3 follows the HiColor DAC's mode (vga.v's command and extended registers, as Tseng's
+// BIOS programs them, z486_sources.py): 565 when it is in 16-bit mode (VESA 111h, 114h, 117h),
+// 1555 otherwise. Until 2026-11-08 always 1555: 16-bit pictures had their greens off.
 // ------------------------------------------------------------------------------------------
 
 always @(posedge clk_sys) begin
@@ -693,8 +699,20 @@ always @(posedge clk_sys) begin
     fb_height      <= vga_flags[3] ? {2'b0, vga_height[10:1]} : {1'b0, vga_height};
     fb_format[2:0] <= (vga_flags[1:0] == 2'd3) ? 3'b101 :
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
-    fb_format[4:3] <= 2'b11;
+    fb_format[4:3] <= {1'b1, ~vga_565};
 end
+
+// ------------------------------------------------------------------------------------------
+// The scaler (ascal) writes the VGA picture into HyperRAM and reads it back for HDMI, at 24bpp
+// unless told otherwise. 800x600 at 60 Hz is 86 MB/s each way, 172 MB/s, more than the
+// HyperRAM gives (~160 MB/s with its 128-byte bursts): Windows 3.11's Super VGA 16 colours
+// came out in shifted lines and stray pixel runs. Pictures wider than 90 characters (720
+// pixels: 800x600 16 colours, 132-column text) go at 16bpp 565 instead, 115 MB/s; 640x480,
+// 720-pixel text and the 320-pixel games keep 24bpp, the VGA DAC's 6 bits per colour.
+// The SVGA framebuffer modes (fb_en) do not use this: the scaler reads the PC's framebuffer.
+// ------------------------------------------------------------------------------------------
+
+always @(posedge clk_sys) scaler_16bpp <= (vga_width > 9'd90);
 
 assign fb_pal_a  = vga_pal_a;
 assign fb_pal_d  = {vga_pal_d[17:12], vga_pal_d[17:16],

@@ -69,6 +69,7 @@ entity av_pipeline is
       fb_pal_dw_i             : in  std_logic_vector(23 downto 0) := (others => '0');  -- R G B
       fb_pal_wr_i             : in  std_logic := '0';
       fb_pal_dr_o             : out std_logic_vector(23 downto 0);
+      video_16bpp_i           : in  std_logic := '0';  -- M2M-UPSTREAM scaler-16bpp
       audio_clk_i             : in  std_logic; -- 12.288 MHz
       audio_rst_i             : in  std_logic;
       audio_left_i            : in  std_logic_vector(15 downto 0);
@@ -872,6 +873,7 @@ begin
          fb_pal_dw_i             => fb_pal_dw_i,
          fb_pal_wr_i             => fb_pal_wr_i,
          fb_pal_dr_o             => fb_pal_dr_o,
+         video_16bpp_i           => video_16bpp_i,  -- M2M-UPSTREAM scaler-16bpp
          video_hdmax_o            => video_hdmax,
          video_vdmax_o            => video_vdmax,
          video_interlaced_o       => video_interlaced,   -- M2M-UPSTREAM screen-center

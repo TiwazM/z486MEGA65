@@ -169,6 +169,10 @@ port (
    fb_pal_dw_i             : in    std_logic_vector(23 downto 0) := (others => '0');  -- R G B
    fb_pal_wr_i             : in    std_logic := '0';
    fb_pal_dr_o             : out   std_logic_vector(23 downto 0);
+   -- M2M-UPSTREAM scaler-16bpp (z486 for MEGA65, 2026-11-07): '1' = the scaler keeps the core
+   -- picture at 16bpp 565 instead of 24bpp (wide pictures, for the HyperRAM's bandwidth).
+   -- Core clock domain, slowly changing; the default keeps every other core unchanged.
+   video_16bpp_i           : in    std_logic := '0';
    -- M2M-UPSTREAM osm-hotkey (AExp 2026-07-10): the core picks which key(s) drive the
    -- framework's menu-open bit (qnice_keys bit 7), so the user can open the OSM with a
    -- key other than Help. Passed straight into i_m2m_keyb; the defaults reproduce the
@@ -992,6 +996,7 @@ begin
          fb_pal_dw_i             => fb_pal_dw_i,
          fb_pal_wr_i             => fb_pal_wr_i,
          fb_pal_dr_o             => fb_pal_dr_o,
+         video_16bpp_i           => video_16bpp_i,  -- M2M-UPSTREAM scaler-16bpp
          audio_clk_i             => audio_clk,
          audio_rst_i             => audio_rst,
          audio_left_i            => audio_left,

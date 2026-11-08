@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 64 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
-The current version is **v0.1-preview** (see
+The current version is **v0.2** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -17,7 +17,10 @@ The current version is **v0.1-preview** (see
 - Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
 
 **Video**
-- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included)
+- Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included);
+  High Color (32K and 64K colours) up to 800x600 and True Color at 640x480,
+  through a HiColor DAC as Tseng's BIOS expects it, so the VESA modes report
+  correctly
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
   resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
   as a VGA card sends them)
@@ -40,7 +43,8 @@ The current version is **v0.1-preview** (see
   - ISO images, raw BIN images, and BIN/CUE discs, including multiple files,
     WAVE audio, pregaps and mixed sector sizes
   - Up to 99 tracks, with CD audio
-  - Works with DOS CD-ROM drivers and MSCDEX, and Windows' Media Player
+  - Works with DOS CD-ROM drivers and MSCDEX, Windows 3.11's Media Player, and
+    Windows 95's own CD-ROM driver (AutoRun, CD Player, video from the CD)
 - Disc and disk images mount automatically at start-up, or from the menu at any
   time
 
@@ -87,7 +91,9 @@ The current version is **v0.1-preview** (see
 
 ## Tested
 
-On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA, Media Player CD audio), DOOM,
+On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA up to 1024x768 in 256 colours
+and 800x600 in 16, Media Player CD audio), Windows 95 (High Color, its own
+CD-ROM driver: AutoRun, CD Player, AVIs from the CD), DOOM,
 SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
 Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
 of Monkey Island (CD, with its CD music), and Quake (slowly: 7.8 fps in
@@ -101,11 +107,10 @@ King's Quest VI's intro movie tears (the lower part of the picture an older
 frame) and judders in the boat scene with the game's own VGA driver: the VGA
 driver from a later Sierra game (the Gabriel Knight demo's), a known fix for
 KQ6, cures both.
-DOS Quake (and 486Quake) always finds the joystick on port 2 (the MEGA65
-can't tell a released stick from an empty port) and stops after "Playing
-registered version." to calibrate it, with its prompts on a console that
-isn't on screen yet: press fire on port 2 at each step, or Esc to skip it,
-or start Quake with `-nojoy`.
+DOS Quake (and 486Quake) calibrates the joystick on port 2 as it starts,
+after "Playing registered version.", with its prompts on a console that isn't
+on screen yet, so it seems to hang. Set "Joystick: Off" in the menu (HELP)
+and Quake starts straight away: no `-nojoy` needed.
 Windows 3.11 runs at up to 1024x768 in 256 colours with Microsoft's generic
 "Super VGA 256 colors" driver (`SVGA.EXE` from the Windows Driver Library,
 through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
@@ -223,6 +228,14 @@ printed on the MEGA65's keycaps:
   mouse is moving: load the mouse driver again (`ctmouse`).
 - The internal drive only reads and formats 512-byte sectors (no
   copy-protected disks).
+- Games that bring SciTech's UniVBE engine take the ET4000 for an ET4000/W32
+  and can show a black screen while they run (The Eleventh Hour, with sound).
+- Windows draws the mouse pointer itself (the ET4000AX has no hardware
+  cursor), so it can flicker when the picture under it changes.
+- In native HDMI mode the picture is measured one line short: the top line
+  can be missing.
+- 800x600 in True Color (24 bit) isn't offered: the display shows 24-bit
+  pictures 640 pixels wide.
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 
@@ -246,3 +259,19 @@ printed on the MEGA65's keycaps:
   Smolinski (the framework, the shell's starting point).
 - PCXT-EGA-MEGA65 by silent-command, for the approaches to storage, keyboard
   and mouse on the MEGA65.
+
+## Licence
+
+z486MEGA65 is licensed under the GNU General Public License version 3, like
+the MiSTer2MEGA65 framework it is built on: see [LICENSE](LICENSE). The
+submodules keep their own licences:
+
+- z486: the Apache License 2.0 for its SystemVerilog, Python and Markdown
+  files (its `LICENSE-SCOPE.md`); its microcode image is not covered.
+- QNICE-FPGA: BSD-3-Clause.
+- z486_MiSTer: the notices in its files (the MiSTer framework's files are GPL
+  version 2 or later).
+
+The core built from this repository (the `.bit` and `.cor` files) contains
+z486's microcode image, which none of these licences cover. The BIOS images
+the core loads from the SD card are not part of it.

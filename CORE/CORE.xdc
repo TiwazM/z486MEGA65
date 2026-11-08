@@ -51,6 +51,13 @@ set_max_delay -datapath_only 15.000 -from [get_clocks pc_audio_clk] -to [get_clo
 ## too). The palette writes stay timed: ascal's palette RAM is written on fb_pal_clk = main_clk.
 set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/fb_*}] -to [get_clocks {hr_clk hdmi_clk}]
 
+## M2M-UPSTREAM scaler-16bpp, the same kind of setting: z486's scaler_16bpp (z486_mega65.sv, main
+## clock) picks ascal's 16bpp format for pictures wider than 720 pixels (Super VGA 16 colours), an
+## <ASYNC> input that ascal samples in its input (i_clk = main_clk, stays timed) and output
+## (hdmi_clk) domains. It only changes on a mode switch; a torn value lasts one frame at most.
+## Timed as synchronous it needs 0.35 ns (64 vs 90 MHz edges) and failed by 2.3 ns.
+set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/scaler_16bpp*}] -to [get_clocks hdmi_clk]
+
 ## z486_mister.sdc: the reset and boot hand-over registers are asynchronous by design
 set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*cpu_reset_n*}]
 set_false_path -from [get_cells -hierarchical -filter {IS_SEQUENTIAL && NAME =~ CORE/i_z486/*boot_done*}]
