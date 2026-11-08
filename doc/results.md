@@ -268,7 +268,9 @@ timed as synchronous with 0.347 ns). With `CORE.xdc`'s cut on the same layout it
 registers). On the board (2026-11-08) PAT.COM's 800x600 and 640x480 16-colour
 pictures are right and steady, and Windows 3.11 at "Super VGA (800x600, 16 colors)"
 no longer flickers, jumps or draws stray lines. Native mode leaves out PAT's top
-frame line: the line it measures short.
+frame line: the line it measures short. The Eleventh Hour's ISO, whose first sector
+starts with text and which the firmware refused as a cue sheet over 16K, now mounts
+and its installer runs.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
