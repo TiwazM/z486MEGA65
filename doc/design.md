@@ -246,9 +246,17 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   tracks: raw reads, the TOC, PLAY sample by sample); `CORE/m2m-rom/test/run.sh`
   runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
   BIN and cue sheets, checked against its own layout of the disc.
-- Menu: floppy A:, floppy B:, hard disk, CD-ROM, HDMI mode, filter,
+- Menu: floppy A:, floppy B:, the internal drive (off, sounds, drive A: or
+  drive B:), hard disk, CD-ROM, real floppy speed, HDMI mode, filter,
   scanlines, refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
-  drive sounds (on or off), help, "Reset the PC". An image mounted at start-up
+  help, "Reset the PC".
+  The internal drive's Sounds is only available with "Real floppy speed" (the
+  Megamiga fork's menu-rows rule, config.vhd `OPTM_AVAIL`, served through
+  `SEL_OPTM_ROWS`; for a single-select mother `menu.asm` takes mask 1 as "while
+  it is on" and mask 0 as "while it is off", and switching one off now also
+  deselects and redraws); a greyed-out selection moves to the group's first
+  available item, which is why Off comes first, and mega65.vhd treats Sounds
+  as Off without real speed. An image mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard
@@ -372,7 +380,22 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   back asks DSKCHG. If DSKCHG then says there is no disk, the mechanism sends
   INDEX without one, and INDEX is not used again until the next start.
   DSKCHG going active while the drive is selected means the disk came out.
-  The menu's "Drive sounds" (On, the default, or Off) switches it.
+  The menu's "Internal drive" (Off, the default; Sounds) switches it; Sounds
+  only with "Real floppy speed".
+- Real floppy speed (`floppy.v`'s `real_speed`, a patch in
+  `tools/z486_sources.py`; off by default): without it an image's sector
+  costs 62 us, the SD card's speed, and only SEEK and RECALIBRATE step at the
+  SPECIFY rate. With it, each sector of a read, write or FORMAT waits in
+  `S_PREPARE` until it has passed under the head of a simulated disk: 300 rpm
+  (360 rpm at 15 sectors per track, a 1.2 MB disk), sector R in slot R-1 of a
+  turn, so a track takes one turn and a sector one slot (11 ms at 18 sectors).
+  A read's or write's implied seek (the Bochs BIOS never sends SEEK) waits
+  first: (16 - SRT) units a step, as an 82077 steps, and 15 units to settle,
+  in floppy.v's SEEK units (1 ms at 500 kbit/s, 2 ms at 250). The internal
+  drive (`ext_chg_en`) is a real one and never waits. Not modelled: the
+  motor's spin-up and READ ID's wait for an ID field.
+  `CORE/sim/run_floppy_err.sh` checks the slots, a seek and the internal
+  drive's exemption.
   `CORE/sim/run_fdd_sound.sh` runs it against a model of the drive (TRACK0,
   DSKCHG, INDEX, a drive with INDEX without a disk, one without TRACK0) and
   checks every step pulse's timing.
@@ -428,8 +451,125 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   `QMON_MONITOR=1` talks to the M2M debug monitor instead (hold Run/Stop +
   Cursor Up, then press Help).
 
-The MEGA65's own floppy drive only makes the drive sounds; it does not read
-or write real floppies yet.
+## The internal floppy drive as a PC drive
+
+The menu's "Internal drive: Drive A:" (or B:) makes the MEGA65's floppy drive
+that PC drive: it reads and writes real disks. z486's `floppy.v` stays the
+PC's controller; what changes is where a sector comes from and goes to:
+
+- `pc_mgmt.vhd` mounts the drive with 84 cylinders, 2 heads and 36 sectors a
+  track, so that `floppy.v` takes any request a real disk can answer (the
+  disk says which sectors it has), and the CMOS says 1.44 MB. The image of
+  that drive is put aside until the menu gives the drive back.
+- A request for that drive goes to `fdd_phys.vhd` by cylinder, head and sector
+  (`floppy.v`'s register 1, a patch in `tools/z486_sources.py`). Its answer is
+  the sector, read out of `fdd_phys`'s track buffer into `floppy.v`'s FIFO as
+  an image's is (checked on the way, asked again fresh if the copy does not
+  match), or an error: ST2:ST1 into `floppy.v`'s register 6 (also a patch)
+  ends the command with an 82077's result bytes, as a real controller ends it
+  for a sector it cannot read. `CORE/sim/run_floppy_err.sh` checks the patch.
+- `fdd_sound.vhd` positions the head: it follows `floppy.v`'s cylinder of that
+  drive, runs the motor with the PC's (a disk in it or not), says when the head
+  has settled (18 ms after the last step), and recalibrates on request.
+- `fdd_mfm_rx.vhd` turns RDATA into bytes: a digital PLL data separator (AExp's
+  design, which replaced a gap classifier there on old media) at the PC's
+  64 MHz, a cell of 2 us at 250 kbit/s or 1 us at 500 kbit/s, +/-10 %; the
+  16-bit pattern 0x4489 (an A1 with a missing clock bit) frames the bytes.
+- `fdd_phys.vhd` parses ID fields (FE: C, H, R, N, CRC) and data fields (FB or
+  F8, CRC), the CRC-CCITT over the three A1s, the mark and the field, and keeps
+  the sectors of the track under the head in a 32-slot buffer (16 KB of block
+  RAM), filled whenever the head is on that track: one revolution reads the
+  whole track, and the PC's next sectors come out of the buffer. Only sectors
+  whose CRC is right count, only into empty slots. A request: the buffer moves
+  to its track, the head is positioned, the motor spun up (an index pulse),
+  then it waits until the second index pulse (a whole revolution) for the
+  sector. No ID field at the rate tried: the other rate (500 or 250 kbit/s),
+  once. ID fields of another cylinder: a recalibration, once. Then an error:
+  no ID field (MA), the ID but no data field (MA, MD), a data CRC error (DE,
+  DD), the sector not on the track (ND, with WC if another cylinder's IDs
+  came). The BIOS gives a command about 2 s (its motor-off count).
+- A write: `pc_mgmt` pops the PC's 512 bytes into `fdd_phys`'s write buffer
+  and asks; the head is positioned as for a read, then `fdd_phys` waits for
+  the sector's ID field (at the rate the disk has, found as for a read),
+  counts out 22 bytes of gap 2 and `fdd_mfm_tx.vhd` writes the data field over
+  the old one, as a PC's controller does: 12 x 00, three A1 syncs, FB, the
+  data, the CRC, 2 x 4E, a WDATA pulse of a quarter cell in the middle of each
+  '1' cell, with an 82077's write precompensation (125 ns early or late by
+  the neighbouring transitions). `floppy.v` (a patch) holds the PC's command
+  until the sector is on the disk: `pc_mgmt` writes its register 7 then, or
+  the error into register 6. (Without the hold, `floppy.v` went on as soon as
+  its FIFO was empty: the PC's next command could move the head before the
+  last sector was written, and that sector's error landed on the next
+  command. The Bochs BIOS stops with "int13_diskette_function: write error"
+  on any write error.) The buffer's copy of the sector is dropped,
+  so the next read comes from the disk. The write protect tab is read while
+  the drive is selected and goes to `floppy.v`'s wp input (the PC's write is
+  refused at once, as by a real controller); the select, the motor, the tab
+  or the head going away mid-write closes WGATE at once (0010, OR, for the
+  PC). `C_FDD_WRITE` in `mega65.vhd` makes a read-only build.
+- FORMAT writes the whole track, as a PC's controller does:
+  - **The hand-over:** `floppy.v` (a patch) accepts any sector count on the
+    internal drive, while the mount says 36. It hands each ID over as it
+    comes from the PC:
+    - register 8: FORMAT running, the data rate, the head's cylinder;
+    - register 9: sectors per track and gap 3;
+    - registers 10 and 11: the ID field (C, H, R, N);
+    - register 12: the IDs left and the filler.
+
+    `pc_mgmt` passes them to `fdd_phys`, which collects the IDs and answers
+    each at once.
+  - **Writing the track:** with the last ID, `fdd_phys` positions the head,
+    picks the rate by the sector count (12 or more: 500 kbit/s; fewer: 250),
+    and from the index pulse writes the 82077's IBM MFM
+    layout: gap 4a, the index address mark (C2 sync), gap 1, then per sector
+    the ID field, gap 2, a data field of 512 filler bytes and gap 3, then 4E
+    until the index comes round. `fdd_mfm_tx` writes it in a track mode from
+    `fdd_phys`'s generator (`p_gen`, with the CRCs).
+  - **Two things the Bochs BIOS relies on:**
+    - It never sends SEEK: its FORMAT expects the controller to take the
+      cylinder from the IDs, as Bochs's emulated one does. So for the
+      internal drive `floppy.v`'s `head_pcn` takes the IDs' cylinder (an
+      implied seek).
+    - It sends gap 3 as 0, which `fdd_phys` replaces with the standard 84
+      (HD) or 80 (DD) bytes, shortened until the track fits a turn with 2 %
+      to spare.
+    - It never sets the data rate (no write to 3F7h or 3F4h), so `floppy.v`'s
+      stays at its reset value, 250 kbit/s. The first board test formatted
+      18 sectors at that rate: the track overran itself, and DOS's first
+      write afterwards stopped the BIOS. Hence the sector-count rule.
+  - **Afterwards:** the track buffer empties, so DOS's verify reads come
+    from the disk.
+- The head follows `floppy.v`'s present cylinder number (`drv_cyl`, a patch:
+  RECALIBRATE, SEEK and a read's or write's implied seek), not its
+  `cylinder` register, which also takes the C+1 an 82077 reports when a
+  multi-track read ends at the end of the track on head 1 (the BIOS's reads
+  do): following that stepped the drive out after every read on side 1, and
+  the next sector cost a turn of the disk.
+- The disk change line the PC reads (DIR bit 7, a patch) is the drive's
+  DSKCHG, read while it is selected, as a PC's controller passes it on: a
+  disk taken out makes it active, and the PC's next seek (a step with a disk
+  in) clears it. `qmon.py fdd` shows the drive's state: requests, errors, ID
+  and data fields, CRC errors, the track buffer, the head, the PLL's cell and
+  the disk's speed.
+
+`CORE/sim/run_fdd_phys.sh` runs `fdd_phys` and `fdd_sound` against a model of
+a drive turning HD (18 sectors) and DD (9 sectors) disks, with jitter and
++/-2 % speed: whole tracks, a data CRC error, a missing sector, lost steps
+(the recalibration), a disk taken out and another put in (the rate found),
+and writes: the model decodes what WDATA wrote (and where: in the sector's
+gap 2), the following turns carry it, and it reads back while its
+neighbours stay intact; the write protect tab; a write at DD found by
+itself. FORMAT:
+- the model decodes the whole written track (the index address mark, every
+  ID and data field with its CRC, the filler, gap 3, and where it began and
+  ended relative to the index);
+- the formatted sectors read back as filler;
+- a sector written into the formatted track reads back;
+- gap 3 0 becomes 84 at HD, and shorter for 10 DD sectors;
+- the tab gives NW.
+
+`CORE/sim/run_floppy_err.sh` checks `floppy.v`'s side: registers 8-12, the
+hold until register 7, and the implied seek.
 
 ## Keyboard after a warm reset
 

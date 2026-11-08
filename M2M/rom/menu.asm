@@ -886,6 +886,10 @@ _OPTM_RUN_6C    MOVE    R8, R11                 ; R11: remember selection key
                                                 ; in memory
 
                 MOVE    R8, R12                 ; R8 still contains group id
+                RSUB    _OPTM_DESEL, 1          ; M2M-UPSTREAM menu-rows: an
+                                                ; item it greys out lets go
+                                                ; (before the callback copies
+                                                ; the selection; clobbers R8)
 
                 MOVE    OPTM_X, R9              ; R9: x-coord
                 MOVE    @R9, R9
@@ -921,6 +925,11 @@ _OPTM_RUN_6C    MOVE    R8, R11                 ; R11: remember selection key
                 MOVE    @R8, R8
                 RSUB    OPTM_DEPS_AFFECTS, 1
                 RBRA    _OPTM_RUN_SM_4, C       ; mother changed: redraw level
+                MOVE    R1, R8                  ; M2M-UPSTREAM menu-rows: the
+                ADD     R2, R8                  ; mother of greyed-out items
+                MOVE    @R8, R8                 ; changed: redraw too
+                RSUB    _OPTM_GAFF, 1
+                RBRA    _OPTM_RUN_SM_4, C
                 RBRA    _OPTM_RUN_SEL, 1        ; continue main loop of menu
 
                 ; proceed in case of multi-sel. with the not yet selected item
@@ -1813,7 +1822,11 @@ _OPTM_AV_1      MOVE    @R4++, R7
 _OPTM_AV_2      ADD     1, R5
                 SUB     1, R0
                 RBRA    _OPTM_AV_1, !Z
-                RBRA    _OPTM_AV_Y, 1           ; no selection: available
+                CMP     0, R3                   ; no selection (a single-select
+                RBRA    _OPTM_AV_Y, Z           ; mother that is off): available
+                AND     0xFFFB, SR              ; only with mask 0, else greyed
+                DECRB                           ; out (mask 1: only while it is
+                RET                             ; on)
 _OPTM_AV_3      AND     R6, R3                  ; in the mask?
                 RBRA    _OPTM_AV_Y, !Z
                 AND     0xFFFB, SR              ; greyed out: clear Carry

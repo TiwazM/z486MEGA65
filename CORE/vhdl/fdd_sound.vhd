@@ -48,7 +48,10 @@ generic (
 port (
    clk_i         : in  std_logic;
    rst_i         : in  std_logic;      -- the core's reset: start again
-   enable_i      : in  std_logic;      -- the menu's "Drive sounds: On"
+   enable_i      : in  std_logic;      -- the menu's "Internal drive": Sounds, Drive A: or B:
+   phys_i        : in  std_logic := '0';   -- the drive is the PC's drive phys_drv_i (fdd_phys)
+   phys_drv_i    : in  std_logic := '0';
+   recal_i       : in  std_logic := '0';   -- pulse: out to TRACK0 and back (a lost step)
 
    -- floppy.v (clk_i)
    pc_motor_i    : in  std_logic_vector(1 downto 0);    -- the DOR's motor bits, A: and B:
@@ -64,6 +67,14 @@ port (
    f_track0_i    : in  std_logic;
    f_index_i     : in  std_logic;
    f_diskchg_i   : in  std_logic;
+
+   -- for fdd_phys: the lines (synchronized, valid while selected), the head on its target
+   sel_ok_o      : out std_logic;                       -- selected 100 us
+   sel_fast_o    : out std_logic;                       -- selected 4 us (DSKCHG valid)
+   idx_n_o       : out std_logic;
+   chg_n_o       : out std_logic;
+   motor_o       : out std_logic;
+   ready_o       : out std_logic;                       -- on target, settled 18 ms
 
    -- status
    cyl_o         : out std_logic_vector(6 downto 0);    -- where the head is
@@ -85,6 +96,8 @@ architecture rtl of fdd_sound is
    constant C_DIR     : natural := G_DIR_US * C_US;
    constant C_SEL     : natural := G_SEL_US * C_US;
    constant C_IDX_MIN : natural := G_IDX_MIN_US * C_US;
+   constant C_FAST    : natural := 4 * C_US;
+   constant C_SETTLE  : natural := 18_000 * C_US;     -- head settle after the last step
 
    type t_state is (S_OFF, S_IDLE, S_SEL, S_DIR, S_PULSE, S_GAP);
    signal state      : t_state := S_OFF;
@@ -100,6 +113,9 @@ architecture rtl of fdd_sound is
    signal sel_ok     : std_logic := '0';     -- ... for C_SEL: the lines are valid
    signal sel_cnt    : natural range 0 to C_SEL := 0;
    signal motor      : std_logic := '0';
+   signal sel_fast   : std_logic := '0';
+   signal settle     : natural range 0 to C_SETTLE := 0;
+   signal ready      : std_logic := '0';
    signal step_n     : std_logic := '1';
    signal dir        : std_logic := '1';
 
@@ -141,8 +157,11 @@ begin
          idx_m  <= f_index_i;   idx_n  <= idx_m;   idx_d <= idx_n;
          chg_m  <= f_diskchg_i; chg_n  <= chg_m;
 
-         -- the PC drive followed: the selected one if its motor runs, else one whose motor runs
-         if pc_motor_i(0) = '1' and (pc_sel_i = '0' or pc_motor_i(1) = '0') then
+         -- the PC drive followed: the selected one if its motor runs, else one whose motor runs;
+         -- the internal drive's own as a PC drive
+         if phys_i = '1' then
+            tgt_drv <= phys_drv_i;
+         elsif pc_motor_i(0) = '1' and (pc_sel_i = '0' or pc_motor_i(1) = '0') then
             tgt_drv <= '0';
          elsif pc_motor_i(1) = '1' then
             tgt_drv <= '1';
@@ -152,16 +171,33 @@ begin
          else
             v_target := clamp(pc_cyl1_i);
          end if;
-         v_pc_on := pc_motor_i /= "00";
+         if phys_i = '1' then
+            v_pc_on := pc_motor_i(to_integer(unsigned'('0' & phys_drv_i))) = '1';
+         else
+            v_pc_on := pc_motor_i /= "00";
+         end if;
 
          -- select settles before its lines count
          if sel = '0' then
-            sel_cnt <= 0;
-            sel_ok  <= '0';
+            sel_cnt  <= 0;
+            sel_ok   <= '0';
+            sel_fast <= '0';
          elsif sel_cnt /= C_SEL then
             sel_cnt <= sel_cnt + 1;
+            if sel_cnt = C_FAST then
+               sel_fast <= '1';
+            end if;
          else
             sel_ok  <= '1';
+         end if;
+
+         if settle /= 0 then
+            settle <= settle - 1;
+         end if;
+         ready <= '0';
+         if recal_i = '1' and state /= S_OFF then
+            recal     <= '1';
+            recal_cnt <= 0;
          end if;
 
          if timer /= 0 then
@@ -179,7 +215,7 @@ begin
 
          -- a disk put in: two index pulses while the motor runs; the motor stops at once and
          -- a probe asks DSKCHG
-         if motor = '1' and sel_ok = '1' and idx_off = '0' then
+         if motor = '1' and sel_ok = '1' and idx_off = '0' and phys_i = '0' then
             if idx_gap /= 0 then
                idx_gap <= idx_gap - 1;
             end if;
@@ -253,6 +289,9 @@ begin
                      v_out := true;                   -- cylinder 0 without TRACK0: lost a step
                   end if;
                end if;
+               if not (v_out or v_in) and settle = 0 and fault = '0' and recal_i = '0' then
+                  ready <= '1';                       -- on target, settled
+               end if;
                if v_out or v_in then
                   sel <= '1';
                   if v_out then
@@ -293,6 +332,7 @@ begin
             when S_PULSE =>
                if timer = 0 then
                   step_n   <= '1';
+                  settle   <= C_SETTLE;
                   timer    <= C_STEP - C_PULSE - C_DIR;
                   state    <= S_GAP;
                   if dir_out = '1' then
@@ -328,9 +368,9 @@ begin
                end if;
          end case;
 
-         -- the motor: with the PC's, unless a disk is in
+         -- the motor: with the PC's, unless a disk is in (sounds); as a PC drive, with the PC's
          if state /= S_OFF then
-            motor <= '1' when v_pc_on and disk = '0' and fault = '0' else '0';
+            motor <= '1' when v_pc_on and (disk = '0' or phys_i = '1') and fault = '0' else '0';
          end if;
 
          if rst_i = '1' then
@@ -347,6 +387,13 @@ begin
    f_motora_o  <= not motor;
    f_step_o    <= step_n;
    f_stepdir_o <= dir;
+
+   sel_ok_o   <= sel_ok;
+   sel_fast_o <= sel_fast;
+   idx_n_o    <= idx_n;
+   chg_n_o    <= chg_n;
+   motor_o    <= motor;
+   ready_o    <= ready;
 
    cyl_o     <= std_logic_vector(to_unsigned(cyl, 7));
    disk_o    <= disk;

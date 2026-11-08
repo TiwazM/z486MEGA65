@@ -20,6 +20,19 @@
 --     14..0 LBA); a read gets the sector from disk_sd and pushes its 512 bytes into register F,
 --     a write or a format pops 512 bytes from register F and hands them to disk_sd. A sector of a
 --     drive without an image, or one that cannot be read, is 512 zeros, as on MiSTer.
+--   * The MEGA65's internal floppy drive as A: or B: (phys_i, fdd_phys.vhd): that drive is
+--     mounted (after the 100 ms without media) with 84 cylinders, 2 heads and 36 sectors a
+--     track, so that floppy.v takes any request a real disk can answer (the disk itself says
+--     which sectors it has), and the CMOS says 1.44 MB. Its requests go to fdd_phys by
+--     cylinder, head and sector (floppy.v's register 1): a read's sector comes out of
+--     fdd_phys's track buffer, checked as disk_sd's (asked again fresh, twice at most), into
+--     register F; a write's into fdd_phys first, and floppy.v's register 7 once fdd_phys has
+--     written it (floppy.v holds the PC's command until then). A sector fdd_phys cannot read or
+--     write is an error for the PC: its ST2:ST1 into floppy.v's register 6 ends the command.
+--     A FORMAT (floppy.v's register 8 bit 15 with a write request): no bytes; the sector's ID
+--     (registers 10, 11), the track's sector count and gap 3 (9), the filler and the IDs left
+--     (12), the data rate and the head's cylinder (8) go to fdd_phys (phys_fmt_o), which
+--     writes the whole track with the last ID; register 7 or 6 answers each as a write's.
 --   * The hard disk (ide.v, master of the first channel; Main_MiSTer's ide.cpp for a raw image,
 --     one sector per data block as PCXT-EGA-MEGA65's mgmt_bridge does it): geometry 16 heads x
 --     256 sectors (ide_set_geometry(0, 0)), LBA28; the BIOS translates by the capacity and reads
@@ -112,6 +125,26 @@ entity pc_mgmt is
       cd_stb_o          : out std_logic;          -- a pulse: a sample from the FIFO (testbench)
       cd_stat_o         : out std_logic_vector(63 downto 0);
 
+      -- the internal floppy drive (fdd_phys.vhd) as A: (bit 0) or B: (bit 1); its requests (a
+      -- toggle, the rest stable a clock before it) and answers (a toggle, err stable with it:
+      -- ST2:ST1, 0 = done), the sector it read (phys_rd_i, a clock after buf_addr_o; phys_bad_i
+      -- as buf_bad_i), the sector to write (phys_we_o with buf_addr_o and buf_wd_o)
+      phys_i            : in  std_logic_vector(1 downto 0) := "00";
+      phys_req_o        : out std_logic := '0';
+      phys_wr_o         : out std_logic := '0';
+      phys_fresh_o      : out std_logic := '0';
+      phys_c_o          : out std_logic_vector(7 downto 0) := (others => '0');
+      phys_h_o          : out std_logic := '0';
+      phys_r_o          : out std_logic_vector(6 downto 0) := (others => '0');
+      phys_done_i       : in  std_logic := '0';
+      phys_err_i        : in  std_logic_vector(15 downto 0) := (others => '0');
+      phys_rd_i         : in  std_logic_vector(7 downto 0) := (others => '0');
+      phys_bad_i        : in  std_logic := '0';
+      phys_we_o         : out std_logic := '0';
+      -- a FORMAT's ID instead of a sector (fdd_phys req_fmt_i: 63 FORMAT, 62 the track's first
+      -- ID, 61 its last, 60..59 the data rate, 47..40 gap 3, 39..32 the filler, 31..0 C H R N)
+      phys_fmt_o        : out std_logic_vector(63 downto 0) := (others => '0');
+
       -- the IDE trace (mega65.vhd keeps it): one event per clock at most, bits 63..60 the
       -- event, 59..56 0, then three bytes A, B, C and 32 bits of data (CD-ROM events from
       -- pc_cdrom.vhd too)
@@ -122,6 +155,8 @@ entity pc_mgmt is
       --   4 a reset (request 110): A drive/head
       --   5 a floppy request: A bit 0 write, data drive (bit 15) and LBA
       --   6 an SD answer: A bit 1 write, bit 0 failed, B the unit, C count (7..0), data the LBA
+      --   7 an internal floppy drive answer: A bit 0 write, B ST2, C ST1, data drive (bit 31),
+      --     cylinder (23..16), head (8), sector (6..0)
       --   8-12 the CD-ROM drive (pc_cdrom.vhd)
       trace_we_o        : out std_logic;
       trace_o           : out std_logic_vector(63 downto 0)
@@ -168,6 +203,11 @@ architecture synthesis of pc_mgmt is
    constant C_CMOS_PG : std_logic_vector(7 downto 0) := x"F4";
 
    constant C_EJECT_WAIT : natural := G_CLK_HZ / 10;          -- 100 ms
+
+   -- the internal floppy drive as a PC drive (m_cur's layout): mounted, not write protected (its
+   -- tab goes to floppy.v's wp input), 84 cylinders, 36 sectors a track, 6048 sectors, 2 heads
+   constant C_PHYS_UNIT  : std_logic_vector(39 downto 0) :=
+      '1' & '0' & x"54" & x"24" & x"17A0" & "10" & "0000";
 
    -- The CMOS type of a floppy image by its sectors (unmounted: 1.44 MB, as MiSTer)
    function fdd_type(mounted : std_logic; total : std_logic_vector(15 downto 0)) return natural is
@@ -247,6 +287,8 @@ architecture synthesis of pc_mgmt is
       S_IDE_IDENT,
       S_HR_SD, S_HR_STREAM, S_HR_CHK, S_HR_REGS, S_FD_CHK,
       S_HW_BLOCK, S_HW_POP, S_HW_SD, S_HW_DONE,
+      S_PHY_CHS, S_PHY_ASK, S_PHY_WAIT,
+      S_PHY_F8, S_PHY_F9, S_PHY_F10, S_PHY_F11, S_PHY_F12,
       S_IDE_BLK,
       S_WREGS,
       S_CD,
@@ -322,6 +364,18 @@ architecture synthesis of pc_mgmt is
    signal r_wr        : std_logic := '0';
    signal r_serve     : std_logic := '0';       -- '1': a drive with an image
    signal r_ok        : std_logic := '0';       -- '1': the sector came from the card
+   signal r_phys      : std_logic := '0';       -- '1': the internal drive's
+
+   -- the internal drive: which PC drive it is as the PC has it, the request out, its answer
+   signal p_cur       : std_logic_vector(1 downto 0) := "00";
+   signal p_req       : std_logic := '0';
+   signal p_done_d    : std_logic := '0';
+   signal p_c         : std_logic_vector(7 downto 0) := (others => '0');
+   signal p_h         : std_logic := '0';
+   signal p_r         : std_logic_vector(6 downto 0) := (others => '0');
+   signal p_drv       : std_logic := '0';
+   signal p_fmt       : std_logic_vector(63 downto 0) := (others => '0');
+   signal p_fsc       : std_logic_vector(7 downto 0) := (others => '0');
 
    signal req         : std_logic := '0';
    signal done_s      : std_logic_vector(2 downto 0) := (others => '0');
@@ -377,7 +431,14 @@ begin
    -- the floppy being mounted: 39 mounted, 38 write protected, 37..30 cylinders, 29..22 sectors
    -- per track, 21..6 sectors, 5..4 heads, 3..0 generation. The hard disk: 119 mounted, 118
    -- write protected, 117..86 sectors, 83..80 generation.
-   m_cur <= m_dst(40 * m_drv + 39 downto 40 * m_drv);
+   m_cur <= C_PHYS_UNIT when p_cur(m_drv) = '1' else m_dst(40 * m_drv + 39 downto 40 * m_drv);
+
+   phys_req_o <= p_req;
+   phys_wr_o  <= r_wr;
+   phys_c_o   <= p_c;
+   phys_h_o   <= p_h;
+   phys_r_o   <= p_r;
+   phys_fmt_o <= p_fmt;
 
    -- this side's outputs, or the CD-ROM's while it has the bus
    cd_gnt           <= '1' when state = S_CD else '0';
@@ -440,6 +501,7 @@ begin
          pm_read  <= '0';
          pm_write <= '0';
          buf_we_o     <= '0';
+         phys_we_o    <= '0';
          tr_we        <= '0';
          done_s       <= done_s(1 downto 0) & sd_done_i;
 
@@ -630,20 +692,32 @@ begin
             ----------------------------------------------------------------------------------
             when S_IDLE =>
                pm_address <= x"0000";
-               if m_dst(3 downto 0) /= a_gen(0) or m_dst(39) /= a_mounted(0) or
-                  m_dst(43 downto 40) /= a_gen(1) or m_dst(79) /= a_mounted(1) then
-                  -- a floppy changed: the first one that did
-                  if m_dst(3 downto 0) /= a_gen(0) or m_dst(39) /= a_mounted(0) then
+               if phys_i(0) /= p_cur(0) or
+                  (phys_i(0) = '0' and (m_dst(3 downto 0) /= a_gen(0) or m_dst(39) /= a_mounted(0))) or
+                  phys_i(1) /= p_cur(1) or
+                  (phys_i(1) = '0' and (m_dst(43 downto 40) /= a_gen(1) or m_dst(79) /= a_mounted(1))) then
+                  -- a floppy changed (its image, or the internal drive took it or gave it
+                  -- back; an image's changes wait while the internal drive has it): the first one
+                  if phys_i(0) /= p_cur(0) or
+                     (phys_i(0) = '0' and (m_dst(3 downto 0) /= a_gen(0) or m_dst(39) /= a_mounted(0))) then
                      m_drv        <= 0;
+                     p_cur(0)     <= phys_i(0);
                      a_gen(0)     <= m_dst(3 downto 0);
-                     a_mounted(0) <= m_dst(39);
+                     a_mounted(0) <= m_dst(39) or phys_i(0);
                      a_total(0)   <= m_dst(21 downto 6);
+                     if phys_i(0) = '1' then
+                        a_total(0) <= x"0B40";        -- 1.44 MB for the CMOS
+                     end if;
                      b_addr       <= C_FDD & x"00";   -- out first
                   else
                      m_drv        <= 1;
+                     p_cur(1)     <= phys_i(1);
                      a_gen(1)     <= m_dst(43 downto 40);
-                     a_mounted(1) <= m_dst(79);
+                     a_mounted(1) <= m_dst(79) or phys_i(1);
                      a_total(1)   <= m_dst(61 downto 46);
+                     if phys_i(1) = '1' then
+                        a_total(1) <= x"0B40";
+                     end if;
                      b_addr       <= C_FDD & x"80";
                   end if;
                   b_data <= x"0000";
@@ -753,7 +827,13 @@ begin
                r_ok          <= '0';
                idx           <= 0;
                r_serve       <= a_mounted(to_integer(unsigned(b_q(15 downto 15))));
-               if r_wr = '1' then
+               r_phys        <= p_cur(to_integer(unsigned(b_q(15 downto 15))));
+               p_drv         <= b_q(15);
+               if p_cur(to_integer(unsigned(b_q(15 downto 15)))) = '1' then
+                  b_addr <= C_FDD & x"01";           -- the internal drive's: by C, H, R
+                  state  <= S_BUS_R;
+                  ret    <= S_PHY_CHS;
+               elsif r_wr = '1' then
                   state <= S_POP;                    -- the PC's bytes first
                elsif a_mounted(to_integer(unsigned(b_q(15 downto 15)))) = '1' then
                   h_try   <= 0;
@@ -780,6 +860,95 @@ begin
                   state <= sd_next;
                end if;
 
+            -- the internal drive: its request by cylinder, head and sector; a write's bytes first
+            when S_PHY_CHS =>
+               p_c <= b_q(15 downto 8);
+               p_h <= b_q(7);
+               p_r <= b_q(6 downto 0);
+               p_fmt        <= (others => '0');
+               phys_fresh_o <= '0';
+               h_try        <= 0;
+               if r_wr = '1' then
+                  b_addr <= C_FDD & x"08";          -- a sector, or a FORMAT's ID?
+                  state  <= S_BUS_R;
+                  ret    <= S_PHY_F8;
+               else
+                  state <= S_PHY_ASK;
+               end if;
+
+            -- a FORMAT (floppy.v's registers 8-12): its ID, the track's numbers; no bytes to pop
+            -- (floppy.v goes on with register 7, as after a sector written)
+            when S_PHY_F8 =>
+               if b_q(15) = '1' then
+                  p_fmt(63)           <= '1';
+                  p_fmt(60 downto 59) <= b_q(13 downto 12);   -- the data rate
+                  p_c                 <= b_q(7 downto 0);     -- the head's cylinder
+                  b_addr <= C_FDD & x"09";
+                  state  <= S_BUS_R;
+                  ret    <= S_PHY_F9;
+               else
+                  state <= S_POP;                   -- a sector: the PC's bytes first
+               end if;
+
+            when S_PHY_F9 =>
+               p_fsc               <= b_q(15 downto 8);       -- sectors per track
+               p_fmt(47 downto 40) <= b_q(7 downto 0);        -- gap 3
+               b_addr <= C_FDD & x"0A";
+               state  <= S_BUS_R;
+               ret    <= S_PHY_F10;
+
+            when S_PHY_F10 =>
+               p_fmt(31 downto 16) <= b_q;                    -- C, H
+               b_addr <= C_FDD & x"0B";
+               state  <= S_BUS_R;
+               ret    <= S_PHY_F11;
+
+            when S_PHY_F11 =>
+               p_fmt(15 downto 0) <= b_q;                     -- R, N
+               p_r <= b_q(14 downto 8);
+               b_addr <= C_FDD & x"0C";
+               state  <= S_BUS_R;
+               ret    <= S_PHY_F12;
+
+            when S_PHY_F12 =>
+               p_fmt(39 downto 32) <= b_q(7 downto 0);        -- the filler
+               if b_q(15 downto 8) = p_fsc then
+                  p_fmt(62) <= '1';                 -- the track's first ID
+               end if;
+               if unsigned(b_q(15 downto 8)) <= 1 then
+                  p_fmt(61) <= '1';                 -- its last: the track is written
+               end if;
+               state <= S_PHY_ASK;
+
+            when S_PHY_ASK =>
+               p_req <= not p_req;                   -- wr, C, H, R and fresh were set before
+               pm_buf_addr <= (others => '1');       -- (the copy's start at 0 counts)
+               state <= S_PHY_WAIT;
+
+            when S_PHY_WAIT =>
+               p_done_d <= phys_done_i;
+               if phys_done_i /= p_done_d then
+                  tr_we <= '1';
+                  tr    <= x"70" & "0000000" & r_wr & phys_err_i(15 downto 8) & phys_err_i(7 downto 0) &
+                           p_drv & "0000000" & p_c & "0000000" & p_h & '0' & p_r;
+                  if phys_err_i /= x"0000" then
+                     b_addr <= C_FDD & x"06";        -- the PC's command ends with the error
+                     b_data <= phys_err_i;
+                     state  <= S_BUS_W;
+                     ret    <= S_REQ_END;
+                  elsif r_wr = '1' then
+                     b_addr <= C_FDD & x"07";        -- on the disk: the PC's command goes on
+                     b_data <= x"0001";
+                     state  <= S_BUS_W;
+                     ret    <= S_REQ_END;
+                  else
+                     r_ok  <= '1';
+                     idx   <= 0;
+                     b_ph  <= 0;
+                     state <= S_FD_CHK;
+                  end if;
+               end if;
+
             -- floppy.v's FIFO cannot take a sector back, so first a copy of the slot only for
             -- disk_sd's checksum (a byte a clock, its verdict two clocks after the last); one
             -- that does not match comes again fresh from the card, twice at most (the ring's
@@ -798,7 +967,11 @@ begin
                      b_ph <= b_ph + 1;
                   when others =>
                      b_ph <= 0;
-                     if buf_bad_i = '1' and r_ok = '1' and h_try < 2 then
+                     if r_phys = '1' and phys_bad_i = '1' and h_try < 2 then
+                        h_try        <= h_try + 1;
+                        phys_fresh_o <= '1';
+                        state        <= S_PHY_ASK;
+                     elsif r_phys = '0' and buf_bad_i = '1' and r_ok = '1' and h_try < 2 then
                         h_try        <= h_try + 1;
                         pm_req_fresh <= '1';
                         sd_next      <= S_FD_CHK;
@@ -817,7 +990,9 @@ begin
                   when 0 | 1 =>
                      b_ph <= b_ph + 1;
                   when 2 =>
-                     if r_ok = '1' then
+                     if r_ok = '1' and r_phys = '1' then
+                        pm_wdata <= x"00" & phys_rd_i;
+                     elsif r_ok = '1' then
                         pm_wdata <= x"00" & buf_rd_i;
                      else
                         pm_wdata <= x"0000";
@@ -848,7 +1023,8 @@ begin
                v_byte      := mgmt_readdata_i(7 downto 0);
                pm_buf_addr  <= std_logic_vector(to_unsigned(idx, 9));
                buf_wd_o    <= v_byte;
-               buf_we_o    <= '1';
+               buf_we_o    <= not r_phys;
+               phys_we_o   <= r_phys;
                pm_read <= '1';                  -- pop it
                if idx = 511 then
                   state <= S_POP_DONE;
@@ -859,7 +1035,9 @@ begin
 
             when S_POP_DONE =>
                idx <= 0;
-               if r_serve = '1' then
+               if r_phys = '1' then
+                  state <= S_PHY_ASK;
+               elsif r_serve = '1' then
                   sd_next <= S_REQ_END;
                   state   <= S_SD_ASK;
                else

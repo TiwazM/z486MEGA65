@@ -1007,7 +1007,8 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "12"                   ; 12: the "Drive sounds" submenu (61 lines)
+CFG_SIG_VAL     .ASCII_W "15"                   ; 15: "Real floppy speed", "Internal
+                                                ; drive" under "Floppy B:" (64 lines)
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -1127,15 +1128,17 @@ DAN_PEND        .BLOCK  4
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 61-line menu: 20 + 617 item characters + 1 + 5 x 61 (the line
+; for this 64-line menu: 20 + 664 item characters + 1 + 5 x 64 (the line
 ; arrays and the dependency array) + 1 + (6 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1230 words (the 54-line one before the "Drive sounds"
-; submenu: 1100; the 53-line one before the joystick's "Off": 1081). The Shell checks it when the menu first opens
+; 26 (SCR$OSM_O_DX) = 1292 words (the 63-line "Internal drive" one: 1268; the
+; 61-line "Drive sounds" one: 1230; the
+; 54-line one before it: 1100; the 53-line one before the joystick's "Off":
+; 1081). The Shell checks it when the menu first opens
 ; (ERR_FATAL_HEAP1/2; with 768, the 38-line menu was 13 short: "Heap
 ; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
 ; 46-line one needed 939 of 960, before the "Refresh" submenu).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 1280
+MENU_HEAP_SIZE  .EQU 1344
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -1143,8 +1146,8 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 18720                      ; (18880 before MENU_HEAP_SIZE
-HEAP            .BLOCK 1                        ; grew by 160 again: the same end)
+HEAP_SIZE       .EQU 18656                      ; (18720 before MENU_HEAP_SIZE
+HEAP            .BLOCK 1                        ; grew by 64: the same end)
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's
                                                 ; larger device handle (main_vars.asm)

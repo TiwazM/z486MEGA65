@@ -58,18 +58,32 @@ The current version is **v0.1-preview** (see
   can be on pin 9 (C64GS style) or pin 5, set in the menu.
 
 **Core**
-- Menu on HELP: disks, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
-  joystick, drive sounds, reset; settings are saved to the SD card
+- Menu on HELP: floppies, internal drive, hard disk, CD-ROM, real floppy
+  speed, HDMI mode, filter, scanlines, refresh (HDMI or VGA), joystick, reset;
+  settings are saved to the SD card
+- Real floppy speed (off by default): the floppy images run at a real drive's
+  speed. Each sector waits for its place on a disk turning at 300 rpm (360 rpm
+  for a 1.2 MB disk), and a read or write that moves the head waits for its
+  steps. Off, images load as fast as the SD card allows. The internal drive as
+  A: or B: is a real drive either way.
 - The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
   from the MEGA65's again
 - The drive LED shows the PC's disk accesses, in Megamiga's colours: red for
   the hard disk, yellow for the floppies, and green for the CD-ROM (CD audio
   too); orange for two or more at once
-- Drive sounds: the MEGA65's own floppy drive hums and clicks with the PC's
-  floppy drives (their images on the SD card). Its motor runs while the PC's
-  does and its head steps to the cylinder the PC's is on. With a disk in it,
-  only the head moves: the motor stays off, so the disk doesn't spin for
-  nothing. It never writes. "Drive sounds: Off" in the menu leaves it idle
+- The MEGA65's own floppy drive ("Internal drive" in the menu):
+  - Off (the default): the drive stays idle
+  - Sounds: it hums and clicks with the PC's floppy drives
+    (their images on the SD card). Its motor runs while the PC's does and its
+    head steps to the cylinder the PC's is on. With a disk in it, only the head
+    moves: the motor stays off, so the disk doesn't spin for nothing. It never
+    writes. Only with "Real floppy speed": without it, Sounds is greyed out
+    (and a Sounds setting becomes Off).
+  - Drive A: or Drive B:: it is that PC drive, and reads and writes real PC
+    disks: 720 KB and 1.44 MB (and other 512-byte-sector formats, such as
+    Microsoft's 1.68 MB DMF). The drive finds the disk's rate and reads its
+    write protect tab and disk change line by itself. The image mounted as that
+    drive waits until the menu gives the drive back.
 
 ## Tested
 
@@ -206,8 +220,8 @@ printed on the MEGA65's keycaps:
   get stuck out of step. With another system BIOS, the pointer can start
   jumping between the screen edges when a program starts or quits while the
   mouse is moving: load the mouse driver again (`ctmouse`).
-- The MEGA65's own floppy drive only makes the drive sounds: it can't read
-  real floppies yet.
+- The internal drive only reads and formats 512-byte sectors (no
+  copy-protected disks).
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 

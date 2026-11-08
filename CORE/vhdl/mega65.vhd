@@ -346,23 +346,30 @@ architecture synthesis of MEGA65_Core is
 
 constant C_MENU_FDD_A          : natural := 2;   -- manual load 0 (m2m-rom.asm DISK_PREP)
 constant C_MENU_FDD_B          : natural := 3;   -- manual load 1
-constant C_MENU_HDD            : natural := 4;   -- manual load 2
-constant C_MENU_CD            : natural := 5;   -- manual load 3
-constant C_MENU_HDMI_720P     : natural := 10;
-constant C_MENU_HDMI_480P     : natural := 11;
-constant C_MENU_HDMI_800      : natural := 12;
-constant C_MENU_HDMI_1024     : natural := 13;
-constant C_MENU_HDMI_1280     : natural := 14;  -- M2M-UPSTREAM sxga-mode
-constant C_MENU_HDMI_NATIVE   : natural := 15;  -- M2M-UPSTREAM native: the PC's own resolution
-constant C_MENU_FLT_SMOOTH    : natural := 22;  -- (21: Sharp, the default)
-constant C_MENU_FLT_PIXELS    : natural := 23;
-constant C_MENU_SL_25         : natural := 30;  -- (29: Off, the default)
-constant C_MENU_SL_50         : natural := 31;
-constant C_MENU_RF_ORIG       : natural := 38;  -- the VGA's own refresh (37: 60 Hz, the default)
-constant C_MENU_JOY_P5        : natural := 45;  -- the game port's fire 2 on pin 5 (44: pin 9)
-constant C_MENU_JOY_OFF       : natural := 46;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_SND_OFF       : natural := 53;  -- no drive sounds (52: On, the default)
-constant C_MENU_RESET         : natural := 58;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_INT_OFF       : natural := 7;   -- the internal floppy drive idle (the default),
+constant C_MENU_INT_SND       : natural := 8;   -- drive sounds (only with real speed),
+constant C_MENU_INT_A         : natural := 9;   -- the PC's A:,
+constant C_MENU_INT_B         : natural := 10;  -- or its B:
+constant C_MENU_HDD            : natural := 13;  -- manual load 2
+constant C_MENU_CD            : natural := 14;  -- manual load 3
+constant C_MENU_REAL_SPEED    : natural := 15;  -- the floppy images at a real drive's speed
+constant C_MENU_HDMI_720P     : natural := 20;
+constant C_MENU_HDMI_480P     : natural := 21;
+constant C_MENU_HDMI_800      : natural := 22;
+constant C_MENU_HDMI_1024     : natural := 23;
+constant C_MENU_HDMI_1280     : natural := 24;  -- M2M-UPSTREAM sxga-mode
+constant C_MENU_HDMI_NATIVE   : natural := 25;  -- M2M-UPSTREAM native: the PC's own resolution
+constant C_MENU_FLT_SMOOTH    : natural := 32;  -- (31: Sharp, the default)
+constant C_MENU_FLT_PIXELS    : natural := 33;
+constant C_MENU_SL_25         : natural := 40;  -- (39: Off, the default)
+constant C_MENU_SL_50         : natural := 41;
+constant C_MENU_RF_ORIG       : natural := 48;  -- the VGA's own refresh (47: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 55;  -- the game port's fire 2 on pin 5 (54: pin 9)
+constant C_MENU_JOY_OFF       : natural := 56;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 61;  -- momentary: m2m-rom.asm resets through the CSR
+
+-- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
+constant C_FDD_WRITE          : boolean := true;
 
 -- The R6's SDRAM (IS42S16320F, 32M x 16): z486's 64 MB size code
 constant C_RAM_SIZE           : std_logic_vector(1 downto 0) := "10";
@@ -614,6 +621,35 @@ signal main_fdd_request       : std_logic_vector(1 downto 0);
 signal main_fdd_motor         : std_logic_vector(1 downto 0);    -- floppy.v: B:'s and A:'s motor
 signal main_fdd_sel           : std_logic;                       -- the selected floppy drive
 signal main_fdd_cyl           : std_logic_vector(15 downto 0);   -- B:'s and A:'s head cylinders
+signal main_int_snd           : std_logic;                       -- the internal drive's Sounds
+
+-- the internal floppy drive as a PC drive (fdd_phys.vhd): B: (bit 1) or A: (bit 0)
+signal main_phys              : std_logic_vector(1 downto 0);
+signal main_snd_sel_ok        : std_logic;
+signal main_snd_sel_fast      : std_logic;
+signal main_snd_idx_n         : std_logic;
+signal main_snd_chg_n         : std_logic;
+signal main_snd_motor         : std_logic;
+signal main_snd_ready         : std_logic;
+signal main_snd_cyl           : std_logic_vector(6 downto 0);
+signal main_phys_recal        : std_logic;
+signal main_phys_req          : std_logic;
+signal main_phys_wr           : std_logic;
+signal main_phys_fresh        : std_logic;
+signal main_phys_c            : std_logic_vector(7 downto 0);
+signal main_phys_h            : std_logic;
+signal main_phys_r            : std_logic_vector(6 downto 0);
+signal main_phys_done         : std_logic;
+signal main_phys_err          : std_logic_vector(15 downto 0);
+signal main_phys_rd           : std_logic_vector(7 downto 0);
+signal main_phys_bad          : std_logic;
+signal main_phys_we           : std_logic;
+signal main_phys_fmt          : std_logic_vector(63 downto 0);   -- a FORMAT's ID (pc_mgmt)
+signal main_phys_chg          : std_logic;
+signal main_phys_wp           : std_logic;
+signal main_phys_stat         : std_logic_vector(255 downto 0);
+signal main_phys_snap         : std_logic_vector(255 downto 0) := (others => '0');
+signal qnice_phys_snap        : std_logic_vector(255 downto 0);
 signal main_ide0_request      : std_logic_vector(2 downto 0);
 signal main_ide1_request      : std_logic_vector(2 downto 0);
 signal main_mgmt_address      : std_logic_vector(15 downto 0);
@@ -697,6 +733,10 @@ component z486_mega65 is
       mgmt_write         : in    std_logic;
       mgmt_writedata     : in    std_logic_vector(15 downto 0);
       fdd_request        : out   std_logic_vector(1 downto 0);
+      fdd_chg_en         : in    std_logic_vector(1 downto 0);
+      fdd_chg            : in    std_logic_vector(1 downto 0);
+      fdd_real_speed     : in    std_logic;
+      fdd_wp             : in    std_logic_vector(1 downto 0);
       fdd_motor          : out   std_logic_vector(1 downto 0);
       fdd_sel            : out   std_logic;
       fdd_cyl            : out   std_logic_vector(15 downto 0);
@@ -784,11 +824,8 @@ begin
    iec_srq_en_o         <= '0';
    iec_srq_n_o          <= '1';
 
-   -- M2M-UPSTREAM floppy-pins: the internal drive makes the PC's floppy drives' sounds
-   -- (fdd_sound.vhd: motor, select, step, direction); it never writes, and side 0, DD
-   f_side1_o            <= '1';
-   f_wdata_o            <= '1';
-   f_wgate_o            <= '1';
+   -- M2M-UPSTREAM floppy-pins: the internal drive makes the PC's floppy drives' sounds, or is
+   -- one of them (fdd_sound.vhd: motor, select, step, direction; fdd_phys.vhd: side, write)
    f_density_o          <= '1';
 
    -- M2M-UPSTREAM pmod-pins: headers unpowered, all pins high-Z
@@ -955,8 +992,14 @@ begin
                            x"00FF00" when main_led_cd /= 0 else
                            x"FFFF00";
 
-   -- Drive sounds: the internal floppy drive follows the PC's floppy drives (motor and head),
-   -- the motor only without a disk in it; the menu's "Drive sounds: Off" leaves it idle
+   -- The internal floppy drive (the menu's "Internal drive"): "Sounds" follows the PC's floppy
+   -- drives (motor and head; the motor only without a disk in it), "Drive A:" / "Drive B:" is
+   -- that PC drive (fdd_phys reads its disks; fdd_sound positions the head and runs the motor),
+   -- "Off" leaves it idle. "Sounds" only with "Real floppy speed" (config.vhd OPTM_AVAIL greys
+   -- it out without): it counts as Off then, also for a settings file that still has it.
+   main_phys <= main_osm_control_i(C_MENU_INT_B) & main_osm_control_i(C_MENU_INT_A);
+   main_int_snd <= main_osm_control_i(C_MENU_INT_SND) and main_osm_control_i(C_MENU_REAL_SPEED);
+
    i_fdd_sound : entity work.fdd_sound
       generic map (
          G_CLK_HZ    => CORE_CLK_SPEED
@@ -964,7 +1007,10 @@ begin
       port map (
          clk_i       => main_clk,
          rst_i       => main_rst,
-         enable_i    => not main_osm_control_i(C_MENU_SND_OFF),
+         enable_i    => main_int_snd or main_phys(1) or main_phys(0),
+         phys_i      => main_phys(1) or main_phys(0),
+         phys_drv_i  => main_phys(1),
+         recal_i     => main_phys_recal,
          pc_motor_i  => main_fdd_motor,
          pc_sel_i    => main_fdd_sel,
          pc_cyl0_i   => main_fdd_cyl(7 downto 0),
@@ -976,11 +1022,79 @@ begin
          f_track0_i  => f_track0_i,
          f_index_i   => f_index_i,
          f_diskchg_i => f_diskchanged_i,
-         cyl_o       => open,
+         sel_ok_o    => main_snd_sel_ok,
+         sel_fast_o  => main_snd_sel_fast,
+         idx_n_o     => main_snd_idx_n,
+         chg_n_o     => main_snd_chg_n,
+         motor_o     => main_snd_motor,
+         ready_o     => main_snd_ready,
+         cyl_o       => main_snd_cyl,
          disk_o      => open,
          idx_off_o   => open,
          fault_o     => open
       );
+
+   i_fdd_phys : entity work.fdd_phys
+      generic map (
+         G_CLK_HZ     => CORE_CLK_SPEED,
+         G_WRITE      => C_FDD_WRITE
+      )
+      port map (
+         clk_i        => main_clk,
+         rst_i        => main_rst,
+         enable_i     => main_phys(1) or main_phys(0),
+         f_rdata_i    => f_rdata_i,
+         f_wprot_i    => f_writeprotect_i,
+         f_side1_o    => f_side1_o,
+         f_wdata_o    => f_wdata_o,
+         f_wgate_o    => f_wgate_o,
+         sel_ok_i     => main_snd_sel_ok,
+         sel_fast_i   => main_snd_sel_fast,
+         idx_n_i      => main_snd_idx_n,
+         chg_n_i      => main_snd_chg_n,
+         motor_i      => main_snd_motor,
+         head_cyl_i   => main_snd_cyl,
+         head_ready_i => main_snd_ready,
+         recal_o      => main_phys_recal,
+         req_i        => main_phys_req,
+         req_wr_i     => main_phys_wr,
+         req_fresh_i  => main_phys_fresh,
+         req_c_i      => main_phys_c,
+         req_h_i      => main_phys_h,
+         req_r_i      => main_phys_r,
+         req_fmt_i    => main_phys_fmt,
+         done_o       => main_phys_done,
+         err_o        => main_phys_err,
+         buf_addr_i   => main_disk_buf_addr,
+         buf_rd_o     => main_phys_rd,
+         buf_bad_o    => main_phys_bad,
+         wbuf_we_i    => main_phys_we,
+         wbuf_addr_i  => main_disk_buf_addr,
+         wbuf_wd_i    => main_disk_buf_wd,
+         dskchg_o     => main_phys_chg,
+         wp_o         => main_phys_wp,
+         stat_o       => main_phys_stat
+      );
+
+   -- its state for qmon.py fdd, a copy now and then (C_DEV_PC_CTL 0x0040..4F)
+   p_main_phys_snap : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         if main_dbg_tick = 0 then                   -- (with the debug snapshot)
+            main_phys_snap <= main_phys_stat;
+         end if;
+      end if;
+   end process p_main_phys_snap;
+
+   i_cdc_phys_snap : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE => 256
+      )
+      port map (
+         src_data_i => main_phys_snap,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_phys_snap
+      ); -- i_cdc_phys_snap
 
    i_z486 : z486_mega65
       generic map (
@@ -1042,6 +1156,10 @@ begin
          mgmt_write         => main_mgmt_write,
          mgmt_writedata     => main_mgmt_writedata,
          fdd_request        => main_fdd_request,
+         fdd_chg_en         => main_phys,
+         fdd_chg            => main_phys_chg & main_phys_chg,
+         fdd_real_speed     => main_osm_control_i(C_MENU_REAL_SPEED),
+         fdd_wp             => main_phys and (main_phys_wp & main_phys_wp),
          fdd_motor          => main_fdd_motor,
          fdd_sel            => main_fdd_sel,
          fdd_cyl            => main_fdd_cyl,
@@ -1145,6 +1263,19 @@ begin
          buf_wd_o          => main_disk_buf_wd,
          buf_rd_i          => main_disk_buf_rd,
          buf_bad_i         => main_disk_buf_bad,
+         phys_i            => main_phys,
+         phys_req_o        => main_phys_req,
+         phys_wr_o         => main_phys_wr,
+         phys_fresh_o      => main_phys_fresh,
+         phys_c_o          => main_phys_c,
+         phys_h_o          => main_phys_h,
+         phys_r_o          => main_phys_r,
+         phys_done_i       => main_phys_done,
+         phys_err_i        => main_phys_err,
+         phys_rd_i         => main_phys_rd,
+         phys_bad_i        => main_phys_bad,
+         phys_we_o         => main_phys_we,
+         phys_fmt_o        => main_phys_fmt,
          cd_tab_addr_o     => main_cd_tab_addr,
          cd_tab_q_i        => main_cd_tab_q,
          cd_l_o            => main_cd_l,
@@ -1460,10 +1591,11 @@ begin
    --   kind 0  a write to the DMA controllers (00-0F, C0-DF), their page registers (81-8F),
    --           the PICs (20/A0 but a plain end of interrupt and OCW3, which interrupt handlers
    --           and the CD-ROM driver's polling write all the time; 21 when it changes the
-   --           mask), the 8042 (60, 64) or the Sound Blaster (224-22F, not its FM ports)
-   --   kind 1  a read of the DSP (22A, 22E, 22F), the mixer (225), the DMA status (08, D0)
-   --           or the 8042 (60, 64); a read that returns what the last one logged did is
-   --           left out (polling)
+   --           mask), the 8042 (60, 64), the Sound Blaster (224-22F, not its FM ports) or the
+   --           floppy controller (3F2 DOR, 3F4 DSR, 3F5 FIFO: commands, 3F7 CCR)
+   --   kind 1  a read of the DSP (22A, 22E, 22F), the mixer (225), the DMA status (08, D0),
+   --           the 8042 (60, 64) or the floppy controller (3F5: result bytes, 3F7: DIR); a read
+   --           that returns what the last one logged did is left out (polling)
    --   kind 2  the Sound Blaster's IRQ rises
    --   kind 3  its DMA request waited 64 us or more before the DMA controller answered (bits
    --           31..16 the microseconds, 7..0 which request: 1 8-bit, 2 16-bit)
@@ -1490,7 +1622,8 @@ begin
                 p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
                 (p(15 downto 4) = x"008" and p /= x"0080") or
                 p = x"0060" or p = x"0064" or
-                (p(15 downto 4) = x"022" and p(3 downto 2) /= "00" and p(3 downto 1) /= "100");
+                (p(15 downto 4) = x"022" and p(3 downto 2) /= "00" and p(3 downto 1) /= "100") or
+                p = x"03F2" or p = x"03F4" or p = x"03F5" or p = x"03F7";   -- the floppy controller
       end function wr_ok;
       function pic_ok (p : std_logic_vector(15 downto 0); v, imr : std_logic_vector(7 downto 0))
          return boolean is
@@ -1502,7 +1635,8 @@ begin
       begin
          return (tmr = '1' and (p = x"0040" or p = x"0041" or p = x"0042" or p = x"0061")) or
                 p = x"022A" or p = x"022E" or p = x"022F" or p = x"0225" or p = x"0008" or
-                p = x"00D0" or p = x"0060" or p = x"0064";
+                p = x"00D0" or p = x"0060" or p = x"0064" or
+                p = x"03F5" or p = x"03F7";                -- the floppy's results, DIR
       end function rd_ok;
    begin
       if rising_edge(main_clk) then
@@ -2086,6 +2220,10 @@ begin
    --                vector than the CPU took since the PC's reset, the last one's (CPU:PIC);
    --    0x0038..3A  the paddle values (as the framework gives them: inverted) of port 1, Y:X,
    --                and port 2; bit 0 of 0x003A = a 1351 on port 1 (pc_mouse.vhd)
+   --    0x0040..4F  read: the internal floppy drive (fdd_phys.vhd's stat_o, word k at 0x40 + k):
+   --                requests, errors, the last status, ID fields, data fields, CRC errors, writes,
+   --                the last ID (C:H, R:N), the buffer's cylinder and flags, the head and state,
+   --                the PLL's cell, the index period (100 us), the buffer's slots, the request
    --    0x1000..1FFF read: the log (p_main_dbg), entry n at 0x1000 + n mod 4096
    --    0x2000..2FFF read: the IDE trace (p_main_trace), event n at 0x2000 + 8 * (n mod 512):
    --                its sequence number, milliseconds, then the event (pc_mgmt.vhd) in four
@@ -2180,6 +2318,11 @@ begin
          put(v_blk0 and v_low = 56 + k, qnice_dbg_snap2(16 * k + 143 downto 16 * k + 128));
       end loop;
       put(v_blk0 and v_low >= 32 and v_low <= 47, qnice_xadc);
+      for k in 0 to 15 loop                    -- the internal floppy drive (fdd_phys's stat_o)
+         put(v_ctl and qnice_dev_addr_i(27 downto 4) = x"000004" and
+             to_integer(unsigned(qnice_dev_addr_i(3 downto 0))) = k,
+             qnice_phys_snap(255 - 16 * k downto 240 - 16 * k));
+      end loop;
       put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0001", "0000" & qnice_dbg_log_q);
       for k in 0 to 5 loop
          put(v_ctl and qnice_dev_addr_i(27 downto 12) = x"0002" and v_word = k,
