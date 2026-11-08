@@ -297,7 +297,14 @@ index, on top of hdac): placed from hdac's finished layout (99.8 % of nets kept,
 minutes) it closes with 0.411 ns to spare at 64 MHz and 0.111 ns at the implementation
 target, hdmi_clk +0.519 ns, hr_rwds +0.216 ns, qnice_clk +0.844 ns, hold +0.025 ns,
 every clock met, every net routed (86,795 LUTs, 44,199 registers). In the full-system
-simulation the BIOS marks 115h unavailable again and still reads 110h/111h back.
+simulation the BIOS marks 115h unavailable again and still reads 110h/111h back. On the
+board (2026-11-08, loaded over JTAG, then flashed with MEGAFLASH and started cold):
+VBEPROBE reads 110h/111h back and lists 115h as unavailable (`a1A`), `HICOL 115` is
+refused; The 7th Guest, Windows 3.11 at 800x600 in 16 colours, Phantasmagoria and King's
+Quest VI as before; SBMIX after a cold start shows every mixer volume at its reset value
+(29 of 31). Once speech sounded quiet against the music (The 7th Guest, Phantasmagoria,
+KQ6); it did not come back, on JTAG or flashed, and the Sound Blaster's path has not
+changed since v0.1 apart from the output stage, which passes a playing sound as it is.
 
 The road there, at 66.667 MHz (CORE-R6.xpr, Performance_ExplorePostRoutePhysOpt),
 with and without the CPU's pblock (`pblock_z486_cpu` in CORE.xdc: clock regions
