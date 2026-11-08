@@ -87,11 +87,11 @@ King's Quest VI's intro movie tears (the lower part of the picture an older
 frame) and judders in the boat scene with the game's own VGA driver: the VGA
 driver from a later Sierra game (the Gabriel Knight demo's), a known fix for
 KQ6, cures both.
-DOS Quake (and 486Quake) always finds the joystick on port 2 (the MEGA65
-can't tell a released stick from an empty port) and stops after "Playing
-registered version." to calibrate it, with its prompts on a console that
-isn't on screen yet: press fire on port 2 at each step, or Esc to skip it,
-or start Quake with `-nojoy`.
+DOS Quake (and 486Quake) finds a joystick on port 2 whenever the game port
+is on (the MEGA65 can't tell a released stick from an empty port) and stops
+after "Playing registered version." to calibrate it, with its prompts on a
+console that isn't on screen yet. Set "Joystick: Off" in the menu (HELP) and
+Quake starts straight away: no `-nojoy` needed.
 Windows 3.11 runs at up to 1024x768 in 256 colours with Microsoft's generic
 "Super VGA 256 colors" driver (`SVGA.EXE` from the Windows Driver Library,
 through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
