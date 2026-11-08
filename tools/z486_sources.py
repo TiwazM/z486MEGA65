@@ -346,6 +346,10 @@ PATCHES = {
     # next write is an index, the one after it is skipped, further writes go to the indexed
     # register on (the index counts up), reads return it; an access to 3C7h-3C9h ends a
     # sequence. Register 3 holds the mode the BIOS set: 02h 15 bit, 03h 16 bit, 09h 24 bit.
+    # The index is 8 bits, registers 0..7 kept, the rest ignored (they read 0): at power-on
+    # the BIOS loads 34 bytes from index 20h; a 3-bit index wrapped them onto register 1,
+    # which the BIOS's detection reads, and it took the DAC for type 24h, the one that can
+    # do 800x600 at 24 bit (VESA 115h), which z486's display cannot show.
     # vga_565 tells the wrapper to read 16-bit pixels as 565 (CORE/sim/build/vbe/VBEPROBE.COM
     # shows what the BIOS reads back)
     "z486_MiSTer/src/soc/vga.v": [
@@ -358,13 +362,14 @@ PATCHES = {
          "reg  [2:0] hdac_cnt;                   // reads of 3C6h in a row, up to 4\n"
          "reg  [7:0] hdac_cr;                    // the command register\n"
          "reg  [1:0] hdac_ext;                   // 0 off, 1 the index next, 2 a byte to skip, 3 data\n"
-         "reg  [2:0] hdac_idx;\n"
+         "reg  [7:0] hdac_idx;                   // registers 0..7 kept, the rest read 0\n"
          "reg  [7:0] hdac_reg [0:7];\n"
          "wire       hdac_rd6     = io_c_read_valid && io_address == 4'h6;\n"
          "wire       hdac_wr6     = io_c_write && io_address == 4'h6;\n"
          "wire       hdac_end     = (io_c_read_valid || io_c_write) && (io_address == 4'h7 || io_address == 4'h8 || io_address == 4'h9);\n"
          "wire       hdac_mask_wr = hdac_wr6 && hdac_ext == 2'd0 && hdac_cnt != 3'd4;\n"
-         "wire [7:0] hdac_read    = (hdac_ext == 2'd3) ? hdac_reg[hdac_idx] : (hdac_cnt == 3'd4) ? hdac_cr : dac_mask;\n"
+         "wire [7:0] hdac_rreg    = (hdac_idx[7:3] == 5'd0) ? hdac_reg[hdac_idx[2:0]] : 8'h00;\n"
+         "wire [7:0] hdac_read    = (hdac_ext == 2'd3) ? hdac_rreg : (hdac_cnt == 3'd4) ? hdac_cr : dac_mask;\n"
          "\n"
          "integer hdac_i;\n"
          "always @(posedge clk_sys) begin\n"
@@ -372,7 +377,7 @@ PATCHES = {
          "\t\thdac_cnt <= 3'd0;\n"
          "\t\thdac_cr  <= 8'd0;\n"
          "\t\thdac_ext <= 2'd0;\n"
-         "\t\thdac_idx <= 3'd0;\n"
+         "\t\thdac_idx <= 8'd0;\n"
          "\t\tfor(hdac_i = 0; hdac_i < 8; hdac_i = hdac_i + 1) hdac_reg[hdac_i] <= 8'd0;\n"
          "\tend\n"
          "\telse if(hdac_end) begin\n"
@@ -387,9 +392,12 @@ PATCHES = {
          "\tend\n"
          "\telse if(hdac_wr6) begin\n"
          "\t\tcase(hdac_ext)\n"
-         "\t\t\t2'd1: begin hdac_idx <= io_writedata[2:0]; hdac_ext <= 2'd2; end\n"
+         "\t\t\t2'd1: begin hdac_idx <= io_writedata[7:0]; hdac_ext <= 2'd2; end\n"
          "\t\t\t2'd2: hdac_ext <= 2'd3;\n"
-         "\t\t\t2'd3: begin hdac_reg[hdac_idx] <= io_writedata[7:0]; hdac_idx <= hdac_idx + 3'd1; end\n"
+         "\t\t\t2'd3: begin\n"
+         "\t\t\t\tif(hdac_idx[7:3] == 5'd0) hdac_reg[hdac_idx[2:0]] <= io_writedata[7:0];\n"
+         "\t\t\t\thdac_idx <= hdac_idx + 8'd1;\n"
+         "\t\t\tend\n"
          "\t\t\tdefault: begin\n"
          "\t\t\t\tif(hdac_cnt == 3'd4) hdac_cr <= io_writedata[7:0];\n"
          "\t\t\t\thdac_cnt <= 3'd0;\n"
