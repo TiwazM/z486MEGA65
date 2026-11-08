@@ -301,7 +301,7 @@ simulation the BIOS marks 115h unavailable again and still reads 110h/111h back.
 board (2026-11-08, loaded over JTAG, then flashed with MEGAFLASH and started cold):
 VBEPROBE reads 110h/111h back and lists 115h as unavailable (`a1A`), `HICOL 115` is
 refused; The 7th Guest, Windows 3.11 at 800x600 in 16 colours, Phantasmagoria and King's
-Quest VI as before; SBMIX after a cold start shows every mixer volume at its reset value
+Quest VI as before, Quake's `timedemo demo1` as before (7.8 fps); SBMIX after a cold start shows every mixer volume at its reset value
 (29 of 31). Once speech sounded quiet against the music (The 7th Guest, Phantasmagoria,
 KQ6); it did not come back, on JTAG or flashed, and the Sound Blaster's path has not
 changed since v0.1 apart from the output stage, which passes a playing sound as it is.
