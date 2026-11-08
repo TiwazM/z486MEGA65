@@ -123,6 +123,11 @@ SF_CONTEXT_DATA .BLOCK 1                        ; optional add. data for ctx
 SF_VIRTUAL      .BLOCK 1                        ; M2M-UPSTREAM cfg-strings: the
                                                 ; chosen entry is no file but
                                                 ; BROWSE_EXTRA's id + 1 (else 0)
+; M2M-UPSTREAM fb-path (selectfile.asm FBP_SET, FBP_CD)
+FB_PATH         .BLOCK FBP_MAX                  ; the browser's directory
+FB_PATH_OK      .BLOCK 1                        ; 1: FB_PATH is right
+LI_FNAME        .BLOCK 1                        ; LOAD_IMAGE's file name, for
+                                                ; PREP_LOAD_IMAGE (in FB_PATH)
 
 ; ----------------------------------------------------------------------------
 ; Virtual drive and manual/automatic CRT/ROM loading system

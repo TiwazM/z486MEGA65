@@ -220,6 +220,9 @@ M2M$SYS_INFO        .EQU 0x00FF     ; Device for System Info
 CFGS_MAX            .EQU 512        ; buffer size (words), and the most text:
 CFGS_MAXC           .EQU 511        ; CFGS_MAX - 1 characters
 
+; M2M-UPSTREAM fb-path (selectfile.asm): the browser's directory as a path
+FBP_MAX             .EQU 160        ; FB_PATH's size (words), the zero included
+
 M2M$RAMROM_4KWIN    .EQU 0xFFF5     ; 4k window selector
 M2M$RAMROM_DATA     .EQU 0x8000     ; 4k MMIO window to read/write
 

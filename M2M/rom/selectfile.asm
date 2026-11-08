@@ -67,6 +67,7 @@ _S_START        MOVE    FB_CARDS, R9            ; or the list of the SD cards
                 MOVE    M2M$RAMROM_4KWIN, R9
                 MOVE    M2M$CFG_DIR_START, @R9
                 MOVE    M2M$RAMROM_DATA, R9
+                RSUB    FBP_SET, 1              ; M2M-UPSTREAM fb-path
 
                 ; load sorted directory list into memory
                 RSUB    FB_DEV, 1               ; R8: the browser's card
@@ -98,6 +99,7 @@ _S_CARDS        MOVE    FB_HEAP, R10
                 ; default path not found, try root instead
 _S_ERR_PNF      ADD     1, SP                   ; see comment in shell.asm
                 MOVE    FN_ROOT_DIR, R9         ; try root
+                RSUB    FBP_SET, 1              ; M2M-UPSTREAM fb-path
                 MOVE    FB_HEAP, R10
                 MOVE    @R10, R10
                 MOVE    HEAP_SIZE, R11
@@ -481,6 +483,7 @@ _ELEM_CD        MOVE    R4, R8                  ; deselect current line
                 MOVE    R6, @--SP               ; rem. abs itm idx for cursor
                 MOVE    0, @--SP                ; ..and the root starts at 0
                 MOVE    FN_ROOT_DIR, R9
+                RSUB    FBP_SET, 1              ; M2M-UPSTREAM fb-path
                 RSUB    FB_DEV, 1
                 RBRA    _S_CD_AND_READ, 1
 _ELEM_CDM       MOVE    R9, R0                  ; cannot mount it: say so, then
@@ -510,7 +513,8 @@ _ELEM_CD2       MOVE    FN_UPDIR, R9            ; are we going one dir. up?
                 MOVE    R6, @--SP               ; rem. abs itm idx for cursor
                 MOVE    0, @--SP                ; ..and new dir. starts at 0
 
-_CHANGEDIR      MOVE    R8, R9                  ; use this directory
+_CHANGEDIR      RSUB    FBP_CD, 1               ; M2M-UPSTREAM fb-path
+                MOVE    R8, R9                  ; use this directory
                 RSUB    FB_DEV, 1
                 RSUB    FB_ATROOT, 1            ; M2M-UPSTREAM sd-host: ".."
                 RBRA    _S_CD_AND_READ, !C      ; at a root: the list of the
@@ -597,8 +601,97 @@ FB_INIT         INCRB
                 MOVE    0, @R0
                 MOVE    SF_VIRTUAL, R0          ; M2M-UPSTREAM cfg-strings
                 MOVE    0, @R0
+                MOVE    FB_PATH_OK, R0          ; M2M-UPSTREAM fb-path
+                MOVE    0, @R0
 
                 DECRB
+                RET
+
+; ----------------------------------------------------------------------------
+; M2M-UPSTREAM fb-path: the browser's current directory as a path (FB_PATH,
+; FB_PATH_OK = 1 while it is right), so that a core can remember where a file
+; was (LOAD_IMAGE puts the file's name into LI_FNAME before it calls
+; PREP_LOAD_IMAGE). The FAT32 device handle only knows the directory's
+; cluster. A path longer than FBP_MAX - 1 characters, or a directory the
+; browser could not read, is not tracked (FB_PATH_OK = 0) until the browser
+; starts over at its start directory or a root.
+; ----------------------------------------------------------------------------
+
+; FBP_SET: FB_PATH := the path R9 (zero-terminated; the start directory from
+; config.vhd may be in the device window). Registers preserved.
+FBP_SET         INCRB
+                MOVE    R9, R0
+                MOVE    FB_PATH, R1
+                MOVE    FBP_MAX, R2
+_FBPS_1         MOVE    @R0++, @R1
+                CMP     0, @R1++
+                RBRA    _FBPS_OK, Z
+                SUB     1, R2
+                RBRA    _FBPS_1, !Z
+                MOVE    FB_PATH_OK, R1          ; too long
+                MOVE    0, @R1
+                DECRB
+                RET
+_FBPS_OK        MOVE    FB_PATH_OK, R1
+                MOVE    1, @R1
+                DECRB
+                RET
+
+; FBP_CD: the browser enters the directory R8 (its name), or goes up when R10
+; = 0 (the name is ".."). Registers preserved.
+FBP_CD          INCRB
+                MOVE    FB_PATH_OK, R0
+                CMP     0, @R0
+                RBRA    _FBPC_RET, Z            ; not tracked
+                MOVE    FB_PATH, R0             ; R0: the path
+                MOVE    R0, R2                  ; R2: its end (the zero)
+_FBPC_E         CMP     0, @R2
+                RBRA    _FBPC_E1, Z
+                ADD     1, R2
+                RBRA    _FBPC_E, 1
+_FBPC_E1        CMP     0, R10
+                RBRA    _FBPC_DOWN, !Z
+
+                ; up: cut at the last '/' (the root keeps its '/')
+                MOVE    R2, R1
+_FBPC_U1        CMP     R1, R0                  ; at the start
+                RBRA    _FBPC_U2, Z
+                SUB     1, R1
+                CMP     0x002F, @R1             ; '/'
+                RBRA    _FBPC_U1, !Z
+                CMP     R1, R0                  ; the root's '/': keep it
+                RBRA    _FBPC_U3, !Z
+_FBPC_U2        ADD     1, R1
+_FBPC_U3        MOVE    0, @R1
+                RBRA    _FBPC_RET, 1
+
+                ; down: '/' (unless it ends with one, the root) and the name
+_FBPC_DOWN      MOVE    R8, R3                  ; R3: the name's end
+_FBPC_D1        CMP     0, @R3
+                RBRA    _FBPC_D2, Z
+                ADD     1, R3
+                RBRA    _FBPC_D1, 1
+_FBPC_D2        SUB     R8, R3                  ; R3: its length
+                ADD     R2, R3
+                SUB     R0, R3                  ; + the path's
+                ADD     2, R3                   ; + '/' and the zero
+                CMP     R3, FBP_MAX             ; more than FB_PATH holds?
+                RBRA    _FBPC_LOST, N
+                CMP     R2, R0                  ; empty: '/'
+                RBRA    _FBPC_D3, Z
+                MOVE    R2, R1
+                SUB     1, R1
+                CMP     0x002F, @R1             ; ends with '/'?
+                RBRA    _FBPC_D4, Z
+_FBPC_D3        MOVE    0x002F, @R2++
+_FBPC_D4        MOVE    R8, R1
+_FBPC_D5        MOVE    @R1++, @R2
+                CMP     0, @R2++
+                RBRA    _FBPC_D5, !Z
+                RBRA    _FBPC_RET, 1
+_FBPC_LOST      MOVE    FB_PATH_OK, R0
+                MOVE    0, @R0
+_FBPC_RET       DECRB
                 RET
 
 ; use re-init when the local stack is already initialized; for example in

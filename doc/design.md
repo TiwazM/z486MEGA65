@@ -256,7 +256,15 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   it is on" and mask 0 as "while it is off", and switching one off now also
   deselects and redraws); a greyed-out selection moves to the group's first
   available item, which is why Off comes first, and mega65.vhd treats Sounds
-  as Off without real speed. An image mounted at start-up
+  as Off without real speed.
+- The hard disk the menu mounted last comes back at the next start: the
+  settings file's text (cfg-strings) keeps `hdd=<path>`, `hdd=none` after
+  "<No Disk>"; without the key (or when that file is gone) `/z486/hdd.img`.
+  The FAT32 handle only knows a directory's cluster, so the file browser now
+  tracks its directory as a path (M2M-UPSTREAM fb-path: `FB_PATH`, `FBP_SET`
+  and `FBP_CD` in `selectfile.asm`; `LOAD_IMAGE` hands the file's name over in
+  `LI_FNAME`). It is opened from the card of the settings file. An image
+  mounted at start-up
   (`/z486/hdd.img`, `/z486/cdrom.cue` or `.iso`, `/z486/floppy.img`) shows its name
   once the menu opens (`DAN_FLUSH`): the
   menu has no memory before that, and the line read "Hard disk:  Hard

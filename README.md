@@ -60,7 +60,7 @@ The current version is **v0.1-preview** (see
 **Core**
 - Menu on HELP: floppies, internal drive, hard disk, CD-ROM, real floppy
   speed, HDMI mode, filter, scanlines, refresh (HDMI or VGA), joystick, reset;
-  settings are saved to the SD card
+  settings are saved to the SD card, the hard disk mounted last too
 - Real floppy speed (off by default): the floppy images run at a real drive's
   speed. Each sector waits for its place on a disk turning at 300 rpm (360 rpm
   for a 1.2 MB disk), and a read or write that moves the head waits for its
@@ -122,7 +122,8 @@ through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
 /z486/boot0.rom    the system BIOS
 /z486/boot1.rom    the VGA BIOS
 /z486/floppy.img   optional: drive A: at start-up (a raw floppy image)
-/z486/hdd.img      optional: the hard disk at start-up (a raw disk image)
+/z486/hdd.img      optional: the hard disk at start-up (a raw disk image), until
+                   the menu mounts another one: the core remembers that one
 /z486/cdrom.cue    optional: the CD-ROM's disc at start-up (a cue sheet, its files in /z486)
 /z486/cdrom.iso    optional: the same as an ISO image (when there is no cdrom.cue)
 ```
