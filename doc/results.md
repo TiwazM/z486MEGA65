@@ -243,7 +243,7 @@ folders, the palette's rainbow; True Color (24 bit), 640x480, too. Display
 Properties' sample bar shows the same stepped two rainbows at 16 and 24 bit (coarser
 at 256 colours): Windows' picture, not the colour depth.
 Benchmarks on hicol (2026-11-07): 3DBench 1.0 47.9 fps, where Phil's Computer Lab
-lists 48.1 for a 486DX2-66 (its benchmark sheet's 29 DX2-66s: median 43.4, 20.9 to
+lists 48.1 for a 486DX2-66 (its [benchmark sheet](https://docs.google.com/spreadsheets/d/1lvF9nOAMKLeCpHR_SaA48M7sUXItwIi72gHRcw0wpNU/)'s 29 DX2-66s: median 43.4, 20.9 to
 51.7; Quake 6.7, at most 7.5, where z486 has 7.8; DX2-80s 56.1 and 8.1, DX4-100s
 60.6 and 9.1); PC Player Benchmark (VGA 320x200) 13.2 fps (DX2-66s: median 10.9, at
 most 12.5; DX2-80s 13.4; DX4-100s 14.7); Landmark System Speed Test 6.00: an
