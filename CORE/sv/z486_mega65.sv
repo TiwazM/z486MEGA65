@@ -349,6 +349,7 @@ wire  [8:0] vga_stride;
 wire  [3:0] vga_flags;
 wire        vga_off;
 wire        vga_565;      // the HiColor DAC is in 16-bit 565 (vga.v's DAC registers, z486_sources.py)
+wire        vga_dac24;    // the HiColor DAC is in 24-bit mode (the same)
 wire  [7:0] vga_pal_a;
 wire [17:0] vga_pal_d;
 wire        vga_pal_we;
@@ -560,6 +561,7 @@ system #(
     .video_flags         (vga_flags),
     .video_off           (vga_off),
     .video_565           (vga_565),
+    .video_dac24         (vga_dac24),
     .video_pal_a         (vga_pal_a),
     .video_pal_d         (vga_pal_d),
     .video_pal_we        (vga_pal_we),
@@ -694,14 +696,25 @@ assign video_ce = core_ce_pixel;
 // 1555 otherwise. Until 2026-11-08 always 1555: 16-bit pictures had their greens off.
 // ------------------------------------------------------------------------------------------
 
+// 24-bit pictures (3 bytes a pixel, blue first): through the DAC's 8-bit path (CRTC 37h bits 7
+// and 5, vga_flags 3: 640x480, VESA 112h) the CRTC counts bytes; through its 16-bit path
+// (attribute 16h bits 5:4 = 10b, which vga_flags calls 16 bit, with the DAC in 24-bit mode:
+// how Tseng's BIOS sets 800x600, VESA 115h) it counts 16-bit words. The width is those bytes / 3
+// (x * 2731 >> 13, exact below 8192). Until 2026-11-10 every 24-bit picture was 640 wide (as
+// z486_mister.sv), and the BIOS did not offer 115h (vga.v's DAC, z486_sources.py).
+wire        fb_24_8   = vga_flags[1:0] == 2'd3;
+wire        fb_24_16  = vga_flags[1:0] == 2'd2 && vga_dac24;
+wire [12:0] fb_24_bytes = fb_24_16 ? {vga_width, 4'b0000} : {1'b0, vga_width, 3'b000};
+wire [25:0] fb_24_div   = fb_24_bytes * 13'd2731;
+
 always @(posedge clk_sys) begin
     fb_en          <= ~vga_flags[2] && |vga_flags[1:0];
     fb_base        <= {4'h3, 6'b111110, vga_start_addr, 2'b00};
-    fb_width       <= (vga_flags[1:0] == 2'd3) ? 12'd640 :
+    fb_width       <= (fb_24_8 || fb_24_16) ? fb_24_div[24:13] :
                       vga_flags[2] ? {1'b0, vga_width, 2'b00} : {vga_width, 3'b000};
     fb_stride      <= {2'b00, vga_stride, 3'b000};
     fb_height      <= vga_flags[3] ? {2'b0, vga_height[10:1]} : {1'b0, vga_height};
-    fb_format[2:0] <= (vga_flags[1:0] == 2'd3) ? 3'b101 :
+    fb_format[2:0] <= (fb_24_8 || fb_24_16)    ? 3'b101 :
                       (vga_flags[1:0] == 2'd2) ? 3'b100 : 3'b011;  // 24 / 16 / 8 bpp
     fb_format[4:3] <= {1'b1, ~vga_565};
 end

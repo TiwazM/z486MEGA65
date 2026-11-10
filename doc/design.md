@@ -95,6 +95,17 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     Benchmark's; SpeedSys's port 61h loop (unpack it first). Done for v0.2.1,
     not on the board yet: BSF/BSR in 3 microcode words ([CPU](cpu.md)), the
     menu's boot order (CD-ROM first: El Torito), the 1351 smoothing.
+  - 800x600 in True Color (VESA 115h, for v0.2.1, not on the board yet): the HiColor
+    DAC's extended register 1 reads 01h, so Tseng's BIOS takes it for type 24h and offers
+    115h. The BIOS sets it through the DAC's 16-bit path (attribute 16h = A0h, CRTC 37h =
+    8Bh, the CRTC counting 16-bit words: 01h = 95h, offset 12Ch = 2400 bytes), which vga.v's
+    flags call 16 bit and which the board showed as stripes; the DAC's 24-bit mode (register
+    3 = 09h, `vga_dac24`) now makes the wrapper read it as 24 bit, 800 wide. Every 24-bit
+    picture's width comes from the CRTC (bytes / 3) instead of a fixed 640. 1024x768 in 64K
+    colours (117h) the BIOS already offers and sets right (CRTC 01h = 7Fh, offset 100h,
+    attribute 16h = A0h: 1024 wide, 2048-byte lines, 16 bit); whether the board shows it is
+    open. `CORE/sim/build/vbe/` VBEMODES.COM (the 15/16/24-bit mode list) and VBECRTC.COM
+    (the registers after 4F02h, with the DAC made type 24h) in the full-system simulation.
 
 ## What the shell does now
 

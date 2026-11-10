@@ -143,10 +143,12 @@ PATCHES = {
         # vga.v's HiColor DAC (below): its 565 flag out to the wrapper's framebuffer format
         ("\toutput wire        video_off,",
          "\toutput wire        video_off,\n"
-         "\toutput wire        video_565,         // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)"),
+         "\toutput wire        video_565,         // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)\n"
+         "\toutput wire        video_dac24,       // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)"),
         ("\t.vga_off           (video_off),",
          "\t.vga_off           (video_off),\n"
-         "\t.vga_565           (video_565),       // MEGA65 (z486_sources.py)"),
+         "\t.vga_565           (video_565),       // MEGA65 (z486_sources.py)\n"
+         "\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)"),
     ],
     # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
     # internal drive follows them): the DOR's motor bits, the selected drive and each drive's
@@ -516,13 +518,18 @@ PATCHES = {
     # The index is 8 bits, registers 0..7 kept, the rest ignored (they read 0): at power-on
     # the BIOS loads 34 bytes from index 20h; a 3-bit index wrapped them onto register 1,
     # which the BIOS's detection reads, and it took the DAC for type 24h, the one that can
-    # do 800x600 at 24 bit (VESA 115h), which z486's display cannot show.
+    # do 800x600 at 24 bit (VESA 115h), which z486's display could not show (stripes). Since
+    # 2026-11-10 register 1 reads 01h, so the BIOS takes type 24h on purpose: it sets 115h
+    # through the DAC's 16-bit path (attribute 16h = A0h, CRTC 37h = 8Bh, the CRTC counting
+    # 16-bit words: 01h = 95h, offset 12Ch), which vga_flags calls 16 bit; vga_dac24 (register 3
+    # at 09h) tells the wrapper the pixels are 24 bit (CORE/sim/build/vbe/VBECRTC.COM).
     # vga_565 tells the wrapper to read 16-bit pixels as 565 (CORE/sim/build/vbe/VBEPROBE.COM
     # shows what the BIOS reads back)
     "z486_MiSTer/src/soc/vga.v": [
         ("\toutput reg          scanline_done\n);",
          "\toutput reg          scanline_done,\n\n"
-         "\toutput              vga_565            // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)\n"
+         "\toutput              vga_565,           // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)\n"
+         "\toutput              vga_dac24          // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)\n"
          ");"),
         ("always @(posedge clk_sys) if(~rst_n) dac_mask <= 8'hFF; else if(io_c_write && io_address == 4'h6) dac_mask <= io_writedata[7:0];",
          "// MEGA65: the HiColor DAC's command and extended registers (z486_sources.py)\n"
@@ -535,7 +542,10 @@ PATCHES = {
          "wire       hdac_wr6     = io_c_write && io_address == 4'h6;\n"
          "wire       hdac_end     = (io_c_read_valid || io_c_write) && (io_address == 4'h7 || io_address == 4'h8 || io_address == 4'h9);\n"
          "wire       hdac_mask_wr = hdac_wr6 && hdac_ext == 2'd0 && hdac_cnt != 3'd4;\n"
-         "wire [7:0] hdac_rreg    = (hdac_idx[7:3] == 5'd0) ? hdac_reg[hdac_idx[2:0]] : 8'h00;\n"
+         "// register 1 reads 01h: the BIOS's detection (7A6Bh) then takes the DAC for type 24h, which\n"
+         "// adds 800x600 at 24 bit (VESA 115h); the BIOS never writes it\n"
+         "wire [7:0] hdac_rreg    = (hdac_idx == 8'd1) ? 8'h01 :\n"
+         "                          (hdac_idx[7:3] == 5'd0) ? hdac_reg[hdac_idx[2:0]] : 8'h00;\n"
          "wire [7:0] hdac_read    = (hdac_ext == 2'd3) ? hdac_rreg : (hdac_cnt == 3'd4) ? hdac_cr : dac_mask;\n"
          "\n"
          "integer hdac_i;\n"
@@ -576,6 +586,9 @@ PATCHES = {
          "// 16-bit pixels are 565 in extended mode (command bit 3) with register 3 at 03h, or with\n"
          "// command bits 7:5 = 110 (C0h, 16 bit on the BIOS's other path, as on AT&T/Sierra DACs)\n"
          "assign vga_565 = hdac_cr[3] ? (hdac_reg[3] == 8'h03) : (hdac_cr[7:5] == 3'b110);\n"
+         "// 24-bit pixels: extended mode with register 3 at 09h (the BIOS's 24-bit modes; 800x600 sends\n"
+         "// them over the 16-bit path, attribute 16h bits 5:4 = 10b, which vga_flags reads as 16 bit)\n"
+         "assign vga_dac24 = hdac_cr[3] && (hdac_reg[3] == 8'h09);\n"
          "\n"
          "always @(posedge clk_sys) if(~rst_n) dac_mask <= 8'hFF; else if(hdac_mask_wr) dac_mask <= io_writedata[7:0];"),
         ("\t(io_c_read_valid && io_address == 4'h6)                      ? dac_mask : //pel mask",
