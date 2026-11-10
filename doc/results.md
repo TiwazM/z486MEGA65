@@ -30,6 +30,12 @@ now: 44 paths from the decoder's window through the jump target's adders to the 
 speculative line (`skel_window_raw_r` to `spec_line` CE, 23 levels, 10 CARRY4). Tests as
 before; not on the board yet.
 
+2026-11-10, trial branch `clk66` (eb1d568, on 059192c): the PC at **66.0 MHz** (VCO 660
+MHz, x33 / 5 / 10; twice CAPS LOCK's 33 MHz) meets timing with **+0.563 ns** (about 68.5
+MHz), +0.263 ns at the 0.3 ns target, hold +0.062 ns, every clock met, 88.6K LUTs (65.9 %),
+80.5 % slices. Not on the board yet: the SDRAM phase (292.5 degrees, fine steps now 27 ps)
+to check with `qmon.py sweep`.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
