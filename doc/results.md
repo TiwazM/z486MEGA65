@@ -49,7 +49,7 @@ Dr. Hardware's 16-bit System Performance gives 27,807 Hardstones and 8612 Softst
 average 32.4 MB/s (64 MHz with the L2: 31.4), maximum 42.5, minimum 22.8; it names the
 clock 57.7 MHz. PC Player Benchmark (VGA 320x200): 13.7 fps (hicol at 64 MHz: 13.2;
 DX2-80s 13.4, DX4-100s 14.7); the Superscape benchmark from Virtual Reality Playhouse
-49.5 fps (Superscape's 3DBench 1.0 at 64 MHz: 47.9). Wing Commander III (setup: CPU speed
+49.5 fps (Superscape's 3DBench 1.0 at 64 MHz: 47.9); Quake 8.0 fps (64 MHz: 7.8). Wing Commander III (setup: CPU speed
 12, "Very Fast") plays a mission with its conversations fine; its boot disk maker formats a 1.44 MB disk
 in the internal drive (FORMAT /S, no bad sectors) and the PC boots from it. (The stray
 last line of that disk's AUTOEXEC.BAT, two bytes, comes from the installer: the same on
