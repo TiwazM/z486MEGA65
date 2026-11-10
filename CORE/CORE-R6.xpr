@@ -1345,6 +1345,7 @@
         <Option Name="VerilogDir" Val="$PPRDIR/../z486/x87"/>
         <Option Name="VerilogDir" Val="$PPRDIR/../z486_MiSTer/src"/>
         <Define Name="Z486_XILINX" Val="1"/>
+        <Define Name="Z486_ALTERA_ALU" Val="1"/>
       </Config>
     </FileSet>
     <FileSet Name="constrs_1" Type="Constrs" RelSrcDir="$PSRCDIR/constrs_1" RelGenDir="$PGENDIR/constrs_1">

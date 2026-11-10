@@ -29,7 +29,10 @@ CORE_SV = ["sv/guest_l2.sv", "sv/sb_soft.sv", "sv/z486_mega65.sv"]
 
 # Verilog include directories, relative to CORE/
 INCLUDE_DIRS = ["../z486", "../z486/x87", "../z486_MiSTer/src"]
-DEFINES = [("Z486_XILINX", "1")]
+# Z486_ALTERA_ALU: z486's alu_alt.sv (+ and - in the ALU, which Vivado maps to carry chains,
+# as Quartus does on MiSTer and the whole-PC Verilator model uses) in place of alu.sv, whose
+# per-bit slices ripple the carry through LUTs (~5.5 ns from bit 2 to 31 on main_clk's paths)
+DEFINES = [("Z486_XILINX", "1"), ("Z486_ALTERA_ALU", "1")]
 
 # The implementation-only constraints (the over-constraint of main_clk), relative to CORE/
 IMPL_XDC = ('      <File Path="$PPRDIR/CORE-impl.xdc">\n        <FileInfo>\n'
