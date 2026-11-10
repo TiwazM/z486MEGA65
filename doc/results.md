@@ -30,6 +30,15 @@ now: 44 paths from the decoder's window through the jump target's adders to the 
 speculative line (`skel_window_raw_r` to `spec_line` CE, 23 levels, 10 CARRY4). Tests as
 before; not on the board yet.
 
+800x600 in True Color (fpu 059192c): **+0.607 ns** at 64 MHz, placement noise against
+25c05b8 (the decoder's group-ROM path back on top). On the board (2026-11-10, in the
+66 MHz trial core, `clk66` eb1d568, which carries it unchanged): VBEPROBE lists 115h
+(800x600, 24 bit, R8@16 G8@8 B8@0, 2400 bytes a line) as available (`a1B`; v0.2: `a1A`)
+and reads 101h, 103h and 110h-112h back after setting them; `HICOL 115` (800x600, 24
+bit), `HICOL 117` (1024x768, 16 bit) and `HICOL 112` (640x480, 24 bit) each show the
+three ramps, red, green, blue, each one ramp across the whole screen (117 in 565's 32
+and 64 steps); `HICOL 116` (1024x768, 15 bit) too.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard

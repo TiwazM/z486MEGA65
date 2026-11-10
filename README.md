@@ -18,7 +18,7 @@ The current version is **v0.2** (see
 
 **Video**
 - Tseng ET4000 SVGA, up to 1024x768 in 256 colours (Windows 3.11 included);
-  High Color (32K and 64K colours) up to 800x600 and True Color at 640x480,
+  High Color (32K and 64K colours) up to 1024x768 and True Color up to 800x600,
   through a HiColor DAC as Tseng's BIOS expects it, so the VESA modes report
   correctly
 - HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
@@ -236,8 +236,6 @@ printed on the MEGA65's keycaps:
   cursor), so it can flicker when the picture under it changes.
 - In native HDMI mode the picture is measured one line short: the top line
   can be missing.
-- 800x600 in True Color (24 bit) isn't offered: the display shows 24-bit
-  pictures 640 pixels wide.
 - CD music while a game loads from the hard disk hasn't been tried on the board
   yet.
 
