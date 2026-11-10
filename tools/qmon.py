@@ -58,6 +58,9 @@
 #   qmon.py cd                the CD-ROM's disc (its track table, C_DEV_PC_CDTOC, written by
 #                             m2m-rom.asm's cdimage.asm) and its audio (pc_cdrom.vhd): the
 #                             status, the LBA heard, the FIFO's underruns and lowest fill
+#   qmon.py fdd               the internal floppy drive as a PC drive (fdd_phys.vhd): requests,
+#                             errors, ID and data fields read, sectors written, the track buffer, the head, the
+#                             data separator's cell and the disk's speed
 #   qmon.py ide [N]           the IDE trace (mega65.vhd, pc_mgmt.vhd): the last N events
 #                             (default 40, at most 512) of both IDE channels and the floppies,
 #                             with milliseconds before the newest
@@ -375,6 +378,42 @@ def st_text(st):
     return "+".join(n for b, n in ST_BITS if st & b) or "0"
 
 
+FDD_ERR = {0x0000: "done", 0x0001: "no ID field (MA)", 0x0101: "ID but no data field (MA, MD)",
+           0x2020: "data CRC error (DE, DD)", 0x0004: "sector not found (ND)",
+           0x1004: "sector not found, wrong cylinder (ND, WC)", 0x0002: "write protected (NW)"}
+
+
+def fdd_err(e):
+    return FDD_ERR.get(e, "ST2:ST1 %04X" % e)
+
+
+def fdd():
+    """The internal floppy drive as a PC drive (fdd_phys.vhd's stat_o, C_DEV_PC_CTL 0x40..4F)"""
+    pc_dev()
+    w = dump(0x8040, 0x804F)
+    if None in w:
+        sys.exit("no answer")
+    st = ["idle", "setup", "positioning", "reading", "deciding", "recalibrating", "done",
+          "write: finding the ID", "write: gap 2", "writing", "format: positioning",
+          "format: waiting for the index", "formatting the track"]
+    w9, w10 = w[9], w[10]
+    print("requests %d  errors %d  last status: %s" % (w[0], w[1], fdd_err(w[2])))
+    print("ID fields %d  data fields %d  CRC errors %d  sectors written (formatted too) %d" % (w[3], w[4], w[5], w[6]))
+    print("last ID: C %d H %d R %d N %d" % (w[7] >> 8, w[7] & 0xFF, w[8] >> 8, w[8] & 0xFF))
+    print("track buffer: %s C %d H %d, rate %s, side %d, write protected %d" % (
+        "holds" if w9 & 0x10 else "empty,", w9 >> 8, w9 >> 2 & 1,
+        "500 kbit/s (HD)" if w9 & 0x08 else "250 kbit/s (DD)", w9 >> 1 & 1, w9 & 1))
+    slots = w[13] << 16 | w[14]
+    print("  sectors in it: %s" % (" ".join(str(i) for i in range(32) if slots >> i & 1) or "none"))
+    print("head on cylinder %d, %s; motor %s, selected %s, head ready %s, disk change line %s" % (
+        w10 >> 8 & 0x7F, st[w10 >> 4 & 0xF] if (w10 >> 4 & 0xF) < len(st) else "?",
+        "on" if w10 & 8 else "off", "yes" if w10 & 4 else "no", "yes" if w10 & 2 else "no",
+        "active" if w10 & 1 else "inactive"))
+    print("PLL cell %.2f clocks (%.3f us)  index period %.1f ms (%d rpm)" % (
+        w[11] / 16.0, w[11] / 16.0 / 64, w[12] / 10.0, 600000 // w[12] if w[12] else 0))
+    print("last request: C %d R %d" % (w[15] & 0xFF, w[15] >> 8 & 0x7F))
+
+
 def ide_event(t, a, b, c, d):
     unit = ["A:", "B:", "HDD", "CD"]
     if t == 1:
@@ -394,6 +433,10 @@ def ide_event(t, a, b, c, d):
     if t == 6:
         return "SD %s %s LBA %d  ahead %d%s" % (unit[b & 3], "write" if a & 2 else "read", d, c,
                                                 "  FAILED" if a & 1 else "")
+    if t == 7:
+        return "internal drive %s %s C %d H %d R %d: %s" % (
+            "write" if a & 1 else "read", "B:" if d & 0x80000000 else "A:", d >> 16 & 0xFF,
+            d >> 8 & 1, d & 0x7F, fdd_err(b << 8 | c))
     if t == 8:
         return "IDE1 command %02X  drive/head %02X  features %02X  limit %d" % (a, b, c, d >> 16)
     if t == 9:
@@ -417,7 +460,8 @@ IOT_PAGE = {0x87: 0, 0x83: 1, 0x81: 2, 0x82: 3, 0x8F: 4, 0x8B: 5, 0x89: 6, 0x8A:
 IOT_PORT = {0x20: "PIC1 command", 0x21: "PIC1 mask", 0xA0: "PIC2 command", 0xA1: "PIC2 mask",
             0x60: "8042 data", 0x64: "8042 status/command", 0x224: "mixer index",
             0x225: "mixer data", 0x226: "DSP reset", 0x22A: "DSP read data",
-            0x22C: "DSP write", 0x22E: "DSP status (8-bit IRQ ack)", 0x22F: "16-bit IRQ ack"}
+            0x22C: "DSP write", 0x22E: "DSP status (8-bit IRQ ack)", 0x22F: "16-bit IRQ ack",
+            0x3F2: "FDC DOR", 0x3F4: "FDC DSR", 0x3F5: "FDC FIFO", 0x3F7: "FDC CCR/DIR"}
 # DSP commands: name, parameter bytes
 DSP_CMD = {0x10: ("direct 8-bit sample", 1), 0x14: ("8-bit single-cycle DMA", 2),
            0x1C: ("8-bit auto-init DMA", 0), 0x40: ("time constant", 1),
@@ -795,6 +839,8 @@ elif args[:2] == ["disks", "watch"]:
     disks_watch(float(args[2]) if len(args) > 2 else 10)
 elif args and args[0] == "disks":
     disks()
+elif args and args[0] == "fdd":
+    fdd()
 elif args and args[0] == "xadc":
     xadc()
 elif args and args[0] == "bios":

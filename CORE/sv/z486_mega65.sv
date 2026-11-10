@@ -84,6 +84,13 @@ module z486_mega65 #(
     input  wire        mgmt_write,
     input  wire [15:0] mgmt_writedata,
     output wire  [1:0] fdd_request,
+    output wire  [1:0] fdd_motor,          // floppy.v: the DOR's motor bits, B: A: (drive sounds)
+    output wire        fdd_sel,            // the selected floppy drive
+    output wire [15:0] fdd_cyl,            // B:'s and A:'s head cylinders
+    input  wire  [1:0] fdd_chg_en,         // B:, A: is the internal drive: DIR bit 7 from fdd_chg
+    input  wire  [1:0] fdd_chg,            // its disk change line
+    input  wire        fdd_real_speed,     // the images at a real drive's speed (floppy.v real_speed)
+    input  wire  [1:0] fdd_wp,             // write protected (the internal drive's tab)
     output wire  [2:0] ide0_request,
     output wire  [2:0] ide1_request,
 
@@ -382,9 +389,15 @@ system #(
     .clock_rate          (28'(CLK_HZ)),
 
     .fdd_request         (fdd_request),
+    .fdd_motor           (fdd_motor),
+    .fdd_sel             (fdd_sel),
+    .fdd_cyl             (fdd_cyl),
+    .fdd_chg_en          (fdd_chg_en),
+    .fdd_chg             (fdd_chg),
+    .fdd_real_speed      (fdd_real_speed),
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
-    .floppy_wp           (2'b00),
+    .floppy_wp           (fdd_wp),
     .joystick_dis        ({1'b1, joy_off}), // joystick 2 absent (its axes and buttons read 1),
                                             // joystick 1 too with the menu's "Joystick: Off"
     .joystick_dig_1      ({6'd0, joy_dig}),
@@ -509,7 +522,7 @@ system #(
     .dbg_avm_resp_valid  (),
     .dbg_cpu_din_z       (),
 
-    .bootcfg             (6'd0),
+    .bootcfg             (6'h08),            // boot: A: (with media) or C:, then C: (rtc.v CMOS 3Dh)
     .ram_size            (ram_size),
     .uma_ram             (1'b0),
     .cpu_speed_osd       (cpu_slow ? 3'd1 : 3'd0), // OSD "56" = 33 (z486_sources.py), or full

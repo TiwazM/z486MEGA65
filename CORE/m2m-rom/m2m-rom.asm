@@ -7,7 +7,8 @@
 ; callbacks below are the ones the Megamiga fork's Shell needs: the M2M
 ; template's plus HANDLE_CORE_IO (core-io-hook), BROWSE_EXTRA (cfg-strings),
 ; FAR_CALL (code-banks) and CFG_SIGCHECK / CFG_SIGSET (the settings file
-; signature). PREP_START loads the PC's BIOS ROMs and mounts /z486/hdd.img,
+; signature). PREP_START loads the PC's BIOS ROMs and mounts the hard disk
+; the menu mounted last (the settings file's "hdd="; else /z486/hdd.img),
 ; /z486/cdrom.iso and /z486/floppy.img, if they are there; the menu's
 ; "Floppy A:", "Floppy B:", "Hard disk:" and "CD-ROM:" lines mount others
 ; (PREP_LOAD_IMAGE, DISK_PREP).
@@ -78,11 +79,75 @@ _PLI_GO         MOVE    R10, @--SP
                 CMP     0, @R10
                 RBRA    _PLI_EJECT, !Z
                 MOVE    @SP++, R10
+                MOVE    R9, @--SP               ; the unit
                 RSUB    DISK_PREP, 1
+                CMP     0, R8                   ; mounted
+                RBRA    _PLI_RET, !Z
+                CMP     2, @SP                  ; the hard disk: the settings
+                RBRA    _PLI_RET, !Z            ; file remembers it
+                RSUB    HDD_REM_FILE, 1
+_PLI_RET        ADD     1, SP
                 RET
 _PLI_EJECT      MOVE    @SP++, R10
-                RSUB    DISK_EJECT, 1
+                CMP     2, R9                   ; the hard disk: remembered
+                RBRA    _PLI_EJ, !Z             ; as none
+                RSUB    HDD_REM_NONE, 1
+_PLI_EJ         RSUB    DISK_EJECT, 1
                 RET
+
+; The hard disk the menu mounted last is the one PREP_START mounts: the
+; settings file's text keeps it as "hdd=<path>" (cfgstr.asm), "hdd=none"
+; after "<No Disk>"; without the key /z486/hdd.img. The path is the file
+; browser's directory (FB_PATH, M2M-UPSTREAM fb-path) and the file's name
+; (LI_FNAME); one the browser could not track is not remembered. The menu's
+; close (ROSM_SAVE) writes the file.
+;
+; HDD_REM_FILE: remember the image LOAD_IMAGE has just mounted. Registers
+; preserved.
+HDD_REM_FILE    SYSCALL(enter, 1)
+                MOVE    FB_PATH_OK, R0
+                CMP     0, @R0
+                RBRA    _HRF_RET, Z
+                MOVE    FB_PATH, R8             ; R8: the directory
+                SYSCALL(strlen, 1)
+                MOVE    R9, R2                  ; R2: its length
+                MOVE    LI_FNAME, R0
+                MOVE    @R0, R8                 ; R8: the name
+                SYSCALL(strlen, 1)
+                ADD     R2, R9
+                ADD     2, R9                   ; '/' and the zero
+                CMP     R9, HDD_PATH_MAX        ; too long: not remembered
+                RBRA    _HRF_RET, N
+                MOVE    FB_PATH, R8
+                MOVE    HDD_PATH, R9
+                SYSCALL(strcpy, 1)
+                ADD     R2, R9                  ; R9: the path's end
+                CMP     0, R2
+                RBRA    _HRF_SL, Z
+                MOVE    R9, R1
+                SUB     1, R1
+                CMP     0x002F, @R1             ; a root ends with '/'
+                RBRA    _HRF_NM, Z
+_HRF_SL         MOVE    0x002F, @R9++
+_HRF_NM         MOVE    LI_FNAME, R0
+                MOVE    @R0, R8
+                SYSCALL(strcpy, 1)
+                MOVE    HDD_KEY, R8
+                MOVE    HDD_PATH, R9
+                RSUB    CFGS_SET, 1
+_HRF_RET        SYSCALL(leave, 1)
+                RET
+
+; HDD_REM_NONE: remember that the hard disk was ejected. Registers preserved.
+HDD_REM_NONE    SYSCALL(enter, 1)
+                MOVE    HDD_KEY, R8
+                MOVE    HDD_NONE, R9
+                RSUB    CFGS_SET, 1
+                SYSCALL(leave, 1)
+                RET
+
+HDD_KEY         .ASCII_W "hdd"
+HDD_NONE        .ASCII_W "none"
 
 ; DISK_EJECT: unit R9 (0 A:, 1 B:, 2 the hard disk, 3 the CD-ROM) has no
 ; image any more: MODE 0, which pc_mgmt.vhd sees as an eject (a floppy's
@@ -590,11 +655,23 @@ _PCS_VGA        MOVE    R8, R7                  ; R7: device handle
                 MOVE    0, @R8++
                 MOVE    0, @R8++
                 MOVE    0, @R8
+                MOVE    HDD_KEY, R8             ; the hard disk the menu
+                MOVE    HDD_PATH, R9            ; mounted last (HDD_REM_FILE),
+                MOVE    HDD_PATH_MAX, R10       ; else /z486/hdd.img
+                RSUB    CFGS_GET, 1
+                RBRA    _PCS_HDDEF, !C          ; none remembered
+                CMP     0x002F, @R9             ; "none": no hard disk
+                RBRA    _PCS_CD, !Z
                 MOVE    R7, R8
+                MOVE    2, R9
+                MOVE    HDD_PATH, R10
+                RSUB    DISK_AUTO, 1
+                RBRA    _PCS_CD, C              ; (gone: /z486/hdd.img)
+_PCS_HDDEF      MOVE    R7, R8
                 MOVE    2, R9
                 MOVE    HDD_AUTO, R10
                 RSUB    DISK_AUTO, 1
-                MOVE    R7, R8                  ; the CD-ROM: /z486/cdrom.cue
+_PCS_CD         MOVE    R7, R8                  ; the CD-ROM: /z486/cdrom.cue
                 MOVE    CD_AUTO_DIR, R9         ; from its folder (its FILEs are
                 XOR     R10, R10                ; relative to it), else
                 SYSCALL(f32_cd, 1)              ; /z486/cdrom.iso
@@ -1007,7 +1084,8 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "11"                   ; 11: the joystick's "Off" (54 lines)
+CFG_SIG_VAL     .ASCII_W "15"                   ; 15: "Real floppy speed", "Internal
+                                                ; drive" under "Floppy B:" (64 lines)
 
 ; ----------------------------------------------------------------------------
 ; The FAT32 write layer (M2M/QNICE/monitor/fat32_write.asm, fat32_wfile.asm;
@@ -1122,20 +1200,26 @@ BPT_SUM         .BLOCK  2                       ; its sums (bios_patch.asm)
 
 ; DISK_AUTO_NAME's auto-mounted paths per unit (0: none), for DAN_FLUSH
 DAN_PEND        .BLOCK  4
+; HDD_REM_FILE's and PREP_START's: the hard disk's path (the settings file's
+; "hdd=")
+HDD_PATH_MAX    .EQU    160
+HDD_PATH        .BLOCK  HDD_PATH_MAX
 
 ; CD_PREP's (cdimage.asm)
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 54-line menu: 20 + 548 item characters + 1 + 5 x 54 (the line
-; arrays and the dependency array) + 1 + (5 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1100 words (the 53-line one before the joystick's "Off":
+; for this 64-line menu: 20 + 664 item characters + 1 + 5 x 64 (the line
+; arrays and the dependency array) + 1 + (6 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 1292 words (the 63-line "Internal drive" one: 1268; the
+; 61-line "Drive sounds" one: 1230; the
+; 54-line one before it: 1100; the 53-line one before the joystick's "Off":
 ; 1081). The Shell checks it when the menu first opens
 ; (ERR_FATAL_HEAP1/2; with 768, the 38-line menu was 13 short: "Heap
 ; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
 ; 46-line one needed 939 of 960, before the "Refresh" submenu).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 1120
+MENU_HEAP_SIZE  .EQU 1344
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -1143,8 +1227,8 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 18880                      ; (19040 before MENU_HEAP_SIZE
-HEAP            .BLOCK 1                        ; grew by 160: the same end)
+HEAP_SIZE       .EQU 18656                      ; (18720 before MENU_HEAP_SIZE
+HEAP            .BLOCK 1                        ; grew by 64: the same end)
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's
                                                 ; larger device handle (main_vars.asm)

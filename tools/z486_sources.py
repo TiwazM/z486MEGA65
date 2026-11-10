@@ -81,7 +81,13 @@ PATCHES = {
          "    output     [15:0] dbg_ps2,          // MEGA65: the 8042's IRQs, output buffer, enables, states\n"
          "    output     [15:0] dbg_ps2_fifo,     // MEGA65: the bytes in its mouse and keyboard FIFOs\n"
          "    output     [15:0] dbg_inta_bad,     // MEGA65: INTAs the PIC acknowledged with another vector\n"
-         "    output     [15:0] dbg_inta_last,    // MEGA65: the last one: the CPU's vector, the PIC's"),
+         "    output     [15:0] dbg_inta_last,    // MEGA65: the last one: the CPU's vector, the PIC's\n"
+         "    output      [1:0] fdd_motor,        // MEGA65: floppy.v's motor bits (drive sounds)\n"
+         "    output            fdd_sel,          // MEGA65: the selected floppy drive\n"
+         "    output     [15:0] fdd_cyl,          // MEGA65: B:'s and A:'s head cylinders\n"
+         "    input       [1:0] fdd_chg_en,       // MEGA65: B:'s, A:'s DIR bit 7 from fdd_chg (the internal drive)\n"
+         "    input       [1:0] fdd_chg,          // MEGA65: its disk change line\n"
+         "    input             fdd_real_speed,   // MEGA65: the images at a real drive's speed"),
         ("pic_inta_bridge inta_bridge (",
          "wire pic_vector_hold;  // MEGA65 (z486_sources.py)\n"
          "pic_inta_bridge inta_bridge ("),
@@ -100,6 +106,14 @@ PATCHES = {
          "\t.vector_hold       (pic_vector_hold),   // MEGA65 (z486_sources.py)\n"
          "\t.dbg_regs          (dbg_pic)\n);\n"
          "assign dbg_irq = interrupt;"),
+        ("\t.request           (fdd_request),\n\t.irq               (irq_6)\n);",
+         "\t.request           (fdd_request),\n\t.irq               (irq_6),\n\n"
+         "\t.drv_motor         (fdd_motor),         // MEGA65 (z486_sources.py): drive sounds\n"
+         "\t.drv_sel           (fdd_sel),\n"
+         "\t.drv_cyl           (fdd_cyl),\n"
+         "\t.ext_chg_en        (fdd_chg_en),\n"
+         "\t.ext_chg           (fdd_chg),\n"
+         "\t.real_speed        (fdd_real_speed)\n);"),
         ("\t.sbp               (sbp),",
          "\t.sbp               (sbp),\n\n"
          "\t.dma_take_starved  (sb_take_starved),  // MEGA65 (z486_sources.py)\n"
@@ -133,6 +147,159 @@ PATCHES = {
         ("\t.vga_off           (video_off),",
          "\t.vga_off           (video_off),\n"
          "\t.vga_565           (video_565),       // MEGA65 (z486_sources.py)"),
+    ],
+    # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
+    # internal drive follows them): the DOR's motor bits, the selected drive and each drive's
+    # head cylinder (its present cylinder number: SEEK, RECALIBRATE, a read's or write's implied seek).
+    # For the internal drive as a PC drive (fdd_phys.vhd through pc_mgmt.vhd): register 1 reads
+    # the sector waiting by cylinder (15..8), head (7) and sector (6..0); register 6 written while
+    # a sector waits ends the command with that error (ST2 in bits 15..8, ST1 in 7..0: an 82077's
+    # status for a sector that could not be read or written), as a real controller ends it; and
+    # DIR bit 7 is the drive's own disk change line (ext_chg) instead of the image's; for that drive
+    # (ext_chg_en) a written sector waits for register 7 (on the disk) before the command goes on.
+    # FORMAT on that drive: any sector count (the drive is mounted with 36 so that any disk reads),
+    # each sector's ID handed over (registers 8-12: the FORMAT's state, its ID, the track's numbers,
+    # the head's cylinder) and answered by register 7 (or 6), no filler bytes popped: fdd_phys
+    # writes the whole track with the last ID
+    "z486_MiSTer/src/soc/floppy.v": [
+        ("\toutput      [1:0] request\n);",
+         "\toutput      [1:0] request,\n\n"
+         "\toutput      [1:0] drv_motor,  // MEGA65 (z486_sources.py): the DOR's motor bits, B: A:\n"
+         "\toutput            drv_sel,    // MEGA65: the selected drive\n"
+         "\toutput     [15:0] drv_cyl,    // MEGA65: B:'s and A:'s head cylinders\n"
+         "\tinput       [1:0] ext_chg_en, // MEGA65: B:'s, A:'s DIR bit 7 from ext_chg (the internal drive)\n"
+         "\tinput       [1:0] ext_chg,    // MEGA65: its disk change line\n"
+         "\tinput             real_speed  // MEGA65: the images at a real drive's speed (rs_go)\n"
+         ");"),
+        ("assign mgmt_readdata = (!mgmt_address) ? {selected_drive[0], sd_sector[14:0]} : (&mgmt_address) ? fifo_readdata : 16'd1;",
+         "wire [15:0] fmt_rd;  // MEGA65: registers 8-12, a FORMAT on the internal drive (see the end)\n"
+         "assign mgmt_readdata = (!mgmt_address) ? {selected_drive[0], sd_sector[14:0]} :\n"
+         "                       (mgmt_address == 4'd1) ? {cylinder[selected_drive[0]], head[selected_drive[0]], sector[selected_drive[0]][6:0]} :  // MEGA65\n"
+         "                       (mgmt_address >= 4'd8 && mgmt_address <= 4'd12) ? fmt_rd :  // MEGA65\n"
+         "                       (&mgmt_address) ? fifo_readdata : 16'd1;"),
+        ("wire fifo_write = mgmt_write && &mgmt_address;",
+         "wire fifo_write = mgmt_write && &mgmt_address;\n\n"
+         "// MEGA65 (z486_sources.py): register 6 written while a sector waits: the command ends with\n"
+         "// that error, ST2 in bits 15..8, ST1 in 7..0 (the internal drive could not read or write it)\n"
+         "wire media_error;\n"
+         "// MEGA65: register 7 written: the internal drive (ext_chg_en) has written the sector; until\n"
+         "// then its write waits with the FIFO empty (the PC's command goes on only once it is on the\n"
+         "// disk, and an error still ends this command)\n"
+         "wire write_ack = mgmt_write && mgmt_address == 4'd7;\n"
+         "// MEGA65: real_speed: a sector of an image waits in S_PREPARE for rs_go (see the end)\n"
+         "wire rs_go;"),
+        ("\telse if(state == S_PREPARE)                                                   state <= S_SD_CONTROL;",
+         "\telse if(state == S_PREPARE && rs_go)                                         state <= S_SD_CONTROL;  // MEGA65"),
+        ("\telse if(state == S_SD_WRITE_WAIT_FOR_EMPTY_FIFO && fifo_empty)                state <= S_UPDATE_SECTOR;",
+         "\telse if(state == S_SD_WRITE_WAIT_FOR_EMPTY_FIFO && fifo_empty &&  // MEGA65: write_ack\n"
+         "\t        (~ext_chg_en[selected_drive[0]] || write_ack))                       state <= S_UPDATE_SECTOR;"),
+        ("    (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :",
+         "    (io_address == 3'd7) ? { ext_chg_en[selected_drive[0]] ? ext_chg[selected_drive[0]] : change[selected_drive[0]], 7'h7F } :  // MEGA65"),
+        ("\tcmd_read_id_finished;\n",
+         "\tcmd_read_id_finished ||\n\tmedia_error;  // MEGA65\n"),
+        ("\tcmd_read_id_finished\n);",
+         "\tcmd_read_id_finished ||\n\tmedia_error  // MEGA65\n);"),
+        ("\telse if(cmd_invalid_start)                                                   reply_left <= 4'd1;",
+         "\telse if(media_error)                                                         reply_left <= 4'd7;  // MEGA65\n"
+         "\telse if(cmd_invalid_start)                                                   reply_left <= 4'd1;"),
+        ("\telse if(cmd_invalid_start)                                                reply <= { reply[79:8], 8'h80 };",
+         "\telse if(media_error)                                                      reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], mgmt_writedata[15:8], mgmt_writedata[7:0], (8'h40 | { 5'd0, head[selected_drive[0]], selected_drive }) };  // MEGA65\n"
+         "\telse if(cmd_invalid_start)                                                reply <= { reply[79:8], 8'h80 };"),
+        ("reg [3:0] state;\n",
+         "reg [3:0] state;\n"
+         "assign media_error = mgmt_write && mgmt_address == 4'd6 &&  // MEGA65 (z486_sources.py)\n"
+         "\t(state == S_SD_READ_WAIT_FOR_DATA || state == S_SD_WRITE_WAIT_FOR_EMPTY_FIFO || state == S_SD_FORMAT_WAIT_FOR_FILL);\n"),
+        ("\tif(~rst_n)                                                                    state <= S_IDLE;",
+         "\tif(~rst_n)                                                                    state <= S_IDLE;\n"
+         "\telse if(media_error)                                                         state <= S_IDLE;  // MEGA65"),
+        ("\tcommand[15:8] != media_sectors_per_track[selected_drive[0]]; //invalid secotr count",
+         "\t(command[15:8] != media_sectors_per_track[selected_drive[0]] && ~ext_chg_en[selected_drive[0]]); //invalid secotr count (MEGA65: the internal drive, any)"),
+        ("reg [7:0] format_filler_byte;\n",
+         "reg [7:0] format_gap, format_sc;  // MEGA65: the FORMAT's gap 3 and sectors (register 9)\n"
+         "always @(posedge clk) begin\n"
+         "\tif(~rst_n)                      begin format_gap <= 8'd0; format_sc <= 8'd0; end\n"
+         "\telse if(cmd_format_ok_at_start) begin format_gap <= command[7:0]; format_sc <= command[15:8]; end\n"
+         "end\n\n"
+         "reg [7:0] format_filler_byte;\n"),
+        ("\telse if(state == S_SD_FORMAT_WAIT_FOR_FILL && &format_counter && fifo_read) format_sector_count <= format_sector_count - 8'd1;",
+         "\telse if(state == S_SD_FORMAT_WAIT_FOR_FILL && (ext_chg_en[selected_drive[0]] ? write_ack : (&format_counter && fifo_read))) format_sector_count <= format_sector_count - 8'd1;  // MEGA65"),
+        ("\telse if(state == S_SD_FORMAT_WAIT_FOR_FILL && &format_counter && fifo_read)   state <= S_WAIT;",
+         "\telse if(state == S_SD_FORMAT_WAIT_FOR_FILL &&  // MEGA65: the internal drive's track, register 7\n"
+         "\t        (ext_chg_en[selected_drive[0]] ? write_ack : (&format_counter && fifo_read))) state <= S_WAIT;"),
+        ("\nendmodule",
+         "\n// MEGA65: the drives' state for the drive sounds (z486_sources.py)\n"
+         "assign drv_motor = {motor_enable[1], motor_enable[0]};\n"
+         "assign drv_sel   = selected_drive_r;\n\n"
+         "// MEGA65: each drive's head, its present cylinder number: RECALIBRATE, SEEK and a read's or\n"
+         "// write's implied seek move it. Not cylinder[], which also takes the C+1 an 82077 reports\n"
+         "// after a (multi-track) read or write ends at the end of the track on head 1, and a\n"
+         "// FORMAT's ID fields: a real controller's head stays where it is. But the internal drive's\n"
+         "// FORMAT seeks to its IDs' cylinder: the Bochs BIOS never sends SEEK (its FORMAT relies on an\n"
+         "// emulated controller taking the cylinder from the IDs, as Bochs's does).\n"
+         "(* ramstyle = \"logic\" *) reg [7:0] head_pcn[2];\n"
+         "always @(posedge clk) begin\n"
+         "\tif(~rst_n | sw_reset)                                                                                                begin head_pcn[0] <= 8'd0; head_pcn[1] <= 8'd0; end\n"
+         "\telse if(cmd_read_write_start && (cmd_read_write_incorrect_sector_at_start || cmd_write_and_writeprotected_at_start)) head_pcn[selected_drive[0]] <= command[47:40];\n"
+         "\telse if(cmd_read_write_ok_at_start)                                                                                  head_pcn[selected_drive[0]] <= command[47:40];\n"
+         "\telse if(cmd_recalibrate_start)                                                                                       head_pcn[selected_drive[0]] <= 8'd0;\n"
+         "\telse if(cmd_seek_start)                                                                                              head_pcn[selected_drive[0]] <= io_writedata;\n"
+         "\telse if(state == S_WAIT_FOR_FORMAT_INPUT && format_data_count == 3'd4 && ext_chg_en[selected_drive[0]])             head_pcn[selected_drive[0]] <= format_data[31:24];\n"
+         "end\n"
+         "assign drv_cyl   = {head_pcn[1], head_pcn[0]};\n\n"
+         "// MEGA65: a FORMAT's sector for the internal drive (pc_mgmt.vhd, fdd_phys.vhd): register 8\n"
+         "// FORMAT running (15), the data rate (13..12), the head's cylinder (7..0); 9 the sectors per\n"
+         "// track and gap 3; 10 and 11 the sector's ID field (C H, R N); 12 the IDs left with this one\n"
+         "// and the filler byte\n"
+         "assign fmt_rd = (mgmt_address == 4'd8)  ? {cmd_format_in_progress, 1'b0, data_rate, 4'd0, head_pcn[selected_drive[0]]} :\n"
+         "                (mgmt_address == 4'd9)  ? {format_sc, format_gap} :\n"
+         "                (mgmt_address == 4'd10) ? format_data[31:16] :\n"
+         "                (mgmt_address == 4'd11) ? format_data[15:0] :\n"
+         "                                          {format_sector_count, format_filler_byte};\n\n"
+         "// MEGA65: real_speed, the images at a real drive's speed (not the internal drive's, ext_chg_en:\n"
+         "// a real one). The disk turns at 300 rpm (360 rpm with 15 sectors per track: a 1.2 MB 5.25\"\n"
+         "// disk); sector R is in slot R-1 of a turn. A read's, write's or FORMAT's sector goes on\n"
+         "// from S_PREPARE once it has passed under the head (a FORMAT's: any slot, a track in one\n"
+         "// turn), after the steps of a read's or write's implied seek ((16 - SRT) units each, the\n"
+         "// units of floppy.v's SEEK: 1 ms at 500 kbit/s, as an 82077 steps) and 15 units to settle.\n"
+         "wire        rs_on   = real_speed && ~ext_chg_en[selected_drive[0]];\n"
+         "wire  [7:0] rs_spt  = (media_sectors_per_track[selected_drive[0]] == 8'd0)? 8'd1 : media_sectors_per_track[selected_drive[0]];\n"
+         "wire [27:0] rs_inc  = (rs_spt == 8'd15)? {18'd0, rs_spt, 2'b00} + {19'd0, rs_spt, 1'b0} : {18'd0, rs_spt, 2'b00} + {20'd0, rs_spt};\n"
+         "reg  [27:0] rs_acc;   // rs_inc a clock, a slot per clk_rate: spt slots in 1/5 (1/6) s\n"
+         "wire [28:0] rs_sum  = {1'b0, rs_acc} + {1'b0, rs_inc};\n"
+         "reg   [7:0] rs_pos;   // the slot under the head\n"
+         "reg   [7:0] rs_last;  // the slot that has just passed (rs_tick)\n"
+         "reg         rs_tick;\n"
+         "always @(posedge clk) begin\n"
+         "\trs_tick <= 1'b0;\n"
+         "\tif(~rst_n | ~rs_on)                begin rs_acc <= 28'd0; rs_pos <= 8'd0; rs_last <= 8'd0; end  // (no turn without it)\n"
+         "\telse if(rs_sum >= {1'b0, clk_rate}) begin\n"
+         "\t\trs_acc  <= rs_sum[27:0] - clk_rate;\n"
+         "\t\trs_tick <= 1'b1;\n"
+         "\t\trs_last <= rs_pos;\n"
+         "\t\trs_pos  <= (rs_pos + 8'd1 >= rs_spt)? 8'd0 : rs_pos + 8'd1;\n"
+         "\tend\n"
+         "\telse                                    rs_acc <= rs_sum[27:0];\n"
+         "end\n"
+         "wire  [7:0] rs_sec  = sector[selected_drive[0]];\n"
+         "wire  [7:0] rs_want = (rs_sec == 8'd0 || rs_sec > rs_spt)? 8'd0 : rs_sec - 8'd1;\n"
+         "reg  [27:0] rs_macc;  // the step units (delay_adder a clock, a unit per clk_rate)\n"
+         "wire [28:0] rs_msum = {1'b0, rs_macc} + {1'b0, delay_adder};\n"
+         "reg         rs_unit;\n"
+         "always @(posedge clk) begin\n"
+         "\trs_unit <= 1'b0;\n"
+         "\tif(~rst_n)                          rs_macc <= 28'd0;\n"
+         "\telse if(rs_msum >= {1'b0, clk_rate}) begin rs_macc <= rs_msum[27:0] - clk_rate; rs_unit <= 1'b1; end\n"
+         "\telse                                 rs_macc <= rs_msum[27:0];\n"
+         "end\n"
+         "wire  [7:0] rs_dist = (command[47:40] > head_pcn[selected_drive[0]])? command[47:40] - head_pcn[selected_drive[0]] : head_pcn[selected_drive[0]] - command[47:40];\n"
+         "reg  [12:0] rs_seek;  // units left of the implied seek\n"
+         "always @(posedge clk) begin\n"
+         "\tif(~rst_n)                                                    rs_seek <= 13'd0;\n"
+         "\telse if(cmd_read_write_ok_at_start && rs_on && rs_dist != 8'd0) rs_seek <= rs_dist * (13'd16 - specify_srt) + 13'd15;\n"
+         "\telse if(rs_unit && rs_seek != 13'd0)                           rs_seek <= rs_seek - 13'd1;\n"
+         "end\n"
+         "assign rs_go = ~rs_on || (rs_seek == 13'd0 && rs_tick && (cmd_format_in_progress || rs_last == rs_want));\n\n"
+         "endmodule"),
     ],
     # sound_dsp.v: the write status port (2xCh) reads busy for 3 us after a DMA request starts,
     # not for as long as it is up. The DSP holds a request until the DMA controller answers it,

@@ -23,7 +23,8 @@ ROOT = z486_sources.ROOT
 CORE_VHDL = ["vhdl/globals.vhd", "vhdl/config.vhd", "vhdl/clk.vhd", "vhdl/ps2_device.vhd",
              "vhdl/pc_keyboard.vhd", "vhdl/pc_mouse.vhd", "vhdl/cd_audio.vhd", "vhdl/pc_cdrom.vhd",
              "vhdl/pc_mgmt.vhd",
-             "vhdl/disk_sd.vhd", "vhdl/xadc_mon.vhd", "vhdl/mega65.vhd"]
+             "vhdl/disk_sd.vhd", "vhdl/xadc_mon.vhd", "vhdl/fdd_sound.vhd",
+             "vhdl/fdd_mfm_rx.vhd", "vhdl/fdd_mfm_tx.vhd", "vhdl/fdd_phys.vhd", "vhdl/mega65.vhd"]
 CORE_SV = ["sv/guest_l2.sv", "sv/sb_soft.sv", "sv/z486_mega65.sv"]
 
 # Verilog include directories, relative to CORE/

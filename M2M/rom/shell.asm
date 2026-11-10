@@ -726,7 +726,9 @@ _LI_OPENFATAL   MOVE    ERR_FATAL_FNF, R8
 
                 ; Callback function that can handle headers, sanity check
                 ; the disk image, determine the type of the disk image, etc.
-_LI_FOPEN_OK    MOVE    R5, R8
+_LI_FOPEN_OK    MOVE    LI_FNAME, R8            ; M2M-UPSTREAM fb-path: the
+                MOVE    R2, @R8                 ; name, for PREP_LOAD_IMAGE
+                MOVE    R5, R8
                 MOVE    SF_CONTEXT, R9
                 MOVE    @R9, R9
                 MOVE    SF_CONTEXT_DATA, R10
