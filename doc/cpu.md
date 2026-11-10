@@ -100,9 +100,19 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
   Commander III's setup (CPU speed 13) don't move: none of them leans on
   CMP r,m.
 
+- **BSF and BSR** (z486 `fpu` dc8bb18): a priority encoder in place of the
+  386 routines' bit-by-bit loops (10 + 3n clocks). The routines' first words
+  still put the operand in TMPB; the next word writes the index of its
+  lowest or highest set bit (or, with none set, leaves the register and sets
+  ZF) and retires. A register form takes 3 microcode words (6 to 58 before,
+  by the value). The single-step tests (0FBC/0FBD, with 66 and 67 prefixes,
+  2,500 each) pass but one case each of 660FBC and 670FBC, which fail on
+  82f00db too: an assertion on the instruction after (opcode 11h, "pb_read_mask
+  misses a GPR read"), not the bit scan. Not on the board yet.
+
 ## What to do, in order
 
-1. ~~16-bit CALL and RET~~ and ~~CMP r,m~~ (above).
+1. ~~16-bit CALL and RET~~, ~~CMP r,m~~ and ~~BSF/BSR~~ (above).
 2. CMP m,r, CMP m,imm and TEST r,m on the same path (the writeback would
    need its operands swapped, or the immediate).
 3. A 16-bit POP as a direct load, as the RET (the C frame above).
@@ -110,11 +120,9 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
    2.5 clocks (both write the flags); the ALU-from-memory result a clock
    sooner; a shift's result a clock sooner. All three touch the load
    forwarding or the register reads, on the build's slowest paths.
-5. BSF and BSR in a clock or two: a priority encoder on the operand in place
-   of the 386 microcode's bit-by-bit loop. CACHECHK times a BSR for its
-   clock and reports z486 as a 486 at 26.1 MHz (a 486 itself takes 6 to 103
-   clocks by the value); compilers, decompressors and memory managers use
-   them, games rarely in their loops. The single-step tests cover both.
+5. ~~BSF and BSR in a clock or two~~ (above). CACHECHK timed a BSR for its
+   clock and reported z486 as a 486 at 26.1 MHz (a 486 itself takes 6 to 103
+   clocks by the value): to look at on the board.
 6. The x87, not a speed item: an x87 instruction with a memory operand does
    not take a pending unmasked exception while the x87 is still busy with
    the one before; it runs, and the exception comes at the next instruction
@@ -123,6 +131,22 @@ Each figure: (the loop's clocks - the empty loop's) / instructions.
    exception (#MF with CR0.NE, else FERR#) before it changes anything. Found
    with Chris's 3D Benchmark (see [design](design.md)), which stops on v0.1
    too; what raises its exception is not known yet.
+   The cause (2026-11-10): with an exception unmasked the memory forms run the
+   386's own routines, and those test ERROR# only while BUSY# is active (a 387
+   holds BUSY# with an error pending): JNBUSY jumps past the test (loads 4F0,
+   stores 556, the m32 load 51F), where WAIT's and the register forms'
+   routines test ERROR# in JNBUSY's delay slot. z486's BUSY# drops when the
+   arithmetic ends, so the instruction runs. Holding BUSY# with ES set (CR0.NE,
+   not the no-wait forms) fixes the stores and the long loads, but the m32
+   load (FLD/FILD m32, the m32 arithmetic) sends its command before that test,
+   so the x87 takes it and the error path's PEREQ test loops for good. The fix
+   needs the x87 side: a waiting command written while ES is set (or may still
+   be set by the one before) is not taken, as a 387 would. With CR0.NE=0 (DOS
+   extenders, FERR# to IRQ13) the IRQ comes when the error happens, so
+   z486's x87 running beside the CPU reports it an instruction or two later
+   than a 486 would anyway. `x87_pending_direct.asm` (with cases 25-29 now: the
+   instruction right after the faulting divide) stays uncommitted in the z486
+   checkout until the fix: it fails.
 
 Found on the way, in z486 as it was: a near JMP or CALL past the CS limit of
 a protected-mode code segment does not fault (#GP), and instructions run on
