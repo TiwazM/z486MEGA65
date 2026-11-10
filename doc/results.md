@@ -59,6 +59,11 @@ an image.) No crash so far. The SDRAM clock phase (`qmon.py sweep`, a reset at e
 with 292.5 degrees 3 steps from its middle, about 3 ns of margin either way. Not checked
 yet: sound pitch, the PIT, CAPS LOCK's 33 MHz.
 
+v0.2.2 test core (`z486-R6-v022a.cor`, fpu f4fd85b: the x87 store hold, z486 aac6a40), `impl strong
+incr` from the 66 MHz layout (99.97 % of cells, 99.95 % of nets reused, 28 minutes): **+0.618 ns** on
+main_clk at 66 MHz (+0.318 ns at the target), hold +0.054 ns, every clock met, 88.7K LUTs. Not on
+the board yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
