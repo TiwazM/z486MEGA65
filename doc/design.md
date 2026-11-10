@@ -63,6 +63,18 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     fault (`x87_store_page_fault.asm`) restart cleanly. v0.1-preview stops the
     same way (the same EIP and registers, 2026-11-07): older than this round's
     x87 work, so a bisect over the fpu cores would find nothing.
+    Found (2026-11-10, the whole-PC simulation of BENCH.EXE under FreeDOS and
+    CWSDPMI, with an x87 watch: the status word, the stack and the microcode
+    around the first unmasked exception): DJGPP's control word is 037Ah (invalid
+    and zero divide unmasked), so a store may not queue behind a busy x87
+    (queue_safe), and BENCH's FSTP m32 comes two instructions after FSUBP. It
+    fell back to its 386 routine, which sends the command before it writes: the
+    x87 converted and popped, then the write page-faulted (CR2 100F8A74h: CWSDPMI
+    maps a page on its first touch), and the restarted FSTP found the stack empty
+    (IE, stack underflow), reported at 3DF5. The direct store path checks its
+    destination first (the overlay's CW), so the store now holds for a busy x87
+    and then goes direct (z486 aac6a40, `x87_store_page_fault_busy`; for v0.2.2,
+    not on the board yet).
   - SpeedSys 4.78 stops after its system box, polling port 61h at
     4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
     (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
