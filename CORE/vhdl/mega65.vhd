@@ -391,7 +391,6 @@ signal main_pc_reset          : std_logic;
 signal main_pc_reset_d        : std_logic := '0';
 signal main_led_hd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;   -- drive LED hold
 signal main_led_fd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;
-signal main_led_cd            : natural range 0 to CORE_CLK_SPEED / 25 := 0;
 signal main_led_req_d         : std_logic := '0';                  -- main_disk_req a clock ago
 signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS time again
 signal main_hr_rst            : std_logic;
@@ -949,26 +948,22 @@ begin
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
 
-   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line,
-   -- in Megamiga's colours: red while the hard disk has a command or a block in hand (ide.v asks
-   -- pc_mgmt, or pc_mgmt reads or writes the card for it), yellow for the floppy drives, and
-   -- green for the CD-ROM drive (the second IDE channel, or pc_cdrom reading the disc's image,
-   -- CD audio too); orange for any two or more at once. Each access keeps it lit for 40 ms at
-   -- least, so that a one-sector access still shows. main_disk_req is a toggle (one change per
-   -- request, pc_mgmt.vhd), not a level: its changes count (rtcsnd took the level, and an odd
-   -- count of requests left the LED on for good).
+   -- Drive LED: the PC's disk accesses, as a 1990s case LED shows its drive's activity line:
+   -- amber while the hard disk or the CD-ROM drive has a command or a block in hand (ide.v asks
+   -- pc_mgmt, or pc_mgmt / pc_cdrom read or write the card for them), green for the floppy
+   -- drives (the floppy wins when both). Each access keeps it lit for 40 ms at least, so that a
+   -- one-sector access still shows. main_disk_req is a toggle (one change per request,
+   -- pc_mgmt.vhd), not a level: its changes count (rtcsnd took the level, and an odd count of
+   -- requests left the LED on for good).
    p_main_drive_led : process (main_clk)
       constant C_HOLD : natural := CORE_CLK_SPEED / 25;      -- 40 ms
       variable v_hd   : boolean;
       variable v_fd   : boolean;
-      variable v_cd   : boolean;
    begin
       if rising_edge(main_clk) then
          main_led_req_d <= main_disk_req;
-         v_hd := main_ide0_request /= "000" or
-                 (main_disk_req /= main_led_req_d and main_disk_req_unit = "10");    -- unit 2
-         v_cd := main_ide1_request /= "000" or
-                 (main_disk_req /= main_led_req_d and main_disk_req_unit = "11");    -- unit 3
+         v_hd := main_ide0_request /= "000" or main_ide1_request /= "000" or
+                 (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '1');  -- units 2, 3
          v_fd := main_fdd_request /= "00" or
                  (main_disk_req /= main_led_req_d and main_disk_req_unit(1) = '0');  -- units 0, 1
          if v_hd then
@@ -981,21 +976,11 @@ begin
          elsif main_led_fd /= 0 then
             main_led_fd <= main_led_fd - 1;
          end if;
-         if v_cd then
-            main_led_cd <= C_HOLD;
-         elsif main_led_cd /= 0 then
-            main_led_cd <= main_led_cd - 1;
-         end if;
       end if;
    end process p_main_drive_led;
 
-   main_drive_led_o     <= '1' when main_led_hd /= 0 or main_led_fd /= 0 or main_led_cd /= 0 else '0';
-   main_drive_led_col_o <= x"FF8000" when (main_led_hd /= 0 and main_led_fd /= 0) or
-                                          (main_led_hd /= 0 and main_led_cd /= 0) or
-                                          (main_led_fd /= 0 and main_led_cd /= 0) else
-                           x"FF0000" when main_led_hd /= 0 else
-                           x"00FF00" when main_led_cd /= 0 else
-                           x"FFFF00";
+   main_drive_led_o     <= '1' when main_led_hd /= 0 or main_led_fd /= 0 else '0';
+   main_drive_led_col_o <= x"00FF00" when main_led_fd /= 0 else x"FF8000";
 
    -- The internal floppy drive (the menu's "Internal drive"): "Sounds" follows the PC's floppy
    -- drives (motor and head; the motor only without a disk in it), "Drive A:" / "Drive B:" is

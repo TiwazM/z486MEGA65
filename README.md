@@ -72,9 +72,8 @@ The current version is **v0.2** (see
   A: or B: is a real drive either way.
 - The reset button and Ctrl+Alt+Del restart the PC cleanly, and set its clock
   from the MEGA65's again
-- The drive LED shows the PC's disk accesses, in Megamiga's colours: red for
-  the hard disk, yellow for the floppies, and green for the CD-ROM (CD audio
-  too); orange for two or more at once
+- The drive LED shows the PC's disk accesses: amber for the hard disk and the
+  CD-ROM, green for the floppies
 - The MEGA65's own floppy drive ("Internal drive" in the menu):
   - Off (the default): the drive stays idle
   - Sounds: it hums and clicks with the PC's floppy drives
