@@ -112,6 +112,10 @@ module z486_mega65 #(
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
     input  wire        video_f60,          // every VGA mode retimed to 60 Hz (MiSTer's default);
                                            // 0 = the VGA's own timing (the menu's "Refresh")
+    input  wire  [5:0] boot_cfg,           // the BIOS's boot order (the menu's "Boot"): rtc.v
+                                           // CMOS 3Dh/38h, 2 bits a place, 1st in [1:0]: 0 floppy
+                                           // with a disk else hard disk, 1 floppy, 2 hard disk,
+                                           // 3 CD-ROM (El Torito)
     input  wire  [1:0] ram_size,           // 0/1/2/3 = 16/32/64/128 MB; the R6 has 64 MB
 
     // The L2 cache (guest_l2.sv; clk_sys): on (a 0 -> 1 empties it first), and its line fills
@@ -522,7 +526,7 @@ system #(
     .dbg_avm_resp_valid  (),
     .dbg_cpu_din_z       (),
 
-    .bootcfg             (6'h08),            // boot: A: (with media) or C:, then C: (rtc.v CMOS 3Dh)
+    .bootcfg             (boot_cfg),         // the boot order (rtc.v CMOS 3Dh/38h)
     .ram_size            (ram_size),
     .uma_ram             (1'b0),
     .cpu_speed_osd       (cpu_slow ? 3'd1 : 3'd0), // OSD "56" = 33 (z486_sources.py), or full

@@ -357,20 +357,22 @@ constant C_MENU_INT_B         : natural := 10;  -- or its B:
 constant C_MENU_HDD            : natural := 13;  -- manual load 2
 constant C_MENU_CD            : natural := 14;  -- manual load 3
 constant C_MENU_REAL_SPEED    : natural := 15;  -- the floppy images at a real drive's speed
-constant C_MENU_HDMI_720P     : natural := 20;
-constant C_MENU_HDMI_480P     : natural := 21;
-constant C_MENU_HDMI_800      : natural := 22;
-constant C_MENU_HDMI_1024     : natural := 23;
-constant C_MENU_HDMI_1280     : natural := 24;  -- M2M-UPSTREAM sxga-mode
-constant C_MENU_HDMI_NATIVE   : natural := 25;  -- M2M-UPSTREAM native: the PC's own resolution
-constant C_MENU_FLT_SMOOTH    : natural := 32;  -- (31: Sharp, the default)
-constant C_MENU_FLT_PIXELS    : natural := 33;
-constant C_MENU_SL_25         : natural := 40;  -- (39: Off, the default)
-constant C_MENU_SL_50         : natural := 41;
-constant C_MENU_RF_ORIG       : natural := 48;  -- the VGA's own refresh (47: 60 Hz, the default)
-constant C_MENU_JOY_P5        : natural := 55;  -- the game port's fire 2 on pin 5 (54: pin 9)
-constant C_MENU_JOY_OFF       : natural := 56;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 61;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_BOOT_CD       : natural := 20;  -- boot: CD-ROM, then hard disk (19: floppy, then
+constant C_MENU_BOOT_HDD      : natural := 21;  -- hard disk, the default); hard disk only
+constant C_MENU_HDMI_720P     : natural := 28;
+constant C_MENU_HDMI_480P     : natural := 29;
+constant C_MENU_HDMI_800      : natural := 30;
+constant C_MENU_HDMI_1024     : natural := 31;
+constant C_MENU_HDMI_1280     : natural := 32;  -- M2M-UPSTREAM sxga-mode
+constant C_MENU_HDMI_NATIVE   : natural := 33;  -- M2M-UPSTREAM native: the PC's own resolution
+constant C_MENU_FLT_SMOOTH    : natural := 40;  -- (39: Sharp, the default)
+constant C_MENU_FLT_PIXELS    : natural := 41;
+constant C_MENU_SL_25         : natural := 48;  -- (47: Off, the default)
+constant C_MENU_SL_50         : natural := 49;
+constant C_MENU_RF_ORIG       : natural := 56;  -- the VGA's own refresh (55: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 63;  -- the game port's fire 2 on pin 5 (62: pin 9)
+constant C_MENU_JOY_OFF       : natural := 64;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 69;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -625,6 +627,7 @@ signal main_fdd_motor         : std_logic_vector(1 downto 0);    -- floppy.v: B:
 signal main_fdd_sel           : std_logic;                       -- the selected floppy drive
 signal main_fdd_cyl           : std_logic_vector(15 downto 0);   -- B:'s and A:'s head cylinders
 signal main_int_snd           : std_logic;                       -- the internal drive's Sounds
+signal main_boot_cfg          : std_logic_vector(5 downto 0);    -- the menu's "Boot" (rtc.v bootcfg)
 
 -- the internal floppy drive as a PC drive (fdd_phys.vhd): B: (bit 1) or A: (bit 0)
 signal main_phys              : std_logic_vector(1 downto 0);
@@ -758,6 +761,7 @@ component z486_mega65 is
       joy_off            : in    std_logic;
       cpu_slow           : in    std_logic;
       video_f60          : in    std_logic;
+      boot_cfg           : in    std_logic_vector(5 downto 0);
       ram_size           : in    std_logic_vector(1 downto 0);
       l2_enable          : in    std_logic;
       cache_off          : in    std_logic;
@@ -989,6 +993,11 @@ begin
    -- it out without): it counts as Off then, also for a settings file that still has it.
    main_phys <= main_osm_control_i(C_MENU_INT_B) & main_osm_control_i(C_MENU_INT_A);
    main_int_snd <= main_osm_control_i(C_MENU_INT_SND) and main_osm_control_i(C_MENU_REAL_SPEED);
+   -- "Boot": 1st place in [1:0], 2nd in [3:2], 3rd in [5:4] (0 floppy with a disk else hard disk,
+   -- 1 floppy, 2 hard disk, 3 CD-ROM). Floppy (or hard disk) then hard disk: 08h, as before
+   main_boot_cfg <= "001011" when main_osm_control_i(C_MENU_BOOT_CD) = '1' else
+                    "000010" when main_osm_control_i(C_MENU_BOOT_HDD) = '1' else
+                    "001000";
 
    i_fdd_sound : entity work.fdd_sound
       generic map (
@@ -1173,6 +1182,8 @@ begin
          -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
          -- 26.9 kHz lines)
          video_f60          => not main_osm_control_i(C_MENU_RF_ORIG),
+         -- the menu's "Boot": the BIOS's boot order (rtc.v CMOS 3Dh/38h; read at every boot)
+         boot_cfg           => main_boot_cfg,
          ps2_mouse_clk_out  => main_mouse_host_clk,
          ps2_mouse_data_out => main_mouse_host_dat,
 

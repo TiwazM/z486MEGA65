@@ -63,8 +63,11 @@ The current version is **v0.2** (see
 
 **Core**
 - Menu on HELP: floppies, internal drive, hard disk, CD-ROM, real floppy
-  speed, HDMI mode, filter, scanlines, refresh (HDMI or VGA), joystick, reset;
-  settings are saved to the SD card, the hard disk mounted last too
+  speed, boot order, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
+  joystick, reset; settings are saved to the SD card, the hard disk mounted
+  last too
+- Boot order: floppy then hard disk (the default), CD-ROM then hard disk (a
+  bootable CD, El Torito), or the hard disk only; it counts from the next reset
 - Real floppy speed (off by default): the floppy images run at a real drive's
   speed. Each sector waits for its place on a disk turning at 300 rpm (360 rpm
   for a 1.2 MB disk), and a read or write that moves the head waits for its
