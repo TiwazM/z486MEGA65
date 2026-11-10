@@ -31,11 +31,14 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     AX to such detection (an AX had at most 1 MB) or the W32's linear window;
     the second goes with a W32 hardware cursor (Windows' software cursor
     flickers when the picture under it changes, as on a real ET4000AX).
-  - 1351 mouse smoothing (`pc_mouse.vhd`): the mouSTer moves its 1351
-    position about every 10 ms, and packets at the 40 per second Windows
-    sets take two or three of those steps in turn (an I/O trace while moving
-    steadily: x −7, −10, −7, −10, ...), so the pointer judders. Spreading
-    each step over the time to the next one would even it out.
+  - 1351 mouse smoothing (`pc_mouse.vhd`, done for v0.2.1, not on the board
+    yet): the mouSTer moves its 1351 position about every 10 ms, and packets
+    at the 40 per second Windows sets took two or three of those steps in turn
+    (an I/O trace while moving steadily: x −7, −10, −7, −10, ...), so the
+    pointer juddered. Now each reading's counts go out one at a time, evenly
+    over the time the reading before took (at most ~16 ms); what is left when
+    the next comes goes with it. `tb_pc_mouse_pot.vhd` 6.: 6 counts every
+    10 ms at 40 packets a second, 12 or 18 counts a packet before, 15 each now.
   - Joysticks that games count by timing (TIE Fighter does not see the stick
     unless it is held to the upper left while the game starts, on ao486 on
     MiSTer too; MiSTer has "Count" modes for that).
@@ -87,9 +90,11 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     in simulation, native's count against the lines and pixels ascal takes in
     (p_main_native counts a line where its display enable ends), then the fix.
   - After v0.2, in this order: native's measurement (above); the x87's
-    memory forms taking a pending exception, then what raises Chris's 3D
-    Benchmark's ([CPU](cpu.md) 6); SpeedSys's port 61h loop (unpack it
-    first); BSF/BSR in a clock or two ([CPU](cpu.md) 5).
+    memory forms taking a pending exception (the cause is found, the fix needs
+    the x87's command port: [CPU](cpu.md) 6), then what raises Chris's 3D
+    Benchmark's; SpeedSys's port 61h loop (unpack it first). Done for v0.2.1,
+    not on the board yet: BSF/BSR in 3 microcode words ([CPU](cpu.md)), the
+    menu's boot order (CD-ROM first: El Torito), the 1351 smoothing.
 
 ## What the shell does now
 

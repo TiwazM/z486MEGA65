@@ -31,6 +31,10 @@
 -- pins 2..4 (which a 1351 never moves), an Amiga mouse again; each new
 -- reading (settled after the framework's per-bit crossing) moves it by the difference to the
 -- last one, -32..31 an axis. flip_i reverses an axis (qmon.py c1351), should one run backwards.
+-- A reading's counts go out one at a time, evenly over the time the reading before took to
+-- come (p_smooth; at most ~16 ms, a reading every ~10 ms): at 40 packets a second (Windows)
+-- a packet took two or three readings at once, 12 or 18 counts at a steady 6 a reading, and
+-- the pointer juddered.
 --
 -- The controller's commands: FF reset (FA AA 00), FE resend, F6 defaults, F5 disable, F4
 -- enable, F3 sample rate and E8 resolution (a byte follows), F2 identify (FA 00), F0 remote
@@ -144,6 +148,19 @@ architecture synthesis of pc_mouse is
    signal p_stb      : std_logic := '0';
    signal p_dx, p_dy : signed(5 downto 0) := (others => '0');
    signal amiga_step : std_logic := '0';                           -- pins 2..4 moved
+
+   -- a 1351's motion spread out (p_smooth): the counts of a reading go out one at a time, evenly
+   -- over the ticks (~1 us) the reading before took to come, at most C_SPREAD; counts not out
+   -- yet when the next reading comes go out with it
+   constant C_TICK   : natural := maximum(1, G_CLK_HZ / 1_000_000);
+   constant C_SPREAD : natural := 16383;
+   signal tick_cnt   : natural range 0 to C_TICK - 1 := 0;
+   signal gap        : unsigned(13 downto 0) := (others => '1');     -- ticks since the last reading
+   signal per        : unsigned(13 downto 0) := (others => '1');     -- the last reading's spread
+   signal r_x, r_y   : signed(7 downto 0) := (others => '0');        -- counts still to go out
+   signal n_x, n_y   : unsigned(6 downto 0) := (others => '0');      -- ...as many at the reading
+   signal f_x, f_y   : unsigned(14 downto 0) := (others => '0');     -- the even spread's fraction
+   signal sm_x, sm_y : signed(5 downto 0) := (others => '0');        -- a count out this clock
 
    -- an Amiga mouse's active button lines (p_buttons): pin 9 and 5 synchronised and settled;
    -- whether each has read driven, and held open now; both open how long
@@ -280,6 +297,99 @@ begin
       end if;
    end process p_1351;
 
+   -- A 1351's motion, spread out: per axis a DDA hands out |r| counts over per ticks (a count
+   -- a tick at most: n <= 127 < per)
+   p_smooth : process (clk_i)
+      variable v_rx, v_ry : signed(7 downto 0);
+      variable v_fx, v_fy : unsigned(14 downto 0);
+      variable v_sx, v_sy : signed(5 downto 0);
+      variable v_ax, v_ay : signed(7 downto 0);
+
+      function add_sat(r : signed(7 downto 0); d : signed(5 downto 0)) return signed is
+         variable t : signed(8 downto 0);
+      begin
+         t := resize(r, 9) + resize(d, 9);
+         if t > 127 then return to_signed(127, 8);
+         elsif t < -127 then return to_signed(-127, 8);
+         else return t(7 downto 0);
+         end if;
+      end function add_sat;
+   begin
+      if rising_edge(clk_i) then
+         v_rx := r_x;
+         v_ry := r_y;
+         v_fx := f_x;
+         v_fy := f_y;
+         v_sx := (others => '0');
+         v_sy := (others => '0');
+         if tick_cnt = C_TICK - 1 then
+            tick_cnt <= 0;
+            if gap /= C_SPREAD then
+               gap <= gap + 1;
+            end if;
+            if v_rx /= 0 then
+               v_fx := v_fx + n_x;
+               if v_fx >= per then
+                  v_fx := v_fx - per;
+                  if v_rx > 0 then
+                     v_sx := to_signed(1, 6);
+                     v_rx := v_rx - 1;
+                  else
+                     v_sx := to_signed(-1, 6);
+                     v_rx := v_rx + 1;
+                  end if;
+               end if;
+            end if;
+            if v_ry /= 0 then
+               v_fy := v_fy + n_y;
+               if v_fy >= per then
+                  v_fy := v_fy - per;
+                  if v_ry > 0 then
+                     v_sy := to_signed(1, 6);
+                     v_ry := v_ry - 1;
+                  else
+                     v_sy := to_signed(-1, 6);
+                     v_ry := v_ry + 1;
+                  end if;
+               end if;
+            end if;
+         else
+            tick_cnt <= tick_cnt + 1;
+         end if;
+
+         if p_stb = '1' then                     -- a reading: its counts join what is left
+            v_rx := add_sat(v_rx, p_dx);
+            v_ry := add_sat(v_ry, p_dy);
+            v_ax := abs(v_rx);
+            v_ay := abs(v_ry);
+            n_x  <= unsigned(v_ax(6 downto 0));
+            n_y  <= unsigned(v_ay(6 downto 0));
+            v_fx := (others => '0');
+            v_fy := (others => '0');
+            if gap < 256 then
+               per <= to_unsigned(256, 14);
+            else
+               per <= gap;
+            end if;
+            gap  <= (others => '0');
+         end if;
+
+         r_x  <= v_rx;
+         r_y  <= v_ry;
+         f_x  <= v_fx;
+         f_y  <= v_fy;
+         sm_x <= v_sx;
+         sm_y <= v_sy;
+
+         if c1351 = '0' or rst_i = '1' then
+            r_x  <= (others => '0');
+            r_y  <= (others => '0');
+            sm_x <= (others => '0');
+            sm_y <= (others => '0');
+         end if;
+      end if;
+   end process p_smooth;
+
    -- An Amiga mouse's right and middle buttons on pins 9 and 5 where it drives them (a mouSTer
    -- with activepotlines): SID value 63 or less = driven (up), 192 or more = open (held), once
    -- the line has read driven; both open for 2 s and the lines count as passive again
@@ -392,9 +502,9 @@ begin
             elsif step(hq, v_h) = -1 and v_x < 511 then v_x := v_x + 1; end if;
             if step(vq, v_v) = 1 and v_y < 511 then v_y := v_y + 1;
             elsif step(vq, v_v) = -1 and v_y > -511 then v_y := v_y - 1; end if;
-         elsif p_stb = '1' then                  -- a 1351: its reading's motion, up to 511
-            v_x := sat(v_x, p_dx);
-            v_y := sat(v_y, p_dy);
+         else                                    -- a 1351: its motion, spread out (p_smooth)
+            v_x := sat(v_x, sm_x);
+            v_y := sat(v_y, sm_y);
          end if;
          hq <= v_h;
          vq <= v_v;

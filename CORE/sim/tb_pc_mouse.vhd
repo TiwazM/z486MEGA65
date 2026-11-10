@@ -439,8 +439,7 @@ begin
       at1351(3, 41);    expect_motion("1351: 7 right across 63 -> 0", 7, 0, "000");
       at1351(3, 41, '1');
       nothing("1351: the noise bit");
-      steps(j_down, j_right, 4, true);
-      nothing("1351: the quadrature lines");
+      -- (a step on the quadrature lines makes it an Amiga mouse at once: tb_pc_mouse_pot.vhd 5.)
       j_up <= '0';      expect_motion("1351: right button (pin 1)", 0, 0, "010");
       j_up <= '1';      expect_motion("1351: right button up", 0, 0, "000");
       j_fire <= '0';    expect_motion("1351: left button", 0, 0, "001");
