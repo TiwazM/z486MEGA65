@@ -5,9 +5,20 @@ Part of [z486MEGA65](../README.md). Build and timing results.
 ## Summary
 
 The whole core synthesizes, places and routes for the R6 (MiSTer2MEGA65, Megamiga's
-fork) and meets timing at 64 MHz with 0.3 ns to spare (the CPU floorplanned,
-`impl strong`, the PC's clock over-constrained in implementation). 66.667 MHz, a
-DX2-66's clock, misses by 0.25 ns (about 65.6 MHz), all inside the CPU.
+fork) and meets timing at 64 MHz with 0.7 ns to spare (the PC's clock over-constrained
+by 0.6 ns in implementation). Until 2026-11-10 it had 0.3 ns, and 66.667 MHz, a
+DX2-66's clock, missed by 0.25 ns (about 65.6 MHz), all inside the CPU.
+
+2026-11-10 (fpu 4670ea5, z486 e60ec10): the three groups of paths that limited the
+PC's clock in every build since v0.2 are shorter. The build takes z486's carry-chain
+ALU (`alu_alt.sv`, as MiSTer), the dcache's VIPT tag compare starts from the TLB
+entry's frame instead of the matched translation, and the x87 multiplier's lowest
+partial product is registered for the round step. With the over-constraint raised
+from 0.3 to 0.6 ns: **+0.738 ns** at 64 MHz (from +0.320; about 67.2 MHz), +0.138 ns
+at the 0.6 ns target, hold met, 89.7K LUTs (66.6 %), 80.9 % slices (from 82.1 %),
+257.5 block RAM tiles, 67 DSPs. The worst paths now start in the prefetch queue
+(`k1q_r`, to the group ROM) and the address unit (`issue_ind_r`). The CPU and x87
+tests and 186 single-step files pass as before; not on the board yet.
 
 ## Builds
 
