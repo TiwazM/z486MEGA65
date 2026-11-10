@@ -9,7 +9,8 @@
 #   qmon.py CMD...            each CMD is sent as is (a firmware command such as "R80008",
 #                             or a monitor command in debug mode); the replies are printed
 #   qmon.py status            z486's debug snapshot (C_DEV_PC_CTL 0x10..0x17) and the log
-#   qmon.py boot PHASE [SECS] reset the PC with the SDRAM clock at PHASE fine steps (13.95 ps)
+#   qmon.py boot PHASE [SECS] reset the PC with the SDRAM clock at PHASE fine steps (13.95 ps at
+#                             64 MHz, 27.06 ps on the 66 MHz build: 560 steps a period)
 #                             from 292.5 degrees, wait SECS (default 3), print the status
 #   qmon.py sweep FROM TO STEP [SECS]   boot at each phase, one summary line each
 #   qmon.py disks             the disks (disk_sd.vhd, C_DEV_PC_DISK): mounts, statistics, times
@@ -410,7 +411,7 @@ def fdd():
         "on" if w10 & 8 else "off", "yes" if w10 & 4 else "no", "yes" if w10 & 2 else "no",
         "active" if w10 & 1 else "inactive"))
     print("PLL cell %.2f clocks (%.3f us)  index period %.1f ms (%d rpm)" % (
-        w[11] / 16.0, w[11] / 16.0 / 64, w[12] / 10.0, 600000 // w[12] if w[12] else 0))
+        w[11] / 16.0, w[11] / 16.0 / 66, w[12] / 10.0, 600000 // w[12] if w[12] else 0))
     print("last request: C %d R %d" % (w[15] & 0xFF, w[15] >> 8 & 0x7F))
 
 

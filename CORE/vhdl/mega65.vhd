@@ -454,7 +454,7 @@ signal main_dbg_inta_bad      : std_logic_vector(15 downto 0);   -- INTAs acknow
 signal main_dbg_inta_last     : std_logic_vector(15 downto 0);   -- the last: CPU's, PIC's vector
 
 -- The DMA and Sound Blaster I/O trace (p_main_iot)
-signal main_iot_div           : unsigned(5 downto 0) := (others => '0');
+signal main_iot_div           : natural range 0 to CORE_CLK_SPEED / 1_000_000 - 1 := 0;
 signal main_iot_tick          : std_logic := '0';                -- a microsecond
 signal main_iot_us            : unsigned(31 downto 0) := (others => '0');
 signal main_iot_cnt           : unsigned(15 downto 0) := (others => '0');  -- entries written
@@ -901,12 +901,12 @@ begin
    clk_gen : entity work.clk
       port map (
          sys_clk_i         => clk_i,           -- expects 100 MHz
-         main_clk_o        => main_clk,        -- 64 MHz
+         main_clk_o        => main_clk,        -- 66 MHz
          main_rst_o        => main_rst,
          video_clk_o       => video_clk,       -- the same clock
          video_rst_o       => video_rst,
          audio_clk_o       => audio_clk,       -- 24.556 MHz
-         sdram_clk_o       => main_sdram_clk,  -- 64 MHz, 292.5 degrees + the fine phase
+         sdram_clk_o       => main_sdram_clk,  -- 66 MHz, 292.5 degrees + the fine phase
          sdram_ps_target_i => qnice_sdram_ps_target,
          sdram_ps_pos_o    => sdram_ps_pos
       ); -- clk_gen
@@ -1643,10 +1643,12 @@ begin
    begin
       if rising_edge(main_clk) then
          main_iot_tick <= '0';
-         main_iot_div  <= main_iot_div + 1;
-         if main_iot_div = 63 then                -- 64 MHz
+         if main_iot_div = CORE_CLK_SPEED / 1_000_000 - 1 then   -- a microsecond
+            main_iot_div  <= 0;
             main_iot_tick <= '1';
             main_iot_us   <= main_iot_us + 1;
+         else
+            main_iot_div  <= main_iot_div + 1;
          end if;
 
          main_iot_irq_d <= main_dbg_sb_irq;
@@ -1852,7 +1854,7 @@ begin
    -- (VGA)"; with "60 Hz (HDMI)" (video_f60) every mode runs at 60 Hz. Held for the same eight
    -- frames as the size.
    p_main_native : process (main_clk)
-      constant C_PER_65HZ : natural := 984615;   -- 64 MHz / 65 Hz
+      constant C_PER_65HZ : natural := CORE_CLK_SPEED / 65;
       variable v_de : std_logic;
       variable v_w  : unsigned(11 downto 0);
       variable v_l  : unsigned(11 downto 0);

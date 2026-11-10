@@ -5,9 +5,10 @@ Part of [z486MEGA65](../README.md). Build and timing results.
 ## Summary
 
 The whole core synthesizes, places and routes for the R6 (MiSTer2MEGA65, Megamiga's
-fork) and meets timing at 64 MHz with 0.7 ns to spare (the PC's clock over-constrained
-by 0.6 ns in implementation). Until 2026-11-10 it had 0.3 ns, and 66.667 MHz, a
-DX2-66's clock, missed by 0.25 ns (about 65.6 MHz), all inside the CPU.
+fork) and meets timing with the PC at 66 MHz (twice CAPS LOCK's 33 MHz) with 0.56 ns to
+spare (the PC's clock over-constrained by 0.3 ns in implementation); at 64 MHz it had
+0.7 ns. Until 2026-11-10 it had 0.3 ns at 64 MHz, and 66.667 MHz, a DX2-66's clock,
+missed by 0.25 ns (about 65.6 MHz), all inside the CPU.
 
 2026-11-10 (fpu 4670ea5, z486 e60ec10): the three groups of paths that limited the
 PC's clock in every build since v0.2 are shorter. The build takes z486's carry-chain
@@ -38,6 +39,25 @@ and reads 101h, 103h and 110h-112h back after setting them; `HICOL 115` (800x600
 bit), `HICOL 117` (1024x768, 16 bit) and `HICOL 112` (640x480, 24 bit) each show the
 three ramps, red, green, blue, each one ramp across the whole screen (117 in 565's 32
 and 64 steps); `HICOL 116` (1024x768, 15 bit) too.
+
+66 MHz (2026-11-10, branch `clk66`, eb1d568 on 059192c, merged into fpu): the PC at **66.0 MHz** (VCO 660
+MHz, x33 / 5 / 10; twice CAPS LOCK's 33 MHz) meets timing with **+0.563 ns** (about 68.5
+MHz), +0.263 ns at the 0.3 ns target, hold +0.062 ns, every clock met, 88.6K LUTs (65.9 %),
+80.5 % slices. On the board (2026-11-10) it boots FreeDOS, shows the VESA modes right, and
+Dr. Hardware's 16-bit System Performance gives 27,807 Hardstones and 8612 Softstones
+(64 MHz, fpu7b: 26,987 and 8347), +3.0 % and +3.2 % for a 3.1 % faster clock; RAM
+average 32.4 MB/s (64 MHz with the L2: 31.4), maximum 42.5, minimum 22.8; it names the
+clock 57.7 MHz. PC Player Benchmark (VGA 320x200): 13.7 fps (hicol at 64 MHz: 13.2;
+DX2-80s 13.4, DX4-100s 14.7); the Superscape benchmark from Virtual Reality Playhouse
+49.5 fps (Superscape's 3DBench 1.0 at 64 MHz: 47.9). Wing Commander III (setup: CPU speed
+12, "Very Fast") plays a mission with its conversations fine; its boot disk maker formats a 1.44 MB disk
+in the internal drive (FORMAT /S, no bad sectors) and the PC boots from it. (The stray
+last line of that disk's AUTOEXEC.BAT, two bytes, comes from the installer: the same on
+an image.) No crash so far. The SDRAM clock phase (`qmon.py sweep`, a reset at each step,
+27.06 ps steps, 560 a period of 15.15 ns, from 292.5 degrees): the BIOS boots from -116 to
++108 steps and hangs from -120 and +116 on, a window of about 6.1 ns (40 % of the period)
+with 292.5 degrees 3 steps from its middle, about 3 ns of margin either way. Not checked
+yet: sound pitch, the PIT, CAPS LOCK's 33 MHz.
 
 ## Builds
 

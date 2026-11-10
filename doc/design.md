@@ -8,9 +8,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   ([m2m-provenance.md](m2m-provenance.md)).
 - **Memory:** the R6's 64 MB SDRAM for system RAM; HyperRAM for the SVGA
   framebuffer (VRAM) and the boot image.
-- **Clock:** 64 MHz. A DX2-66 runs at 66.667 MHz, which the CPU's paths miss by
-  0.25 ns with the framework in; 64 MHz meets timing with room for
-  build-to-build variation.
+- **Clock:** 66.0 MHz, twice CAPS LOCK's 33 MHz (64 MHz until 2026-11-10). A
+  DX2-66's 66.667 MHz missed by 0.25 ns before the 2026-11-10 path work; one MMCM
+  makes 66.0 MHz (VCO 660 MHz), which meets timing with 0.56 ns to spare.
 - **Disks:** a hardware replacement for MiSTer's ARM-side IDE/floppy handling,
   after `mgmt_bridge.sv` in
   [PCXT-EGA-MEGA65](https://github.com/silent-command/PCXT-EGA-MEGA65)
@@ -147,12 +147,12 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   matches a centre-aligned bilinear exactly, Sharp's edges sit where Pixels'
   do (`CORE/sim/tb_ascal.vhd` with `G_PAT=1`: "68" text at 720x400 into
   1280x960 and 800x600).
-- Clocks (`CORE/vhdl/clk.vhd`): 64 MHz for the PC and the video, 24.556 MHz
-  for OPL3/SB (MiSTer uses 24.576 MHz; 0.08 % slow, about 1.4 cents), one
-  MMCM at VCO 1280 MHz.
+- Clocks (`CORE/vhdl/clk.vhd`): 66 MHz for the PC and the video, 24.558 MHz
+  for OPL3/SB (MiSTer uses 24.576 MHz; 0.07 % slow, about 1.3 cents), one
+  MMCM at VCO 660 MHz.
 - The SDRAM clock is a third output of that MMCM at 292.5 degrees, through an
   ODDR (see [SDRAM clock](sdram-clock.md)). `sdram.v`'s shortcut below 75 MHz
-  (one cycle for tRCD and tRP, 15.6 ns at 64 MHz, under the chip's 18 ns) is
+  (one cycle for tRCD and tRP, 15.2 ns at 66 MHz, under the chip's 18 ns) is
   patched out in the build copy (`tools/z486_sources.py`): two cycles each.
 - BIOS: at startup the firmware (`CORE/m2m-rom/m2m-rom.asm`, `PREP_START`)
   loads `boot1.rom` (VGA BIOS, to `0xC0000`) and `boot0.rom` (system BIOS, to
@@ -394,7 +394,7 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   `analog_pipeline.vhd` turned the connector's syncs). On the board
   (`z486-R6-vgasdb`) the Dell and an Eizo both took it as 70 Hz text, and
   both still shimmered, flickered and cut the first column. The analog
-  pipeline runs on the PC's video clock, main_clk's 64 MHz, with z486's
+  pipeline runs on the PC's video clock, main_clk (64 MHz then), with z486's
   clock enable: a 28.322 MHz pixel lasts 2 or 3 of its clocks (31.3 or 46.9
   ns, not 35.3), so every pixel edge, and the syncs, land up to 15.6 ns (half
   a pixel) off, differently on each line. A CRT barely shows it; an LCD
@@ -537,7 +537,7 @@ PC's controller; what changes is where a sector comes from and goes to:
   has settled (18 ms after the last step), and recalibrates on request.
 - `fdd_mfm_rx.vhd` turns RDATA into bytes: a digital PLL data separator (AExp's
   design, which replaced a gap classifier there on old media) at the PC's
-  64 MHz, a cell of 2 us at 250 kbit/s or 1 us at 500 kbit/s, +/-10 %; the
+  clock (66 MHz), a cell of 2 us at 250 kbit/s or 1 us at 500 kbit/s, +/-10 %; the
   16-bit pattern 0x4489 (an A1 with a missing clock bit) frames the bytes.
 - `fdd_phys.vhd` parses ID fields (FE: C, H, R, N, CRC) and data fields (FB or
   F8, CRC), the CRC-CCITT over the three A1s, the mark and the field, and keeps

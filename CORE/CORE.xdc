@@ -4,8 +4,8 @@
 ##
 ## Based on the M2M template, Megamiga's and pc10-iii's CORE/CORE.xdc; licensed under GPL v3
 
-## The PC's clock, 64 MHz, also M2M's video clock (CORE/vhdl/clk.vhd), and the audio clock
-## (24.556 MHz) for OPL3 and the Sound Blaster
+## The PC's clock, 66 MHz, also M2M's video clock (CORE/vhdl/clk.vhd), and the audio clock
+## (24.558 MHz) for OPL3 and the Sound Blaster
 create_generated_clock -name main_clk  [get_pins CORE/clk_gen/i_clk_main/CLKOUT1]
 create_generated_clock -name pc_audio_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
 

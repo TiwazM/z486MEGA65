@@ -4,14 +4,14 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 486DX2-class PC built around the [z486](https://github.com/nand2mario/z486) CPU,
 to the MEGA65 R6.
 
-It runs at 64 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
+It runs at 66 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
 The current version is **v0.2** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
 
 **PC**
-- z486 486DX2-class CPU at 64 MHz, with L1 caches and an x87 FPU
+- z486 486DX2-class CPU at 66 MHz, with L1 caches and an x87 FPU
 - 256 KB L2 cache in block RAM, as on a 486 board
 - 64 MB RAM (the R6's SDRAM)
 - Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
@@ -195,7 +195,7 @@ printed on the MEGA65's keycaps:
 | F1 F3 F5 F7 F9 F11 | the same; with Shift F2 F4 F6 F8 F10 F12, as on the keycaps (the PC sees no Shift while the key is down) |
 | cursor keys | arrows; with MEGA, up/down = Page Up/Down, left/right = Home/End |
 | CTRL, ALT, TAB, both shifts | Ctrl, Alt, Tab, Shift |
-| CAPS LOCK | the turbo switch: down (it latches) = the CPU at 33 MHz, up = full speed (64 MHz); z486's throttle, memory and devices keep full speed. The PC's Caps Lock is MEGA+TAB (SHIFT LOCK holds Shift: the MEGA65 wires it to the left Shift) |
+| CAPS LOCK | the turbo switch: down (it latches) = the CPU at 33 MHz, up = full speed (66 MHz); z486's throttle, memory and devices keep full speed. The PC's Caps Lock is MEGA+TAB (SHIFT LOCK holds Shift: the MEGA65 wires it to the left Shift) |
 | NO SCROLL | Scroll Lock |
 | symbol keys and shifted digits | as on their keycaps: `:` (Shift `[`), `;` (Shift `]`), `@`, `*`, `+`, `-`, `=`, Shift+2 `"`, Shift+6 `&`, Shift+7 `'`, Shift+8 `(`, Shift+9 `)`, ... (the PC sees Shift pressed or released as each one needs) |
 | PC symbols without a keycap | `£` `\` (Shift `|`), arrow-up `^` (Shift `~`), arrow-left `` ` ``, Shift+`-` `_`, Shift+`@` `{`, Shift+`*` `}` |
@@ -221,7 +221,7 @@ printed on the MEGA65's keycaps:
 
 ## Known limits
 
-- A 486 at 64 MHz with a microcoded FPU: Pentium-era 3D games are slow.
+- A 486 at 66 MHz with a microcoded FPU: Pentium-era 3D games are slow.
 - Some games don't detect the joystick. TIE Fighter does when the stick is
   held to the upper left while it starts (as on ao486 on MiSTer).
 - The core fixes z486_MiSTer's `boot0.rom` as it loads it, so the mouse can't

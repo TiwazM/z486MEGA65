@@ -3,27 +3,34 @@
 --
 -- Clock generator, one MMCM:
 --
---    main_clk  = 100 MHz * 64 / 5 / 20     = 64.000 MHz   CLKOUT1   the PC
---    audio_clk = 100 MHz * 64 / 5 / 52.125 = 24.556 MHz   CLKOUT0   OPL3 / Sound Blaster; MiSTer's
+--    main_clk  = 100 MHz * 33 / 5 / 10     = 66.000 MHz   CLKOUT1   the PC (twice the 33 MHz of
+--                                                                   CAPS LOCK's speed)
+--    audio_clk = 100 MHz * 33 / 5 / 26.875 = 24.558 MHz   CLKOUT0   OPL3 / Sound Blaster; MiSTer's
 --                                                                   CLK_AUDIO is 24.576 MHz, this
---                                                                   is 0.08 % slow (fractional
+--                                                                   is 0.07 % slow (fractional
 --                                                                   divide only on CLKOUT0)
 --    video_clk = main_clk: system.sv's VGA runs on clk_sys with a pixel clock enable
---    sdram_clk = 100 MHz * 64 / 5 / 20     = 64.000 MHz   CLKOUT2   main_clk at 292.5 degrees plus
+--    sdram_clk = 100 MHz * 33 / 5 / 10     = 66.000 MHz   CLKOUT2   main_clk at 292.5 degrees plus
 --                                                                   sdram_ps_target_i fine steps
 --
--- The SDRAM clock's phase was measured on an R6: sdram.v reads its data three clocks after each
--- READ command, and the PC boots with CLKOUT2 between 180 degrees + 130 and + 570 fine steps
--- (1.81 to 7.95 ns after main_clk's falling edge). 292.5 degrees is the middle, +350 steps
--- (4.88 ns), and leaves 3.07 ns either way. 180 degrees, MiSTer's phase at 85 MHz, is outside.
+-- The SDRAM clock's phase was measured on an R6 at 64 MHz: sdram.v reads its data three clocks
+-- after each READ command, and the PC booted with CLKOUT2 between 180 degrees + 130 and + 570
+-- fine steps (1.81 to 7.95 ns after main_clk's falling edge). 292.5 degrees was the middle
+-- (4.88 ns), leaving 3.07 ns either way. At 66 MHz (2026-11-10, qmon.py's sweep) it boots from
+-- -116 to +108 fine steps of 27.06 ps around 292.5 degrees: a 6.1 ns window with 292.5 degrees
+-- 3 steps from its middle, about 3 ns either way. 180 degrees, MiSTer's phase at 85 MHz, is
+-- outside.
 -- To measure it again, QNICE sets sdram_ps_target_i (signed, in steps of 1/56 of the VCO period,
--- 13.95 ps; 1120 steps are one 64 MHz period) and the MMCM's dynamic phase shift walks CLKOUT2
--- there, one step at a time on sys_clk_i. sdram_ps_pos_o is where it is. The SDRAM needs a
+-- 13.95 ps at 64 MHz; 1120 steps are one main_clk period) and the MMCM's dynamic phase shift walks CLKOUT2
+-- there, one step at a time on sys_clk_i. sdram_ps_pos_o is where it is (27.06 ps steps at the
+-- VCO's 660 MHz: 560 steps are one main_clk period). The SDRAM needs a
 -- reset after a move (mega65.vhd: C_DEV_PC_CTL).
 --
--- VCO 1280 MHz (600..1440 MHz for -2), PFD 20 MHz. 64 MHz, not a DX2-66's 66.667 MHz: with the
--- framework in, the CPU's paths close at about 65.6 MHz (doc/results.md). Implementation aims 0.3 ns
--- above 64 MHz (CORE-impl.xdc), which keeps that margin against build-to-build variation.
+-- VCO 660 MHz (600..1440 MHz for -2; CLKFBOUT_MULT_F goes to 64 only, so not 1320 with /20),
+-- PFD 20 MHz. 66.0 MHz since 2026-11-10 (64 MHz before):
+-- the CPU's paths now close at about 67.1-67.6 MHz (doc/results.md); 66.0 rather than a DX2-66's
+-- 66.667 keeps more of that margin and makes CAPS LOCK's 33 MHz exactly half. Implementation aims
+-- 0.3 ns above it (CORE-impl.xdc) against build-to-build variation.
 --
 -- Based on the MiSTer2MEGA65 template (sy2002 and MJoergen) and pc10-iii's clk.vhd
 -- (Johan Smolinski); licensed under GPL v3
@@ -43,12 +50,12 @@ entity clk is
    port (
       sys_clk_i       : in  std_logic;   -- expects 100 MHz
 
-      main_clk_o      : out std_logic;   -- 64 MHz
+      main_clk_o      : out std_logic;   -- 66 MHz
       main_rst_o      : out std_logic;   -- main's reset, synchronized
       video_clk_o     : out std_logic;   -- the same clock
       video_rst_o     : out std_logic;   -- video reset, synchronized
       audio_clk_o     : out std_logic;   -- 24.556 MHz
-      sdram_clk_o     : out std_logic;   -- 64 MHz, the SDRAM's (z486_mega65.sv forwards it)
+      sdram_clk_o     : out std_logic;   -- 66 MHz, the SDRAM's (z486_mega65.sv forwards it)
 
       sdram_ps_target_i : in  std_logic_vector(15 downto 0);  -- any clock: cdc_stable here
       sdram_ps_pos_o    : out std_logic_vector(15 downto 0)   -- sys_clk_i
@@ -83,18 +90,18 @@ begin
          CLKIN1_PERIOD        => 10.0,       -- INPUT @ 100 MHz
          REF_JITTER1          => 0.010,
          DIVCLK_DIVIDE        => 5,          -- PFD 20 MHz
-         CLKFBOUT_MULT_F      => 64.000,     -- VCO 1280 MHz
+         CLKFBOUT_MULT_F      => 33.000,     -- VCO 660 MHz
          CLKFBOUT_PHASE       => 0.000,
          CLKFBOUT_USE_FINE_PS => FALSE,
-         CLKOUT0_DIVIDE_F     => 52.125,     -- 24.556 MHz (audio)
+         CLKOUT0_DIVIDE_F     => 26.875,     -- 24.558 MHz (audio)
          CLKOUT0_PHASE        => 0.000,
          CLKOUT0_DUTY_CYCLE   => 0.500,
          CLKOUT0_USE_FINE_PS  => FALSE,
-         CLKOUT1_DIVIDE       => 20,         -- 64 MHz (main = video)
+         CLKOUT1_DIVIDE       => 10,         -- 66 MHz (main = video)
          CLKOUT1_PHASE        => 0.000,
          CLKOUT1_DUTY_CYCLE   => 0.500,
          CLKOUT1_USE_FINE_PS  => FALSE,
-         CLKOUT2_DIVIDE       => 20,         -- 64 MHz (SDRAM), 292.5 degrees + dynamic shift
+         CLKOUT2_DIVIDE       => 10,         -- 66 MHz (SDRAM), 292.5 degrees + dynamic shift
          CLKOUT2_PHASE        => 292.500,
          CLKOUT2_DUTY_CYCLE   => 0.500,
          CLKOUT2_USE_FINE_PS  => TRUE
