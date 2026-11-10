@@ -410,7 +410,7 @@ def fdd():
         "on" if w10 & 8 else "off", "yes" if w10 & 4 else "no", "yes" if w10 & 2 else "no",
         "active" if w10 & 1 else "inactive"))
     print("PLL cell %.2f clocks (%.3f us)  index period %.1f ms (%d rpm)" % (
-        w[11] / 16.0, w[11] / 16.0 / 64, w[12] / 10.0, 600000 // w[12] if w[12] else 0))
+        w[11] / 16.0, w[11] / 16.0 / 66, w[12] / 10.0, 600000 // w[12] if w[12] else 0))
     print("last request: C %d R %d" % (w[15] & 0xFF, w[15] >> 8 & 0x7F))
 
 
