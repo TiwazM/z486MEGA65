@@ -33,8 +33,21 @@ before; not on the board yet.
 2026-11-10, trial branch `clk66` (eb1d568, on 059192c): the PC at **66.0 MHz** (VCO 660
 MHz, x33 / 5 / 10; twice CAPS LOCK's 33 MHz) meets timing with **+0.563 ns** (about 68.5
 MHz), +0.263 ns at the 0.3 ns target, hold +0.062 ns, every clock met, 88.6K LUTs (65.9 %),
-80.5 % slices. Not on the board yet: the SDRAM phase (292.5 degrees, fine steps now 27 ps)
-to check with `qmon.py sweep`.
+80.5 % slices. On the board (2026-11-10) it boots FreeDOS, shows the VESA modes right, and
+Dr. Hardware's 16-bit System Performance gives 27,807 Hardstones and 8612 Softstones
+(64 MHz, fpu7b: 26,987 and 8347), +3.0 % and +3.2 % for a 3.1 % faster clock; RAM
+average 32.4 MB/s (64 MHz with the L2: 31.4), maximum 42.5, minimum 22.8; it names the
+clock 57.7 MHz. PC Player Benchmark (VGA 320x200): 13.7 fps (hicol at 64 MHz: 13.2;
+DX2-80s 13.4, DX4-100s 14.7); the Superscape benchmark from Virtual Reality Playhouse
+49.5 fps (Superscape's 3DBench 1.0 at 64 MHz: 47.9). Wing Commander III (setup: CPU speed
+12, "Very Fast") plays a mission with its conversations fine; its boot disk maker formats a 1.44 MB disk
+in the internal drive (FORMAT /S, no bad sectors) and the PC boots from it. (The stray
+last line of that disk's AUTOEXEC.BAT, two bytes, comes from the installer: the same on
+an image.) No crash so far. The SDRAM clock phase (`qmon.py sweep`, a reset at each step,
+27.06 ps steps, 560 a period of 15.15 ns, from 292.5 degrees): the BIOS boots from -116 to
++108 steps and hangs from -120 and +116 on, a window of about 6.1 ns (40 % of the period)
+with 292.5 degrees 3 steps from its middle, about 3 ns of margin either way. Not checked
+yet: sound pitch, the PIT, CAPS LOCK's 33 MHz.
 
 ## Builds
 
