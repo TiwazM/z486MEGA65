@@ -658,6 +658,18 @@ module tb_cdrom #(
         r0 = eng_reads;
         cd_read(1, 20000, 40, 16'hfffe);
         check(FAULT != 0 || eng_reads - r0 == 1, $sformatf("  %0d SD reads", eng_reads - r0));
+        // ISOLINUX 4.05 booting through the Bochs BIOS's El Torito calls (CorePlus on the board,
+        // 2026-11-10: the BIOS's limit FFF0h): its volume descriptor and image one sector at a
+        // time, the rest of the image in one read, then a file in reads of 32 sectors (65536
+        // bytes, more than the limit: pc_cdrom sends a block a sector, as ATAPI allows)
+        cd_read(0, 17, 1, 16'hfff0);
+        cd_read(0, 76, 1, 16'hfff0);
+        cd_read(0, 77, 1, 16'hfff0);
+        cd_read(0, 78, 11, 16'hfff0);
+        cd_read(0, 28672, 32, 16'hfff0);
+        check(blocks == 32, $sformatf("  %0d blocks", blocks));
+        cd_read(0, 28704, 32, 16'hfff0);
+        cd_read(0, 28736, 32, 16'hfff0, 1);
         // past the end: ILLEGAL REQUEST, LBA out of range
         set_cdb(8'h28, 0, 0, 0, 8'h75, 8'h2f, 0, 0, 2, 0, 0, 0);   // 29999, 2 sectors
         packet(16'hfffe);
