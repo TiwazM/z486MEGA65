@@ -20,6 +20,16 @@ at the 0.6 ns target, hold met, 89.7K LUTs (66.6 %), 80.9 % slices (from 82.1 %)
 (`k1q_r`, to the group ROM) and the address unit (`issue_ind_r`). The CPU and x87
 tests and 186 single-step files pass as before; not on the board yet.
 
+The next two (fpu 25c05b8, z486 36cbf92): the sidecar TLB is read at its three preread
+candidates and the entry chosen after the RAM, and the decoder's entry/group ROM addresses
+take their own two-byte early window (no longer on the 64-bit window's select, fanout 82).
+**+0.827 ns** at 64 MHz (about 67.6 MHz), +0.227 ns at the 0.6 ns target, 88.5K LUTs
+(65.8 %), 79.8 % slices. The group ROM path left the 50 worst; the TLB group went from 43
+paths to 6 (the probe's own address, a five-way choice, still waits for issue). The worst
+now: 44 paths from the decoder's window through the jump target's adders to the prefetch's
+speculative line (`skel_window_raw_r` to `spec_line` CE, 23 levels, 10 CARRY4). Tests as
+before; not on the board yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
