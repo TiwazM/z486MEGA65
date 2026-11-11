@@ -64,6 +64,11 @@ incr` from the 66 MHz layout (99.97 % of cells, 99.95 % of nets reused, 28 minut
 main_clk at 66 MHz (+0.318 ns at the target), hold +0.054 ns, every clock met, 88.7K LUTs. Not on
 the board yet.
 
+v0.2.2 test core b (`z486-R6-v022b.cor`, fpu bfc146b: the x87 store hold and the INTR error-code
+fix for OS/2's TRAP 000D, z486 593bc26), `impl strong incr` from the same 66 MHz layout (99.97 % of
+cells, 99.85 % of nets reused, 31 minutes): **+0.482 ns** on main_clk at 66 MHz (+0.182 ns at the
+target), hold +0.054 ns, every clock met, 88.7K LUTs. Not on the board yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
