@@ -80,7 +80,10 @@ after its header, or in its system box on older cores), MS-DOS 6.22: 80486DX 69 
 measure), NPU yes, processor benchmark **23.26**, memory bandwidth 93.14 MB/s, L1 41.90 / L2 34.92
 MB/s, memory throughput 30.32 MB/s, VESA ET4000 20728 KB/s; hard disk (fast test, 520C 128H 63S,
 2.00 GB): random access 0.42 ms, buffered read 9440 KB/s, linear read 8721 KB/s, hard drive speed
-**1684.85**; BIOS shown as "Bochs BIOS for z486. (06/02/26)".
+**1684.85**; BIOS shown as "Bochs BIOS for z486. (06/02/26)". Windows 98 SE (OEM CD, booted from
+the CD-ROM drive) installs onto a fresh 2 GB image to its desktop,
+with no "Disk Write Error" (reported from v0.2.1 by Mike351 after the product key): file copy at
+about 200 sectors/s read and 330 written, no failed or repeated SD transfers.
 
 ## Builds
 
