@@ -77,20 +77,37 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     not on the board yet). In the whole-PC simulation with the fix BENCH.EXE runs
     on in its graphics mode, no unmasked x87 exception, to the run's end (700M
     sim_time; it stopped at 452M before).
-  - SpeedSys 4.78 stops after its system box, polling port 61h at
-    4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
-    (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
-    still (I/O trace `timer` option, `natdbg`). DEBUG's `o 61 21` / `i 61` give
-    21h and 31h, and pit.v alone (Verilator) reads back the gate, flips refresh
-    every 15 us and dips OUT2 for 843 ns: so only SpeedSys's way of reaching the
-    port goes wrong. SPEEDSYS.EXE is packed; its loop needs unpacking to read.
-    On v0.2 (2026-11-08) it stops earlier: its header, then its own 8-pixel
-    text mode with its closing text, every character doubled and every other
-    one missing, and the PC hung (no memory manager: the CPU at 41DF:4ADF in
-    real mode, no port polled; with EMM386: in the memory manager, 0048:05D2).
-    cdsvc (no DAC registers) does the same, so the DAC is not the cause;
-    natdbg reached the system box. To bisect: svga16, then natdbg again, with
-    the same DOS setup.
+  - SpeedSys 4.78 sat after its header on v0.2 and v0.2.1 (2026-11-08/11; the
+    `natdbg` test core had reached its system box). Found in the whole-PC
+    simulation, which stopped there too (2026-11-11): right after the header
+    SpeedSys enters unreal mode from its code segment, 469Dh there (MOV CR0 with
+    PE, LGDT, FS/GS/DS/ES with a 4 GB data selector, PE off, no far jump). z486
+    cleared CS[1:0] when PE was set, to make CPL 0 (z386 did so from its first
+    commit); the Intel486 leaves CS as it is. CS came back as 469Ch, the next
+    real-mode interrupt pushed 469Ch and its IRET resumed 16 bytes off, a RET went
+    to 469C:0000, and the CPU ran into SpeedSys's data: the PSP segment 21CDh it
+    keeps at CS:0, CD 21 = INT 21h with AH = 01h, DOS waiting for a key forever.
+    Only code segments whose selector value has RPL bits set are hit, so it
+    depends on where DOS loads SpeedSys: v0.2's hang at 41DF:4ADF (bits 11),
+    natdbg's code segment 4148h (bits 00). Fix: z486 holds CPL 0 from that CR0
+    write to the next CS load and leaves CS alone (z486 a3dbae9,
+    `unreal_odd_cs`; not on the board yet). In the simulation SpeedSys then
+    determines the system contents and shows its system box.
+  - SpeedSys 4.78 then stops in its system box, on `natdbg` (4148:5D86..5DA1)
+    and in the simulation with the fix (469D:5D76..5DA7, from 1.265G to the
+    run's end at 1.5G): not a port 61h poll, as read from the I/O trace before
+    (the last I/O was SpeedSys starting timers 0 and 2), but SpeedSys's bubble
+    sort of 169 dwords (its timing samples), which never ends: it sorts at
+    C35D:0021, in the VGA BIOS ROM, so no swap sticks. A SpeedSys bug that our
+    BIOS brings out: to show the BIOS's name it scans F000:0000..FFFD with
+    DS = F000 for a year "198x"/"199x" followed by ',', '-' or ' ' (469D:1348),
+    and when there is none it leaves without its POP DS (469D:136F). z486_MiSTer's
+    system BIOS (the Bochs BIOS) has only "(c) 2001-2017  The Bochs Project", so
+    DS stays F000 and SpeedSys takes its buffer segment from F000:0019 (C35Dh)
+    instead of its data segment (5C0Dh). Found with the DS-change watch of the
+    simulation (2026-11-11); the CPU is not involved (the same bytes sort right in
+    the CPU testbench, also with an interrupt every 20..275 cycles). Any BIOS
+    string with such a year avoids it.
   - OS/2 Warp 4.52's boot CD (MCP2, El Torito with a 2.88 MB floppy image)
     trapped on its WARP logo screen (2026-11-10): TRAP 000D, "internal
     processing error at ##0168:fff1eb1c - 000e:cb1c, 60000, 9084". Found in the
