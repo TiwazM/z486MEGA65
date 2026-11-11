@@ -74,7 +74,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     (IE, stack underflow), reported at 3DF5. The direct store path checks its
     destination first (the overlay's CW), so the store now holds for a busy x87
     and then goes direct (z486 aac6a40, `x87_store_page_fault_busy`; for v0.2.2,
-    not on the board yet).
+    not on the board yet). In the whole-PC simulation with the fix BENCH.EXE runs
+    on in its graphics mode, no unmasked x87 exception, to the run's end (700M
+    sim_time; it stopped at 452M before).
   - SpeedSys 4.78 stops after its system box, polling port 61h at
     4148:5D86..5DA1 after setting timer 2 to mode 2 (count 65536) and its gate on
     (61h <- 21h): every read gives 20h, the gate bit lost and the refresh bit
