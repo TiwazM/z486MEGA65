@@ -1,5 +1,6 @@
 ; ****************************************************************************
-; z486 for MEGA65: a sync check for the system BIOS's mouse handler
+; z486 for MEGA65: a sync check for the system BIOS's mouse handler, and a
+; dated ID string
 ;
 ; z486_MiSTer's system BIOS (verilator/boot0.rom, the Bochs BIOS of 2017)
 ; files the mouse's bytes by position in its IRQ12 handler (F000:51B8): a byte
@@ -17,7 +18,12 @@
 ; calls F000:E000 (filler up to the POST entry at E05B), which does what the 8
 ; bytes there did (the position into [bp-2]) and then drops a byte at position
 ; 0 without bit 3, as other BIOSes and mouse drivers do. The packets fall back
-; into step within a few. Any other BIOS file stays as it is.
+; into step within a few. It also writes "(C)1991, Bochs BIOS for z486." at
+; F000:D800 (filler too): SpeedSys 4.78 scans the BIOS for "198x"/"199x"
+; followed by ',', '-' or ' ' to show its name, and when there is none it
+; leaves its scan without its POP DS and later sorts its timing samples in ROM,
+; forever (the Bochs BIOS has only "(c) 2001-2017"). Any other BIOS file stays
+; as it is.
 ; tools/bios_patch.py makes BPT_S1, BPT_S2 and BPT_TAB from the file (--check
 ; compares, --dis shows the patched code); test/bios_run.sh runs this in the
 ; QNICE emulator.
@@ -81,13 +87,29 @@ _BPT_DONE       MOVE    R4, R9
 _BPT_RET        DECRB
                 RET
 
-; (4K window, word in it, new word): F000:5208..5211 (the call, five NOPs)
-; and F000:E000..E015 (the check), from tools/bios_patch.py
+; (4K window, word in it, new word): F000:5208..5211 (the call, five NOPs),
+; F000:D800..D81D (the ID string) and F000:E000..E015 (the check), from
+; tools/bios_patch.py
 BPT_TAB         .DW     0x01FA, 0x0904, 0xE8FD
                 .DW     0x01FA, 0x0905, 0x8DF4
                 .DW     0x01FA, 0x0906, 0x9090
                 .DW     0x01FA, 0x0907, 0x9090
                 .DW     0x01FA, 0x0908, 0x8A90
+                .DW     0x01FE, 0x0C00, 0x4328
+                .DW     0x01FE, 0x0C01, 0x3129
+                .DW     0x01FE, 0x0C02, 0x3939
+                .DW     0x01FE, 0x0C03, 0x2C31
+                .DW     0x01FE, 0x0C04, 0x4220
+                .DW     0x01FE, 0x0C05, 0x636F
+                .DW     0x01FE, 0x0C06, 0x7368
+                .DW     0x01FE, 0x0C07, 0x4220
+                .DW     0x01FE, 0x0C08, 0x4F49
+                .DW     0x01FE, 0x0C09, 0x2053
+                .DW     0x01FE, 0x0C0A, 0x6F66
+                .DW     0x01FE, 0x0C0B, 0x2072
+                .DW     0x01FE, 0x0C0C, 0x347A
+                .DW     0x01FE, 0x0C0D, 0x3638
+                .DW     0x01FE, 0x0C0E, 0x002E
                 .DW     0x01FF, 0x0000, 0x468A
                 .DW     0x01FF, 0x0001, 0x24FC
                 .DW     0x01FF, 0x0002, 0x8807

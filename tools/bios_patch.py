@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""The sync check for z486_MiSTer's system BIOS (CORE/m2m-rom/bios_patch.asm).
+"""The firmware's patches to z486_MiSTer's system BIOS (CORE/m2m-rom/bios_patch.asm).
 
 The Bochs BIOS's IRQ12 handler (F000:51B8) files the mouse's bytes by position and never
 checks a packet's first byte, so one lost byte leaves every packet after it one position
 off. The firmware patches the BIOS's copy in HyperRAM: at F000:5209 the handler calls a
 check in the filler before the POST entry (F000:E000), which does what the 8 bytes there
 did and then drops a byte at position 0 without bit 3.
+
+It also puts an ID string with a year of the 1990s into that filler (F000:D800). SpeedSys
+4.78 scans the BIOS for "198x"/"199x" followed by ',', '-' or ' ' to show the BIOS's name,
+and when there is none it leaves its scan without its POP DS: it then sorts its timing
+samples in ROM and never ends. The Bochs BIOS has only "(c) 2001-2017".
 
   tools/bios_patch.py [boot0.rom]            the sums and BPT_TAB for bios_patch.asm
   tools/bios_patch.py [boot0.rom] --check    compare with bios_patch.asm
@@ -29,6 +34,8 @@ PC_BIOS_WIN = 0x01F8
 CALL_AT = 0x5209                    # in int74_function: the position into [bp-2]
 CALL_OLD = bytes.fromhex("8A46FC 2407 8846FE")      # mov al,[bp-4]; and al,7; mov [bp-2],al
 CHECK_AT = 0xE000                   # filler (zeros) up to the POST entry at E05B
+DATE_AT = 0xD800                    # filler too (zeros from D722)
+DATE = b"(C)1991, Bochs BIOS for z486.\x00"
 POST = 0xE05B
 CHECK = bytes.fromhex(
     "8A46FC"        # mov  al,[bp-4]        the position (EBDA 26h, read before)
@@ -51,11 +58,14 @@ def patched(rom):
         raise SystemExit("F000:%04X is not the expected code" % CALL_AT)
     if any(rom[CHECK_AT:POST]):
         raise SystemExit("F000:%04X..%04X is not filler" % (CHECK_AT, POST))
+    if any(rom[DATE_AT:DATE_AT + len(DATE)]) or re.search(rb"19[89]", rom):
+        raise SystemExit("F000:%04X is not filler, or the BIOS has a 198x/199x year" % DATE_AT)
     call = b"\xE8" + struct.pack("<H", (CHECK_AT - (CALL_AT + 3)) & 0xFFFF)
     call += b"\x90" * (len(CALL_OLD) - len(call))
     new = bytearray(rom)
     new[CALL_AT:CALL_AT + len(call)] = call
     new[CHECK_AT:CHECK_AT + len(CHECK)] = CHECK
+    new[DATE_AT:DATE_AT + len(DATE)] = DATE
     return bytes(new)
 
 
