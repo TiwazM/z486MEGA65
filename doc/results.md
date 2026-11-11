@@ -73,8 +73,9 @@ v0.2.2 test core c (`z486-R6-v022c.cor`, fpu 85418f3: v022b, plus z486 a3dbae9, 
 the CS selector, for SpeedSys after its header, and the BIOS's "(C)1991" ID string from the
 firmware, for SpeedSys's system box), `impl strong incr` from the same 66 MHz layout (96.87 % of
 cells, 95.82 % of nets reused, 48 minutes, next to another build): **+0.304 ns** on main_clk at
-66 MHz (+0.004 ns at the target), hold +0.008 ns, every clock met, 88.7K LUTs. Not on the board
-yet.
+66 MHz (+0.004 ns at the target), hold +0.008 ns, every clock met, 88.7K LUTs. On the board
+(2026-11-11): Chris's 3D Benchmark runs to its end, **Chris's Bench Score 43.3, 25.9 frames per
+second** (before: "Floating Point exception at eip=00003df5").
 
 ## Builds
 

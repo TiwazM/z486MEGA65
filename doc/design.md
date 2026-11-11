@@ -73,10 +73,11 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     maps a page on its first touch), and the restarted FSTP found the stack empty
     (IE, stack underflow), reported at 3DF5. The direct store path checks its
     destination first (the overlay's CW), so the store now holds for a busy x87
-    and then goes direct (z486 aac6a40, `x87_store_page_fault_busy`; for v0.2.2,
-    not on the board yet). In the whole-PC simulation with the fix BENCH.EXE runs
-    on in its graphics mode, no unmasked x87 exception, to the run's end (700M
-    sim_time; it stopped at 452M before).
+    and then goes direct (z486 aac6a40, `x87_store_page_fault_busy`; for v0.2.2).
+    In the whole-PC simulation with the fix BENCH.EXE runs on in its graphics
+    mode, no unmasked x87 exception, to the run's end (700M sim_time; it stopped
+    at 452M before). On the board (v022c, 2026-11-11) it runs to its end: Chris's
+    Bench Score 43.3, 25.9 frames per second.
   - SpeedSys 4.78 sat after its header on v0.2 and v0.2.1 (2026-11-08/11; the
     `natdbg` test core had reached its system box). Found in the whole-PC
     simulation, which stopped there too (2026-11-11): right after the header
