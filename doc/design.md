@@ -108,7 +108,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     instead of its data segment (5C0Dh). Found with the DS-change watch of the
     simulation (2026-11-11); the CPU is not involved (the same bytes sort right in
     the CPU testbench, also with an interrupt every 20..275 cycles). Any BIOS
-    string with such a year avoids it.
+    string with such a year avoids it: the firmware now writes "(C)1991, Bochs
+    BIOS for z486." into the BIOS's filler (85418f3). On the board (v022c,
+    2026-11-11) SpeedSys runs through, its BIOS line "Bochs BIOS for z486.".
   - OS/2 Warp 4.52's boot CD (MCP2, El Torito with a 2.88 MB floppy image)
     trapped on its WARP logo screen (2026-11-10): TRAP 000D, "internal
     processing error at ##0168:fff1eb1c - 000e:cb1c, 60000, 9084". Found in the

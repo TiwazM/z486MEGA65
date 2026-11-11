@@ -75,7 +75,12 @@ firmware, for SpeedSys's system box), `impl strong incr` from the same 66 MHz la
 cells, 95.82 % of nets reused, 48 minutes, next to another build): **+0.304 ns** on main_clk at
 66 MHz (+0.004 ns at the target), hold +0.008 ns, every clock met, 88.7K LUTs. On the board
 (2026-11-11): Chris's 3D Benchmark runs to its end, **Chris's Bench Score 43.3, 25.9 frames per
-second** (before: "Floating Point exception at eip=00003df5").
+second** (before: "Floating Point exception at eip=00003df5"). SpeedSys 4.78 runs through (before: it sat
+after its header, or in its system box on older cores), MS-DOS 6.22: 80486DX 69 MHz (its own
+measure), NPU yes, processor benchmark **23.26**, memory bandwidth 93.14 MB/s, L1 41.90 / L2 34.92
+MB/s, memory throughput 30.32 MB/s, VESA ET4000 20728 KB/s; hard disk (fast test, 520C 128H 63S,
+2.00 GB): random access 0.42 ms, buffered read 9440 KB/s, linear read 8721 KB/s, hard drive speed
+**1684.85**; BIOS shown as "Bochs BIOS for z486. (06/02/26)".
 
 ## Builds
 
