@@ -91,6 +91,22 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     cdsvc (no DAC registers) does the same, so the DAC is not the cause;
     natdbg reached the system box. To bisect: svga16, then natdbg again, with
     the same DOS setup.
+  - OS/2 Warp 4.52's boot CD (MCP2, El Torito with a 2.88 MB floppy image)
+    trapped on its WARP logo screen (2026-11-10): TRAP 000D, "internal
+    processing error at ##0168:fff1eb1c - 000e:cb1c, 60000, 9084". Found in the
+    whole-PC simulation (2026-11-11), which ends on the same screen: a page fault
+    goes through OS/2's trap gate, so IF stays set, and the RTC's IRQ 8 (OS/2's
+    512 Hz clock) came at the #PF handler's first instruction. z486 cleared the
+    sequencer's per-event flags only when an instruction issued, so the IRQ's
+    delivery still had the #PF's error-code flag and pushed an error code too
+    (16 bytes for 12); the IRQ stub's `add esp,8 / iretd` then took the #PF
+    handler's EIP as CS, #GP(D7FC). Events taken at a boundary now clear the
+    flags too (z486 08262e5, `irq_after_fault_errcode`), and the simulation
+    boots on past that point. Not on the board yet. The simulation only got
+    there with its own copy of rtc.v: Verilator saw the blocking `ce_8192hz`
+    on different clocks in `periodic_start` and `periodic_major`, so the RTC's
+    periodic interrupt never came (the FPGA builds a flip-flop there, so the
+    core is not affected) and IBM1FLPY.ADD waited for its timeout forever.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
