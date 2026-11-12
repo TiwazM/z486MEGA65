@@ -91,6 +91,12 @@ v0.2.2 test core d (`z486-R6-v022d.cor`, fpu ccb919d: v022c, plus z486 d84ee22, 
 at 66 MHz (+0.024 ns at the target), hold +0.042 ns, every clock met, 88.8K LUTs. Not on the
 board yet.
 
+v0.2.2 test core e (`z486-R6-v022e.cor`, fpu 506edfa: v022d, plus z486 6df2334, a queue flush
+keeps a microcode read miss, for Tiny Core CorePlus's NULL-pointer oops while unpacking the
+initramfs), `impl strong incr` from the same 66 MHz layout (96.38 % of cells, 96.87 % of nets
+reused, 38 minutes with synthesis): **+0.356 ns** on main_clk at 66 MHz (+0.056 ns at the
+target), hold +0.047 ns, every clock met, 88.7K LUTs. Not on the board yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
