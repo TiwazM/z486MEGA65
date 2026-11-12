@@ -95,7 +95,17 @@ v0.2.2 test core e (`z486-R6-v022e.cor`, fpu 506edfa: v022d, plus z486 6df2334, 
 keeps a microcode read miss, for Tiny Core CorePlus's NULL-pointer oops while unpacking the
 initramfs), `impl strong incr` from the same 66 MHz layout (96.38 % of cells, 96.87 % of nets
 reused, 38 minutes with synthesis): **+0.356 ns** on main_clk at 66 MHz (+0.056 ns at the
-target), hold +0.047 ns, every clock met, 88.7K LUTs. Not on the board yet.
+target), hold +0.047 ns, every clock met, 88.7K LUTs. On the board (2026-11-12): OS/2 Warp 4.52's
+boot CD reaches Setup ("Insert the OS/2 Warp CD-ROM"), and with the install CD in, TRAP 000E in
+an FNSAVE (fixed in v022f). CorePlus no longer oopses; it stops at "No working init found" (the
+initramfs's tmpfs is capped at half of the 64 MB), and with `rootfstype=ramfs` its init runs up to
+"Setting Language to C Done.", then the kernel waits forever on the FWAIT after an FNSAVE.
+
+v0.2.2 test core f (`z486-R6-v022f.cor`, fpu 6594826: v022e, plus z486 7bbeb1c, IN+D wraps by
+the stack's size only on SS, for OS/2's FNSAVE #PF on its 16-bit ring-0 stack), `impl strong incr`
+from the same 66 MHz layout (96.88 % of cells, 95.96 % of nets reused, 40 minutes with synthesis):
+**+0.335 ns** on main_clk at 66 MHz (+0.035 ns at the target), hold +0.054 ns, every clock met,
+88.7K LUTs. Not on the board yet.
 
 ## Builds
 
