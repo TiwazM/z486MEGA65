@@ -127,6 +127,19 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     on different clocks in `periodic_start` and `periodic_major`, so the RTC's
     periodic interrupt never came (the FPGA builds a flip-flop there, so the
     core is not affected) and IBM1FLPY.ADD waited for its timeout forever.
+    On v022c (2026-11-11) it got past the logo, then stopped a program with
+    "c0000005 DOSCALL1.DLL 0003:0000419a" (P2 FFFFFFFF), and the simulation did
+    the same (2026-11-12, after 4.29G sim_time). Not a #GP but a #TS: OS/2 keeps
+    an invalid ring-2 stack in its TSS (SS2 = 0400h, RPL 0, a DPL-0 data segment
+    of limit 0), so every 16-bit call gate from ring 3 into its ring-2 IOPL code
+    (here DOSFSRAMSEMREQUEST, CALL at E01F:419A) raises #TS(0400h), and the #TS
+    handler switches stacks itself. z486 pushed 0401h: the gate CALL's microcode
+    (5B9) sets the flag that marks a CALL as nesting for a task switch, and the
+    fault path's EXT test (878) read the same flag, so the CALL's own fault
+    looked external and OS/2 refused it. EXT now has its own latch, set only in
+    event delivery (z486 d84ee22, `call_gate16_ring2_ts`); a simulation replay
+    with 0400h pushed ran on to "Loading, please wait..." with no error. Not on
+    the board yet.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
