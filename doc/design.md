@@ -138,8 +138,18 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     fault path's EXT test (878) read the same flag, so the CALL's own fault
     looked external and OS/2 refused it. EXT now has its own latch, set only in
     event delivery (z486 d84ee22, `call_gate16_ring2_ts`); a simulation replay
-    with 0400h pushed ran on to "Loading, please wait..." with no error. Not on
-    the board yet.
+    with 0400h pushed ran on to "Loading, please wait..." with no error. On
+    v022e (2026-11-12) Setup comes up and asks for the install CD; with it in,
+    the kernel stopped: TRAP 000E, ERRCD 0002, CR2 0000A02C at 0168:FFF1A4AC,
+    an FNSAVE [EBX] (EBX FEF1A010) saving the FPU owner's state, on its 16-bit
+    ring-0 stack (SS 0030, B = 0). The microcode steps through such multi-word
+    images with IN+D, and in protected mode IN+D wrapped at 64K whenever SS was
+    16-bit, whatever the segment: the image's first 24 bytes went to EBX, the
+    registers (from offset 1Ch) to (EBX & 0FFFFh) + 1Ch. IN+D now wraps with
+    the stack's size only on SS (and during a stack switch), with the
+    instruction's address size elsewhere (z486 test `x87_fsave_ss16`, FNSAVE and
+    FRSTOR above 64K on a 16-bit stack, plus SGDT/SIDT; `x87_fsave_ss32` the
+    same on a 32-bit stack). Not on the board yet.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the
@@ -159,7 +169,14 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     (ESI's in the simulation; the board's 0 fits the same path). A queue flush now leaves a
     microcode read in flight; faults and interrupt entry still end it
     (z486 test `ucrd_miss_retire`: the old core fails A1 + CALL in its first
-    round). Not on the board yet.
+    round). On v022e (2026-11-12) the oops is gone. The kernel then panics
+    with "No working init found": with `loglevel=7`, "rootfs image is not
+    initramfs (write error)" and "/initrd.image: incomplete write (-28 !=
+    14122569)". That is RAM, not the CPU: the initramfs is unpacked into a
+    tmpfs capped at half of RAM, core.gz holds 20.6 MB, and with 64 MB, a
+    14 MB kernel and the 13.8 MB initrd still in memory the cap is reached
+    before /bin/sh (busybox, near the archive's end). `rootfstype=ramfs` on
+    the boot line has no cap (to try).
   - Native mode measures the PC's picture a line short (640x479, 720x399 at
     the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
     screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
