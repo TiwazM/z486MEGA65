@@ -1,6 +1,6 @@
 ; ****************************************************************************
-; z486 for MEGA65: a sync check for the system BIOS's mouse handler, and a
-; dated ID string
+; z486 for MEGA65: a sync check for the system BIOS's mouse handler, a dated
+; ID string, and a RAM clear at every normal POST
 ;
 ; z486_MiSTer's system BIOS (verilator/boot0.rom, the Bochs BIOS of 2017)
 ; files the mouse's bytes by position in its IRQ12 handler (F000:51B8): a byte
@@ -22,8 +22,20 @@
 ; F000:D800 (filler too): SpeedSys 4.78 scans the BIOS for "198x"/"199x"
 ; followed by ',', '-' or ' ' to show its name, and when there is none it
 ; leaves its scan without its POP DS and later sorts its timing samples in ROM,
-; forever (the Bochs BIOS has only "(c) 2001-2017"). Any other BIOS file stays
-; as it is.
+; forever (the Bochs BIOS has only "(c) 2001-2017"). And at every normal POST
+; (shutdown status 0, 0Dh and up; the 05h/0Ah..0Ch returns jump away before it)
+; it clears conventional memory, a z486 compatibility choice: the Bochs BIOS
+; has no memory test, so every reset kept RAM as it was. OS/2's OS2BOOT reads
+; with INT 13h AH=42h when it finds 'I13X' at 3000:0000, which an OS/2 that ran
+; before leaves there, and the Bochs BIOS has no AH=42h on the boot CD's El
+; Torito floppy: SYS02025, printed from DS=3000 as garbage. Warm boots are
+; cleared too (real BIOSes often skip their test there): OS/2 Setup's own
+; restarts must find it gone. At F000:E0BD, where the POST zeroes the BIOS data
+; area, it calls F000:E020 (filler), which does that, then zeroes
+; 0000:0500..FBFF (below the POST's stack at 0000:FFFE) and 1000:0000..9000:FFFF
+; (the EBDA is built later); it leaves DS, SS, BX, DX and IF as they were, and
+; ES = AX = 0, CX = 0, DI = 500h, DF = 0 as the code after it expects. Any
+; other BIOS file stays as it is.
 ; tools/bios_patch.py makes BPT_S1, BPT_S2 and BPT_TAB from the file (--check
 ; compares, --dis shows the patched code); test/bios_run.sh runs this in the
 ; QNICE emulator.
@@ -88,7 +100,8 @@ _BPT_RET        DECRB
                 RET
 
 ; (4K window, word in it, new word): F000:5208..5211 (the call, five NOPs),
-; F000:D800..D81D (the ID string) and F000:E000..E015 (the check), from
+; F000:D800..D81D (the ID string), F000:E000..E015 (the check), F000:E020..E049
+; (the RAM clear) and F000:E0BC..E0C5 (its call, six NOPs), from
 ; tools/bios_patch.py
 BPT_TAB         .DW     0x01FA, 0x0904, 0xE8FD
                 .DW     0x01FA, 0x0905, 0x8DF4
@@ -121,4 +134,30 @@ BPT_TAB         .DW     0x01FA, 0x0904, 0xE8FD
                 .DW     0x01FF, 0x0008, 0xEC89
                 .DW     0x01FF, 0x0009, 0xC35D
                 .DW     0x01FF, 0x000A, 0x00C3
+                .DW     0x01FF, 0x0010, 0x80B9
+                .DW     0x01FF, 0x0011, 0xBF00
+                .DW     0x01FF, 0x0012, 0x0400
+                .DW     0x01FF, 0x0013, 0xF3FC
+                .DW     0x01FF, 0x0014, 0xB9AB
+                .DW     0x01FF, 0x0015, 0x7B80
+                .DW     0x01FF, 0x0016, 0xABF3
+                .DW     0x01FF, 0x0017, 0xBA52
+                .DW     0x01FF, 0x0018, 0x1000
+                .DW     0x01FF, 0x0019, 0xC28E
+                .DW     0x01FF, 0x001A, 0xFF31
+                .DW     0x01FF, 0x001B, 0x00B9
+                .DW     0x01FF, 0x001C, 0xF380
+                .DW     0x01FF, 0x001D, 0x80AB
+                .DW     0x01FF, 0x001E, 0x10C6
+                .DW     0x01FF, 0x001F, 0xFE80
+                .DW     0x01FF, 0x0020, 0x72A0
+                .DW     0x01FF, 0x0021, 0x5AEF
+                .DW     0x01FF, 0x0022, 0xC08E
+                .DW     0x01FF, 0x0023, 0x00BF
+                .DW     0x01FF, 0x0024, 0xC305
+                .DW     0x01FF, 0x005E, 0xE8C0
+                .DW     0x01FF, 0x005F, 0xFF60
+                .DW     0x01FF, 0x0060, 0x9090
+                .DW     0x01FF, 0x0061, 0x9090
+                .DW     0x01FF, 0x0062, 0x9090
                 .DW     0

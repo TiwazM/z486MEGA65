@@ -12,6 +12,16 @@ It also puts an ID string with a year of the 1990s into that filler (F000:D800).
 and when there is none it leaves its scan without its POP DS: it then sorts its timing
 samples in ROM and never ends. The Bochs BIOS has only "(c) 2001-2017".
 
+And it clears conventional memory at every normal POST, warm boots included, as a z486
+compatibility choice (real BIOSes differ; many skip their memory test on a warm boot). The
+Bochs BIOS has no memory test, so every reset kept RAM as it was. OS/2's OS2BOOT (the
+boot floppy's first loader, at 0800:0000) reads its disk with INT 13h AH=42h when it finds
+'I13X' at 3000:0000, and an OS/2 that ran before leaves that there: on the El Torito floppy
+of OS/2's boot CD, which has no AH=42h, it then stops with SYS02025 (printed from DS=3000,
+so as garbage). At F000:E0BD, where the POST zeroes the BIOS data area (mov cx,80h; mov
+di,400h; cld; rep stosw), it calls F000:E020 (filler), which does that and then zeroes
+0000:0500..FBFF (the POST's stack is at 0000:FFFE) and 1000:0000..9FFF:FFFF.
+
   tools/bios_patch.py [boot0.rom]            the sums and BPT_TAB for bios_patch.asm
   tools/bios_patch.py [boot0.rom] --check    compare with bios_patch.asm
   tools/bios_patch.py [boot0.rom] --dis      disassemble the patched handler (capstone)
@@ -37,6 +47,30 @@ CHECK_AT = 0xE000                   # filler (zeros) up to the POST entry at E05
 DATE_AT = 0xD800                    # filler too (zeros from D722)
 DATE = b"(C)1991, Bochs BIOS for z486.\x00"
 POST = 0xE05B
+CLEAR_CALL_AT = 0xE0BD              # normal_post: zero the BIOS data area
+CLEAR_OLD = bytes.fromhex("B98000 BF0004 FC F3AB")   # mov cx,80h; mov di,400h; cld; rep stosw
+CLEAR_AT = 0xE020                   # after the check, in the same filler
+CLEAR = bytes.fromhex(
+    "B98000"        # mov  cx,80h           the BIOS data area, as before
+    "BF0004"        # mov  di,400h
+    "FC"            # cld
+    "F3AB"          # rep  stosw            (ES = AX = 0)
+    "B9807B"        # mov  cx,7B80h         0000:0500..FBFF, below the POST's stack
+    "F3AB"          # rep  stosw
+    "52"            # push dx
+    "BA0010"        # mov  dx,1000h
+    "8EC2"          # seg: mov es,dx        1000:0000..9000:FFFF
+    "31FF"          # xor  di,di
+    "B90080"        # mov  cx,8000h
+    "F3AB"          # rep  stosw
+    "80C610"        # add  dh,10h
+    "80FEA0"        # cmp  dh,0A0h
+    "72EF"          # jb   seg
+    "5A"            # pop  dx
+    "8EC0"          # mov  es,ax            as the code after it had it:
+    "BF0005"        # mov  di,500h          ES = 0, DI = 500h, CX = 0
+    "C3"            # ret
+)
 CHECK = bytes.fromhex(
     "8A46FC"        # mov  al,[bp-4]        the position (EBDA 26h, read before)
     "2407"          # and  al,7
@@ -58,6 +92,10 @@ def patched(rom):
         raise SystemExit("F000:%04X is not the expected code" % CALL_AT)
     if any(rom[CHECK_AT:POST]):
         raise SystemExit("F000:%04X..%04X is not filler" % (CHECK_AT, POST))
+    if rom[CLEAR_CALL_AT:CLEAR_CALL_AT + len(CLEAR_OLD)] != CLEAR_OLD:
+        raise SystemExit("F000:%04X is not the expected code" % CLEAR_CALL_AT)
+    if not (CHECK_AT + len(CHECK) <= CLEAR_AT and CLEAR_AT + len(CLEAR) <= POST):
+        raise SystemExit("the clear does not fit the filler")
     if any(rom[DATE_AT:DATE_AT + len(DATE)]) or re.search(rb"19[89]", rom):
         raise SystemExit("F000:%04X is not filler, or the BIOS has a 198x/199x year" % DATE_AT)
     call = b"\xE8" + struct.pack("<H", (CHECK_AT - (CALL_AT + 3)) & 0xFFFF)
@@ -66,6 +104,10 @@ def patched(rom):
     new[CALL_AT:CALL_AT + len(call)] = call
     new[CHECK_AT:CHECK_AT + len(CHECK)] = CHECK
     new[DATE_AT:DATE_AT + len(DATE)] = DATE
+    clr = b"\xE8" + struct.pack("<H", (CLEAR_AT - (CLEAR_CALL_AT + 3)) & 0xFFFF)
+    clr += b"\x90" * (len(CLEAR_OLD) - len(clr))
+    new[CLEAR_CALL_AT:CLEAR_CALL_AT + len(clr)] = clr
+    new[CLEAR_AT:CLEAR_AT + len(CLEAR)] = CLEAR
     return bytes(new)
 
 
@@ -115,7 +157,8 @@ def main():
     if "--dis" in args:
         import capstone
         md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
-        for a, b in ((0x51B8, 0x5291), (CHECK_AT, CHECK_AT + len(CHECK))):
+        for a, b in ((0x51B8, 0x5291), (CHECK_AT, CHECK_AT + len(CHECK)),
+                     (0xE0A3, 0xE0D2), (CLEAR_AT, CLEAR_AT + len(CLEAR))):
             for i in md.disasm(new[a:b], a):
                 print("F000:%04X  %-6s %s" % (i.address, i.mnemonic, i.op_str))
             print()
