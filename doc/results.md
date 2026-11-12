@@ -85,6 +85,12 @@ the CD-ROM drive) installs onto a fresh 2 GB image to its desktop,
 with no "Disk Write Error" (reported from v0.2.1 by Mike351 after the product key): file copy at
 about 200 sectors/s read and 330 written, no failed or repeated SD transfers.
 
+v0.2.2 test core d (`z486-R6-v022d.cor`, fpu ccb919d: v022c, plus z486 d84ee22, a gate CALL's own
+#TS has EXT clear, for OS/2's DOSCALL1 c0000005), `impl strong incr` from the same 66 MHz layout
+(97.21 % of cells, 97.52 % of nets reused, 40 minutes with synthesis): **+0.324 ns** on main_clk
+at 66 MHz (+0.024 ns at the target), hold +0.042 ns, every clock met, 88.8K LUTs. Not on the
+board yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
