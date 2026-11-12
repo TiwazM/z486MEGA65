@@ -105,7 +105,12 @@ v0.2.2 test core f (`z486-R6-v022f.cor`, fpu 6594826: v022e, plus z486 7bbeb1c, 
 the stack's size only on SS, for OS/2's FNSAVE #PF on its 16-bit ring-0 stack), `impl strong incr`
 from the same 66 MHz layout (96.88 % of cells, 95.96 % of nets reused, 40 minutes with synthesis):
 **+0.335 ns** on main_clk at 66 MHz (+0.035 ns at the target), hold +0.054 ns, every clock met,
-88.7K LUTs. Not on the board yet.
+88.7K LUTs. On the board (2026-11-12): OS/2's install CD swap works, Setup reaches LVM.
+
+v0.2.2 test core g (`z486-R6-v022g.cor`, fpu 60a9229: v022f, plus the BIOS patch clearing
+conventional RAM at every normal POST, for OS/2's boot CD stopping with SYS02025 after a restart:
+'I13X' left at 3000:0000), `build_r6.sh patch` of v022f's routed layout (the firmware's block RAMs
+only, 2 minutes): timing as v022f. Not on the board yet.
 
 ## Builds
 
