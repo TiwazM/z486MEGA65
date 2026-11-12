@@ -146,6 +146,20 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     timer. CACHECHK's clock (26.1 MHz) is a BSR loop: z486 runs BSR/BSF with
     the 386's bit-by-bit microcode. SI 8.0's CPU index is 121.7 (its 486DX-33
     71.2, Pentium-66 211.4), the overall index 82.0 with that disk figure.
+  - Tiny Core's CorePlus CD (Linux 6.18) reaches its kernel on v022c, which
+    then oopses while unpacking the initramfs ("BUG: kernel NULL pointer
+    dereference", in generic_perform_write) and idles. The simulation does
+    the same at about 7.0G sim_time. The bad pointer is `current`, from
+    `mov eax, fs:[current_task]` (64 A1) right after a RET, followed by a CALL.
+    Right after a RET the A1 takes the microcode read path; its line had left
+    the L1, so the read missed while the instruction retired (its translation
+    was known good). The CALL's early redirect then raised a queue flush, and
+    data_access dropped the outstanding read on any queue flush, so the MOV's
+    deferred register write took OPR_R as it was: the previous read's value
+    (ESI's in the simulation; the board's 0 fits the same path). A queue flush now leaves a
+    microcode read in flight; faults and interrupt entry still end it
+    (z486 test `ucrd_miss_retire`: the old core fails A1 + CALL in its first
+    round). Not on the board yet.
   - Native mode measures the PC's picture a line short (640x479, 720x399 at
     the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
     screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
