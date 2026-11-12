@@ -149,7 +149,17 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     the stack's size only on SS (and during a stack switch), with the
     instruction's address size elsewhere (z486 test `x87_fsave_ss16`, FNSAVE and
     FRSTOR above 64K on a 16-bit stack, plus SGDT/SIDT; `x87_fsave_ss32` the
-    same on a 32-bit stack). Not on the board yet.
+    same on a 32-bit stack). On v022f (2026-11-12) the swap works and Setup
+    reaches LVM. After that the boot CD stopped at every reset, even with
+    another hard disk image: a garbage line, then a halt at 0800:0376 in
+    OS2BOOT (the boot floppy's loader). OS2BOOT reads with INT 13h AH=42h when
+    it finds 'I13X' at 3000:0000; the OS/2 that ran before leaves that there,
+    the Bochs BIOS has no AH=42h on the El Torito floppy, and its SYS02025 is
+    printed from DS=3000. No reset cleared RAM (the Bochs BIOS has no memory
+    test; loading a core over JTAG keeps the SDRAM too). The firmware's BIOS
+    patch now clears conventional memory at every normal POST (fpu 60a9229;
+    the shutdown returns skip it). v022g (2026-11-12): a reset with OS/2 Setup
+    running boots the CD back into Setup.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the

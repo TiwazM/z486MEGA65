@@ -110,7 +110,8 @@ from the same 66 MHz layout (96.88 % of cells, 95.96 % of nets reused, 40 minute
 v0.2.2 test core g (`z486-R6-v022g.cor`, fpu 60a9229: v022f, plus the BIOS patch clearing
 conventional RAM at every normal POST, for OS/2's boot CD stopping with SYS02025 after a restart:
 'I13X' left at 3000:0000), `build_r6.sh patch` of v022f's routed layout (the firmware's block RAMs
-only, 2 minutes): timing as v022f. Not on the board yet.
+only, 2 minutes): timing as v022f. On the board (2026-11-12): with OS/2 Setup running, "Reset
+the PC" boots the OS/2 CD again, into Setup (v022f: the garbage line and a halt every time).
 
 ## Builds
 
