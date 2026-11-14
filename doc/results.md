@@ -194,7 +194,12 @@ a wrong byte, REP INSW 3,270 KB/s, IN loop 3,020, REP INSD 3,856, IN check 3,811
 1,918, 3,655, 2,226). QBASIC.EXE copied 5 times on C: and compared with FC: no differences. After a
 JTAG reload with the PC idle, both cards start native 4-bit at 50 MHz again. A menu setting changed
 (the joystick's fire 2 pin), the menu closed, the core reloaded: the setting is back from
-`/z486/z486cfg` (the firmware writes it through the new SD host). Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+`/z486/z486cfg` (the firmware writes it through the new SD host). DSL 4.4.10's hard disk install
+(`dsl-hdinstall`, ext2 on hda1, the CD read while the hard disk writes: v022l's failure) runs
+through twice: 27,872 sectors read and 14,814 written after the first, none failed or retried, the
+slowest read 46 ms. The second installs GRUB 0.91 (636K lower / 64512K upper), and DSL boots from
+the hard disk. Its framebuffer entries (`vga=791` etc.) stop with "undefined mode number": vesafb
+needs a linear framebuffer, which z486's ET4000 lacks. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
