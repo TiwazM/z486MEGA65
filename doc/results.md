@@ -199,7 +199,8 @@ JTAG reload with the PC idle, both cards start native 4-bit at 50 MHz again. A m
 through twice: 27,872 sectors read and 14,814 written after the first, none failed or retried, the
 slowest read 46 ms. The second installs GRUB 0.91 (636K lower / 64512K upper), and DSL boots from
 the hard disk. Its framebuffer entries (`vga=791` etc.) stop with "undefined mode number": vesafb
-needs a linear framebuffer, which z486's ET4000 lacks. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+needs a linear framebuffer, which z486's ET4000 lacks. Its X (Xvesa, the VESA BIOS's banked modes)
+switches between its modes, 800x600 at 24 bits too. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
