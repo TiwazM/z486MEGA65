@@ -4,8 +4,8 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 486DX2-class PC built around the [z486](https://github.com/nand2mario/z486) CPU,
 to the MEGA65 R6.
 
-It runs at 66 MHz, boots DOS and Windows 3.11, and plays games from the CD era.
-The current version is **v0.2** (see
+It runs at 66 MHz, boots DOS, Windows 3.11 to 98, OS/2 Warp 4 and Linux, and
+plays games from the CD era. The current version is **v0.2.2** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -95,11 +95,16 @@ The current version is **v0.2** (see
 
 On an R6: MS-DOS, FreeDOS, Windows 3.11 (SVGA up to 1024x768 in 256 colours
 and 800x600 in 16, Media Player CD audio), Windows 95 (High Color, its own
-CD-ROM driver: AutoRun, CD Player, AVIs from the CD), DOOM,
-SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The 7th
-Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The Secret
-of Monkey Island (CD, with its CD music), and Quake (slowly: 7.8 fps in
-`timedemo demo1`; 486Quake, a build tuned for 486s, 8.5 fps).
+CD-ROM driver: AutoRun, CD Player, AVIs from the CD), Windows 98 SE (installed
+from its CD), OS/2 Warp 4 (installed from its CD, its desktop at 640x480),
+Linux (TinyCore with CorePlus, Damn Small Linux installed onto the hard disk),
+DOOM, SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The
+7th Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The
+Secret of Monkey Island (CD, with its CD music), and Quake (slowly: 8.0 fps in
+`timedemo demo1` and `demo2`, its CD music playing from a BIN/CUE while it
+loads from the hard disk; 486Quake, a build tuned for 486s, 8.5 fps at 64 MHz).
+Benchmarks: Chris's 3D Benchmark 43.3 (25.9 fps), SpeedSys 4.78 (CPU 23.19,
+hard drive 1902), PC Player Benchmark 13.7 fps, Superscape 49.5 fps.
 
 Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
@@ -118,6 +123,12 @@ Windows 3.11 runs at up to 1024x768 in 256 colours with Microsoft's generic
 through the ET4000 BIOS's VESA calls); pick the mode in Windows Setup
 (Options, Change System Settings, Display). Its own drivers stop at 800x600 in
 16 colours.
+TinyCore and its CorePlus image: add `rootfstype=ramfs` to the boot line. Its
+default root filesystem may use only half of the 64 MB, and CorePlus's
+extensions run out of memory in it.
+Damn Small Linux installed onto the hard disk: pick the plain "DSL" entry in its
+boot menu. Its "fb" entries need a linear framebuffer (see Known limits). Its X
+(Xvesa) offers the VESA modes, up to 800x600 in True Color.
 
 ## Getting started
 
@@ -230,14 +241,20 @@ printed on the MEGA65's keycaps:
   mouse is moving: load the mouse driver again (`ctmouse`).
 - The internal drive only reads and formats 512-byte sectors (no
   copy-protected disks).
-- Games that bring SciTech's UniVBE engine take the ET4000 for an ET4000/W32
-  and can show a black screen while they run (The Eleventh Hour, with sound).
+- The ET4000 has no linear framebuffer (the W32's linear window). Games that
+  bring SciTech's UniVBE engine take it for an ET4000/W32 and can show a black
+  screen while they run (The Eleventh Hour, with sound), and Linux's VESA
+  framebuffer (`vga=791` and the like) stops with "undefined mode number".
+- OS/2's SVGA support finds 256 KB of video memory, so OS/2's desktop stays at
+  640x480 in 16 colours.
 - Windows draws the mouse pointer itself (the ET4000AX has no hardware
   cursor), so it can flicker when the picture under it changes.
 - In native HDMI mode the picture is measured one line short: the top line
   can be missing.
-- CD music while a game loads from the hard disk hasn't been tried on the board
-  yet.
+- With the internal SD slot empty, the MEGA65's own start-up reads the back
+  card in SPI mode, and a card stays in SPI mode until it loses power. The PC's
+  disks then run about 40 % slower. Take the card out and put it back in, or
+  start the MEGA65 with a card in the internal slot.
 
 ## Documentation
 
