@@ -185,7 +185,11 @@ no speed. SpeedSys 4.78 (MS-DOS 7.10; v022c's run was MS-DOS 6.22): processor be
 (23.26), memory figures unchanged (93.14 MB/s, L1 41.90, L2 34.92, 30.32), VESA 20520 KB/s
 (20728); hard disk 520C 128H 63S as before, random access 0.36 ms (0.42), buffered read 9549 KB/s
 (9440), linear read 8917 KB/s (8721), hard drive speed **1902.18** (1684.85): the SD host's new
-waits cost nothing. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+waits cost nothing. Quake 1.06 from C: with its CD as a BIN/CUE (11 tracks): 16-bit Sound Blaster
+on DMA 5, CD audio, the DOS mouse driver and the joystick found; `timedemo demo2` 8.0 fps (969
+frames, 120.8 s), as v0.2.1. Its music played from the CD into track 5 while the game loaded from
+the hard disk: 39 samples missing in all (under 1 ms, the moments after a PLAY before the first
+sectors arrive), no disk errors, 48,431 ring checksums matched. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
