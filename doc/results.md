@@ -204,8 +204,11 @@ switches between its modes, 800x600 at 24 bits too. The internal slot empty (a p
 JTAG load): slot 0 "no card", the settings file and the hard disk from the back card, the PC boots,
 no failed sector. The back card runs SPI at 25 MHz: with the internal slot empty, the MEGA65's own
 start-up reads the back card in SPI mode, and a card stays in SPI until it loses power; the core
-falls back to SPI after its native tries, as designed. Not tried yet: a disk-heavy run in SPI mode,
-a start from flash or the SD card.
+falls back to SPI after its native tries, as designed. In SPI mode (the first time on hardware for
+v022n's SPI rules): PIOTEST 24 MB in 6 passes without a wrong byte, REP INSW 1,982 KB/s, IN loop
+1,981, REP INSD 1,985, IN check 2,792 (native: 3,270 to 3,856); QBASIC.EXE copied 5 times and
+compared: no differences; no failed sector, no retry, no checksum mismatch, the slowest write
+7.2 ms. Not tried yet: a start from flash or the SD card.
 
 ## Builds
 
