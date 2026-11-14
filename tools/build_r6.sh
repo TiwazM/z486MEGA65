@@ -33,9 +33,10 @@ coretool=${CORETOOL:-$HOME/Downloads/m65tools-release-1.00-macos/coretool}
 mkdir -p "$root/CORE/reports"
 
 cor() {
-    # MEGAFLASH shows the name and version: the commit checked out when the .cor is made
+    # MEGAFLASH shows the name and version: the commit checked out when the .cor is made.
+    # The "default" capability lets MEGAFLASH make the slot the default core (not set here).
     "$coretool" --force -B "$root/CORE/bitstream/z486-R6.cor" --bit "$root/CORE/bitstream/z486-R6.bit" \
-        --target mega65r6 --bit-name "z486" \
+        --target mega65r6 --bit-name "z486" --caps default \
         --bit-version "WIP-$(git -C "$root" describe --always)"
 }
 

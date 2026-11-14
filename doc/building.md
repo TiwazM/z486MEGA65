@@ -43,7 +43,8 @@ Implementation stops after the strategy's post-route `phys_opt_design`; `bit`
 writes the bitstream from its checkpoint (`CORE/build_bit.tcl`) and makes the
 `.cor` with `coretool` from the MEGA65 tools release (`CORETOOL=path`, default
 `~/Downloads/m65tools-release-1.00-macos/coretool`). MEGAFLASH shows it as
-"z486", version "WIP-" and the commit. `incr` places and routes incrementally
+"z486", version "WIP-" and the commit, and can make its slot the default core
+(the `.cor` declares the "default" capability). `incr` places and routes incrementally
 (directive TimingClosure) from the routed checkpoint in `CORE/reports/ref/`:
 copy a good build's `CORE/reports/impl/mega65_r6_routed.dcp` there, and the
 next small change keeps the rest of its placement and routing. Synthesis takes
