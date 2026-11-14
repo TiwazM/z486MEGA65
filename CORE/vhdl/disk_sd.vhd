@@ -853,7 +853,11 @@ begin
                end if;
 
             -- in the run (and not overwritten: the slot's next block has not arrived): wait
-            -- for the block; else the run ends. A write drops the drive's run.
+            -- for the block, if it is in the ring or the runner is on this read run; else the
+            -- run ends. A write drops the drive's run. (A write run the runner is on brings no
+            -- read blocks: the CD's sector waited for one while the hard disk's run waited for
+            -- its next sector, which pc_mgmt, the bus with the CD, could not take: DSL's
+            -- installer hung both drives, 2026-11-14.)
             when F_CHECK =>
                x_shift <= shift(x_drv);
                v_j := x_lba - c_lba;
@@ -863,7 +867,7 @@ begin
                elsif x_wr = '0' and x_fresh = '0' and c_valid = '1' and c_drv = x_drv and
                      c_gen = gen(x_drv) and x_lba >= c_lba and v_j < resize(c_n, 32) and
                      resize(c_got, 32) <= v_j + (C_RING - 1) and
-                     (rs /= R_IDLE or r_go = '1' or v_j < resize(c_got, 32)) then
+                     (((rs /= R_IDLE or r_go = '1') and r_wr = '0') or v_j < resize(c_got, 32)) then
                   c_j    <= v_j(15 downto 0);
                   c_cons <= v_j(15 downto 0);
                   st     <= F_WAIT_BLK;

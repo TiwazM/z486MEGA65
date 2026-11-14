@@ -237,23 +237,67 @@ module tb_cdrom #(
         tab_desc(n, 8'hAA, lctl, lead);
     endtask
 
-    // The SD engine port (tb_ide's model, reads only): a START moves COUNT blocks from ADDR on,
-    // block k only once k < LIMIT, ABORT ends a read at the next block boundary
+    // The SD engine port (tb_ide's model): a START moves COUNT blocks from ADDR on, block k only
+    // once k < LIMIT (a write's card waits between blocks), ABORT ends the transfer at the next
+    // block boundary, also while it waits for LIMIT. A write's bytes are checked against the
+    // pattern of the hard disk sector expected in that SD block.
     reg e_busy = 0, e_done = 0, e_err = 0, e_blk = 0, e_rdwe = 0;
     reg [8:0] e_rdidx = 0, e_wridx = 0;
     reg [7:0] e_rddata = 0;
-    reg [15:0] e_rdblk = 0;
-    assign q2c = {e_wridx, 16'd0, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
+    reg [15:0] e_rdblk = 0, e_wrblk = 0;
+    assign q2c = {e_wridx, e_wrblk, e_rddata, e_rdidx, e_rdblk, e_rdwe, e_blk, e_err, e_done,
                   e_busy, 1'b1};
     integer eng_reads = 0, eng_blocks = 0, eng_aborts = 0;
+    integer eng_writes = 0, eng_wblocks = 0, write_errors = 0;
+    integer expect_write_lba [integer];
+    integer written [integer];
+    function automatic [15:0] pattern(input integer lba, input integer w);
+        pattern = 16'(lba * 1000 + w * 3 + 16'h1234);
+    endfunction
     always begin
         integer b, i, k, n;
         bit stop;
         @(posedge qclk);
-        if (c2q[0]) begin
+        if (c2q[0] && c2q[1]) begin
             b = c2q[34:3];
             n = c2q[50:35];
-            if (c2q[1]) $fatal(1, "engine: a write");
+            e_busy <= 1;
+            repeat (40) @(posedge qclk);
+            eng_writes++;
+            stop = 0;
+            for (k = 0; k < n && !stop; k++) begin
+                while (!c2q[2] && k >= c2q[66:51]) @(posedge qclk);
+                if (c2q[2]) begin
+                    stop = 1;
+                end else begin
+                    e_wrblk <= k;
+                    for (i = 0; i < 512; i++) begin
+                        e_wridx <= i;
+                        @(posedge qclk);
+                        @(negedge qclk);
+                        if (!expect_write_lba.exists(b + k)) begin
+                            if (i == 0) $error("engine: write to unexpected block %0d", b + k);
+                            write_errors++;
+                        end else if (c2q[74:67] !== (i[0] ? pattern(expect_write_lba[b + k], i / 2) >> 8
+                                                          : pattern(expect_write_lba[b + k], i / 2) & 8'hff)) begin
+                            if (write_errors < 5) $error("engine: block %0d byte %0d = %02x", b + k, i, c2q[74:67]);
+                            write_errors++;
+                        end
+                    end
+                    @(posedge qclk);
+                    repeat (50) @(posedge qclk);
+                    written[b + k] = written.exists(b + k) ? written[b + k] + 1 : 1;
+                    eng_wblocks++;
+                    e_blk <= 1; @(posedge qclk); e_blk <= 0;
+                end
+            end
+            if (c2q[2]) eng_aborts++;
+            repeat (10) @(posedge qclk);
+            e_done <= 1; @(posedge qclk); e_done <= 0; e_err <= 0;
+            e_busy <= 0;
+        end else if (c2q[0]) begin
+            b = c2q[34:3];
+            n = c2q[50:35];
             e_busy <= 1;
             repeat (40) @(posedge qclk);
             eng_reads++;
@@ -353,6 +397,8 @@ module tb_cdrom #(
     reg [7:0] r_st, r_err, r_ir;            // the end: status, error, interrupt reason
     integer   r_irqs;                       // interrupts raised during the command
 
+    integer   hold_lba = 0, hold_n = 0;   // a hard disk write packet() starts (hdd_write_start)
+
     task automatic set_cdb(input [7:0] c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
         cdb[0] = c0; cdb[1] = c1; cdb[2] = c2; cdb[3] = c3; cdb[4] = c4; cdb[5] = c5;
         cdb[6] = c6; cdb[7] = c7; cdb[8] = c8; cdb[9] = c9; cdb[10] = c10; cdb[11] = c11;
@@ -398,7 +444,10 @@ module tb_cdrom #(
                 end
             end
             blocks++;
-            if (hdd_after > 0 && blocks == hdd_after) read_hdd(1234, 2);
+            if (hdd_after > 0 && blocks == hdd_after) begin
+                if (hold_n > 0) hdd_write_start(hold_lba, hold_n);
+                else            read_hdd(1234, 2);
+            end
         end
         inb(16'h172, r_ir);
         inb(16'h171, r_err);
@@ -446,6 +495,40 @@ module tb_cdrom #(
         wait_ready(16'h1f0, st);
         check(bad == 0 && (st & 8'hC9) == 8'h40,
               $sformatf("hard disk read LBA %0d-%0d (%0d words wrong, status %02x)", lba, lba + n - 1, bad, st));
+    endtask
+
+    // A hard disk write held open: hdd_write_start writes the first of n sectors from lba and
+    // returns once the drive asks for the second (its SD write run waits for it);
+    // hdd_write_finish writes the rest and checks them on the card, each block once. With
+    // hold_n > 0, packet() starts one after hdd_after blocks instead of the read.
+    task automatic hdd_write_start(input integer lba, input integer n);
+        reg [7:0] st;
+        integer s, k;
+        for (s = 0; s < n; s++) expect_write_lba[blk(lba + s)] = lba + s;
+        outb(16'h1f2, n[7:0]);
+        outb(16'h1f3, lba[7:0]); outb(16'h1f4, lba[15:8]); outb(16'h1f5, lba[23:16]);
+        outb(16'h1f6, 8'he0 | lba[27:24]);
+        outb(16'h1f7, 8'h30);
+        wait_ready(16'h1f0, st);
+        if (!st[3]) $fatal(1, "hard disk write: no DRQ, status %02x", st);
+        for (k = 0; k < 256; k++) outw(16'h1f0, pattern(lba, k));
+        wait_ready(16'h1f0, st);
+        if (!st[3]) $fatal(1, "hard disk write: no DRQ for the second sector, status %02x", st);
+    endtask
+    task automatic hdd_write_finish(input integer lba, input integer n);
+        reg [7:0] st;
+        integer s, k, once;
+        for (s = 1; s < n; s++) begin
+            wait_ready(16'h1f0, st);
+            if (!st[3]) $fatal(1, "hard disk write: no DRQ for sector %0d, status %02x", s, st);
+            for (k = 0; k < 256; k++) outw(16'h1f0, pattern(lba + s, k));
+        end
+        wait_ready(16'h1f0, st);
+        once = 0;
+        for (s = 0; s < n; s++) if (written.exists(blk(lba + s)) && written[blk(lba + s)] == 1) once++;
+        check((st & 8'hC9) == 8'h40 && write_errors == 0 && once == n,
+              $sformatf("  the hard disk write LBA %0d-%0d: status %02x, %0d of %0d blocks on the card once, %0d bytes wrong",
+                        lba, lba + n - 1, st, once, n, write_errors));
     endtask
 
     // READ (10) / (12) of n sectors from lba, limit lim: the data checked
@@ -736,6 +819,16 @@ module tb_cdrom #(
         // a hard disk read between the second and third block of a CD read
         cd_read(0, 300, 4, 16'hfffe, 2);
         read_hdd(1235, 1);
+        // a hard disk write held open across a CD read that needs the card (DSL 4.4.10's
+        // installer: the CD's compressed image in, files out). The write run waits for the PC's
+        // next sector, the CD's next sector is past the ring: disk_sd waited for it as if the
+        // running transfer were the CD's read run, while pc_mgmt, the bus with the CD, could not
+        // take the write's next sector: both drives hung (2026-11-14)
+        hold_lba = 7000; hold_n = 4;
+        cd_read(0, 1000, 24, 16'hfffe, 2);
+        hold_n = 0;
+        hdd_write_finish(7000, 4);
+        read_hdd(1236, 1);
         // a byte count limit of 768: blocks that end inside a card sector (and a hard disk read
         // between two of them)
         cd_read(0, 700, 2, 16'h0300, 3);
