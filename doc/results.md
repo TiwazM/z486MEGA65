@@ -179,8 +179,10 @@ the bottom one too. 37,159 sectors read and 24,678 written with none failed or r
 from it puts Windows 95's start-up files back, and `hdd.img` boots again. OS/2 boots. The ET4000's
 memory-size registers read as the VGA BIOS leaves them for 2 MB (CR32 = A8h, CR37 = 0Bh) in
 FreeDOS, in Windows 95 and in an OS/2 DOS session. OS/2's SVGA tool still finds 256 KB by its own
-means. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom tray
-empty.
+means. In Windows 95's DOS: Chris's 3D Benchmark 43.3 (25.9 fps), the Superscape benchmark 49.5 fps
+and PC Player Benchmark 13.7 fps, each the same as v0.2.1 and v022c, so the CPU fixes since then cost
+no speed. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+tray empty.
 
 ## Builds
 
