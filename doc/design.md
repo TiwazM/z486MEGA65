@@ -160,6 +160,22 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     patch now clears conventional memory at every normal POST (fpu 60a9229;
     the shutdown returns skip it). v022g (2026-11-12): a reset with OS/2 Setup
     running boots the CD back into Setup.
+    After Setup copied its files, OS/2's first boot from the hard disk froze
+    every time, about 26 s in (just after its mouse driver starts): CS:EIP
+    0148:7E92, interrupts pending and never taken, no memory traffic (qmon's
+    L2 and L1 off changed nothing). The debug EIP is the address after the
+    last issued instruction: `mov [bp+14h],ax` right after `arpl ax,bx` in a
+    16-bit kernel thunk, the store spanning two 16-byte code lines. When an
+    instruction ends (RNI) and the next one's bytes are not there yet, the
+    microcode ROM runs on into the finished routine's next words, which never
+    execute. ARPL's next word is a repeat word (it waits for a protection
+    test, or for COUNTR to count down), and an interrupt's entry and IRET
+    leave COUNTR at 8: z486 let that dead word repeat, which held the ROM, so
+    the store's first word never loaded and the dead word repeated forever.
+    A word now repeats only while an instruction is running, as the I/O wait
+    already did (z486 4cdcb65; test `os2_arpl_store_intr`, OS/2's thunk with
+    INTR swept across it; `_nocache` hangs the old core at the same place).
+    v022h (2026-11-14): OS/2 boots from the hard disk to its graphical screen.
     CACHECHK's "Timer messed up!" may be the same, and Norton System
     Information 8.0's disk test (seeks 0.0 ms, transfer 0.0 KB/s, disk index
     2.8; PIOTEST measures 3 MB/s): a disk too fast for its timing, or the

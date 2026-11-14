@@ -113,6 +113,14 @@ conventional RAM at every normal POST, for OS/2's boot CD stopping with SYS02025
 only, 2 minutes): timing as v022f. On the board (2026-11-12): with OS/2 Setup running, "Reset
 the PC" boots the OS/2 CD again, into Setup (v022f: the garbage line and a halt every time).
 
+v0.2.2 test core h (`z486-R6-v022h.cor`, fpu e196df6: v022g, plus z486 4cdcb65, a repeat
+microcode word runs only while an instruction does, for OS/2's freeze at 0148:7E92 on its first
+boot from the hard disk), `impl strong incr` from v022f's layout (96.56 % of cells, 96.60 % of nets
+reused, 50 minutes with synthesis, beside another build): **+0.300 ns** on main_clk at 66 MHz
+(0.000 ns at the target), hold +0.052 ns, every clock met, 88.8K LUTs. On the board (2026-11-14):
+OS/2 boots from the hard disk past the old freeze to its graphical screen (640x480), idling with its
+interrupts served.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
