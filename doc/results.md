@@ -121,6 +121,31 @@ reused, 50 minutes with synthesis, beside another build): **+0.300 ns** on main_
 OS/2 boots from the hard disk past the old freeze to its graphical screen (640x480), idling with its
 interrupts served.
 
+v0.2.2 test core i (`z486-R6-v022i.cor`, fpu c282725: v022h, plus z486 dcf9b3a, a TLB hit that
+denies an access walks the tables again, and an x87 state transfer left open by a fault is
+dropped, for CorePlus's crawl in the FNSAVE of a signal frame), `impl strong incr` from v022h's
+layout (91.35 % of cells, 92.58 % of nets reused, 66 minutes with synthesis): **+0.050 ns** on
+main_clk at 66 MHz (-0.250 ns at the target, 106 endpoints), hold +0.052 ns, every clock met,
+90.0K LUTs. On the board (2026-11-14): past the crawl, CorePlus's tc-config waits for `/dev/rtc0`
+for ever (rtc_cmos: "only 24-hr supported"); with `nortc` it boots to its login, the OOM killer
+taking tc-config and tce-load at 60 MB (`free`: 1.9 MB available, 32 MB in buff/cache, mostly the ramfs root). Its
+TinyCore entry reaches the desktop at 1024x768, without a pointer: dmesg lists the i8042 KBD port
+only.
+
+v0.2.2 test core j (`z486-R6-v022j.cor`, fpu 02665f7: v022i, plus the CMOS's registers A = 26h
+and B = 02h at power-up), `tb_floppy` first (registers A and B read back), `impl strong incr`
+from v022i's layout (99.63 % of cells, 98.67 % of nets reused, 52 minutes with synthesis):
+**+0.442 ns** on main_clk at 66 MHz (+0.142 ns at the target), hold +0.052 ns, every clock met,
+90.1K LUTs. On the board (2026-11-14): TinyCore boots without `nortc`; with `i8042.noloop` the
+mouse works in X.
+
+v0.2.2 test core k (`z486-R6-v022k.cor`, fpu 251290e: v022j, plus the 8042 sending a D3 byte at
+once, also with the mouse port off, for Linux's mouse port probe), `impl strong incr` from v022j's
+layout (99.94 % of cells, 99.97 % of nets reused, 35 minutes with synthesis): **+0.443 ns** on
+main_clk at 66 MHz (+0.143 ns at the target), hold +0.048 ns, every clock met, 90.1K LUTs. On the
+board (2026-11-14): TinyCore boots to its desktop with the mouse working, with only
+`rootfstype=ramfs` on the boot line.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard

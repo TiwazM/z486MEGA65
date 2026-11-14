@@ -202,7 +202,34 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     tmpfs capped at half of RAM, core.gz holds 20.6 MB, and with 64 MB, a
     14 MB kernel and the 13.8 MB initrd still in memory the cap is reached
     before /bin/sh (busybox, near the archive's end). `rootfstype=ramfs` on
-    the boot line has no cap (to try).
+    the boot line has no cap, and the init runs (v022e). It then crawled
+    after "Setting Language to C Done.", nearly every sample at 0060:C013C700,
+    the FWAIT after the FNSAVE in copy_fpstate_to_sigframe(): Linux (i386,
+    no FXSR) saves the x87 state straight into the user's signal frame with
+    page faults off; when the save faults, it clears the frame with ordinary
+    stores (which fault the page in or make it writable) and saves again.
+    Two bugs kept it faulting. A TLB hit whose permissions deny the access
+    raised #PF from the TLB entry, but Linux raises a PTE's permissions (R/W
+    after copy-on-write) without INVLPG, so the clearing stores faulted on
+    the stale entry for ever; such a hit now walks the tables again and
+    faults only if they still deny it. And FNSAVE, FNSTENV, FRSTOR and
+    FLDENV transfer through their 386 routines, which send the command
+    first: a fault mid-transfer left the transfer open and PEREQ up, and the
+    restarted routine waited at its start for PEREQ to fall, for ever,
+    interrupts still taken. Such a transfer runs only inside its routine, so
+    one still open when another instruction issues (the bridge idle) was
+    abandoned: x87_control drops it (z486 dcf9b3a; tests
+    `x87_fnsave_pf_retry`, `x87_fnsave_fwait_intr`). v022i (2026-11-14): past
+    the crawl, tc-config waits for `/dev/rtc0` for ever: rtc_cmos refused
+    the clock, "only 24-hr supported" (the CMOS's registers A and B, under
+    Disks below; `nortc` skips the wait). With 60 MB the full CorePlus
+    set of extensions does not fit: the ramfs root cannot be swapped, and
+    the OOM killer takes tc-config and tce-load (no desktop, a login
+    prompt). Its TinyCore entry (`lst=xbase.lst`, Xvesa and FLWM) reaches
+    the desktop, but without a pointer: Linux found no mouse port (the
+    8042's D3, under Mouse below; `i8042.noloop` skips that test). v022k
+    (2026-11-14): TinyCore boots to its desktop, mouse working, with only
+    `rootfstype=ramfs` on the boot line.
   - Native mode measures the PC's picture a line short (640x479, 720x399 at
     the DOS prompt; `qmon.py status`'s native line) and cropped SpeedSys's
     screen (its "Ver 4.78" cut at the right) in its 1:1 window; earlier it kept
@@ -324,7 +351,16 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   nearly every time; the debug log showed it. `CORE/sim/run_ps2.sh`
   simulates the keyboard and the mouse against z486's 8042 (`ps2.v`;
   `tb_pc_mouse` has a packet in the middle of F3, which fails without the
-  quiet time), and the PIC patch below (`tb_pic.sv`).
+  quiet time), and the PIC patch below (`tb_pic.sv`). The 8042 (`ps2.v`
+  patched by `tools/z486_sources.py`) keeps the mouse's bytes in a FIFO,
+  which an 8042 does not have: they wait there while the mouse port is off
+  and from a D4 byte until it has gone out, and a D4 byte drops them
+  (Windows, quitting, turns the port off, sends D4 F4 and wants FA next). A
+  D3 byte (the PC's own, as if from the mouse) drops them as well and comes
+  out at once, also while the port is off: Linux's probe (i8042_check_aux)
+  loops 5Ah back with the port off, and when that byte waited with the
+  others, Linux took the port for absent (TinyCore's X without a pointer;
+  `tb_i8042_aux` runs the probe, 251290e).
 - The BIOS's mouse packets: the Bochs BIOS files the mouse's bytes by
   position (its IRQ12 handler, F000:51B8; the position in EBDA 26h) and never
   checks a packet's first byte, so one lost byte puts every packet after it
@@ -356,7 +392,10 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
-  (equipment, base memory, checksum, the date and time from the MEGA65's RTC,
+  (registers A = 26h and B = 02h as x86_init writes them: the Bochs BIOS
+  never sets them at POST, rtc.v's start at 00h, and register B's 12-hour
+  mode made Linux's rtc_cmos refuse the clock, 02665f7;
+  equipment, base memory, checksum, the date and time from the MEGA65's RTC,
   again when the RTC's first read arrives and whenever the PC restarts: the reset
   button, "Reset the PC", and the keyboard controller's reset, port 64h <- FEh,
   which Bochs' BIOS uses for Ctrl+Alt+Del and Windows for a restart; the PC's
