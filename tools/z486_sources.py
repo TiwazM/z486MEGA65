@@ -610,7 +610,11 @@ PATCHES = {
     # once. Windows quitting writes command byte 75h
     # (IRQ12 and the port off), sends D4 F4 and wants FA next; it read an old packet byte
     # instead (I/O trace, 2026-11-02), left IRQ12 off, and the mouse's bytes, unread, held the
-    # keyboard's back for good
+    # keyboard's back for good. A D3 byte (the PC's own, as if from the mouse) drops the bytes
+    # queued as well and comes out at once, also while the port is off (mouse_loop): Linux's
+    # i8042_check_aux loops 5Ah back with the port off, and when that byte waited, the A8 check
+    # read it as the command byte and the IRQ12 test timed out behind the real one, so Linux
+    # took the mouse port for absent (TinyCore's X without a pointer, 2026-11-14)
     "z486_MiSTer/src/soc/ps2.v": [
         ("\toutput                  ps2_mousedat_out   // Mouse data output (open-drain)\n);",
          "\toutput                  ps2_mousedat_out,  // Mouse data output (open-drain)\n\n"
@@ -639,9 +643,18 @@ PATCHES = {
          "    .sclr       (cmd_self_test || mouse_drop),                                  //Clear on self-test; MEGA65: and a command to the mouse"),
         ("// Mouse FIFO signals",
          "// MEGA65: a byte to the mouse is written and goes out: what the mouse sent before is dropped;\n"
-         "// its bytes wait while its port is off and from a command's D4 byte until it went out (z486_sources.py)\n"
-         "wire mouse_drop = write_to_mouse || mouse_state == PS2_SEND_INHIBIT;\n"
-         "wire mouse_hold = disable_mouse || write_to_mouse || (status_inputbufferfull && input_for_mouse && ~(input_write_done));\n\n"
+         "// its bytes wait while its port is off and from a command's D4 byte until it went out; a D3\n"
+         "// byte (the PC's own, as if from the mouse) drops them as well and comes out at once, also\n"
+         "// while the port is off: the hold starts again once the PC has read it (z486_sources.py)\n"
+         "reg mouse_loop;\n"
+         "always @(posedge clk) begin\n"
+         "    if(rst_n == 1'b0)                                                               mouse_loop <= 1'b0;\n"
+         "    else if(cmd_write_to_mouse_output)                                              mouse_loop <= 1'b1;\n"
+         "    else if(cmd_self_test || write_to_mouse ||\n"
+         "            (io_read_valid && io_address[2:0] == 3'd0 && status_mousebufferfull))   mouse_loop <= 1'b0;\n"
+         "end\n"
+         "wire mouse_drop = write_to_mouse || cmd_write_to_mouse_output || mouse_state == PS2_SEND_INHIBIT;\n"
+         "wire mouse_hold = (disable_mouse && ~(mouse_loop)) || write_to_mouse || (status_inputbufferfull && input_for_mouse && ~(input_write_done));\n\n"
          "// Mouse FIFO signals"),
     ],
 }
