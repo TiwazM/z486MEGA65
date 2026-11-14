@@ -192,7 +192,9 @@ the hard disk: 39 samples missing in all (under 1 ms, the moments after a PLAY b
 sectors arrive), no disk errors, 48,431 ring checksums matched. PIOTEST: 24 MB in 6 passes without
 a wrong byte, REP INSW 3,270 KB/s, IN loop 3,020, REP INSD 3,856, IN check 3,811 (wrun: 3,040,
 1,918, 3,655, 2,226). QBASIC.EXE copied 5 times on C: and compared with FC: no differences. After a
-JTAG reload with the PC idle, both cards start native 4-bit at 50 MHz again. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+JTAG reload with the PC idle, both cards start native 4-bit at 50 MHz again. A menu setting changed
+(the joystick's fire 2 pin), the menu closed, the core reloaded: the setting is back from
+`/z486/z486cfg` (the firmware writes it through the new SD host). Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
