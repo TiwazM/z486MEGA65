@@ -35,8 +35,12 @@
 --     writes the whole track with the last ID; register 7 or 6 answers each as a write's.
 --   * The hard disk (ide.v, master of the first channel; Main_MiSTer's ide.cpp for a raw image,
 --     one sector per data block as PCXT-EGA-MEGA65's mgmt_bridge does it): geometry 16 heads x
---     256 sectors (ide_set_geometry(0, 0)), LBA28; the BIOS translates by the capacity and reads
---     and writes by LBA. Request 110 (reset): the task file with BSY, then ready (the slave,
+--     63 sectors, the cylinders the size / 1008 (at most 16383, as ATA's large disks), LBA28.
+--     ide.cpp's ide_set_geometry(0, 0) says 256 sectors a track, which Linux 2.0-2.4 keep in a
+--     byte: 0, and the kernel divided by it (DSL 4.4.10). The BIOS translates by the capacity
+--     (CMOS 39h: LBA) and reads and writes by LBA, or, for a disk of 504 MB or less, whose
+--     translated geometry is this one, by CHS: (cylinder * 16 + head) * 63 + sector - 1, and
+--     the task file counts sector, head and cylinder on. Request 110 (reset): the task file with BSY, then ready (the slave,
 --     never there, reads cylinder FFFFh: the BIOS's probe takes it as absent). Request 100 (a
 --     command): EC IDENTIFY, 20/21/C4 reads, 30/31/C5 writes one sector per block (IDENTIFY
 --     says one sector per multiple block, C6 accepts 0 and 1), the no-data commands, anything
@@ -230,22 +234,22 @@ architecture synthesis of pc_mgmt is
       return 4;
    end function fdd_type;
 
-   -- IDENTIFY DEVICE (ide.cpp's, for a raw image of t sectors, 16 heads x 256 sectors)
+   -- IDENTIFY DEVICE (ide.cpp's, for a raw image of t sectors; c cylinders of 16 heads x 63
+   -- sectors, at most 16383)
    constant C_MODEL : string(1 to 40) := "z486 MEGA65 hard disk                   ";
-   function ident(k : natural; t : unsigned(31 downto 0)) return std_logic_vector is
-      variable c : unsigned(15 downto 0);
+   function ident(k : natural; t : unsigned(31 downto 0); c : unsigned(13 downto 0))
+      return std_logic_vector is
+      variable chs : unsigned(23 downto 0);                       -- c * 1008
    begin
-      if t(31 downto 28) /= 0 then
-         c := x"FFFF";
-      else
-         c := t(27 downto 12);
-      end if;
+      chs := (c & "0000000000") - ("000000" & c & "0000");       -- c * 1024 - c * 16
       case k is
          when 0      => return x"0040";
-         when 1 | 54 => return std_logic_vector(c);
+         when 1 | 54 => return "00" & std_logic_vector(c);
          when 3 | 55 => return x"0010";
          when 5      => return x"0200";
-         when 6 | 56 => return x"0100";
+         when 6 | 56 => return x"003F";
+         when 57     => return std_logic_vector(chs(15 downto 0));    -- the CHS capacity
+         when 58     => return x"00" & std_logic_vector(chs(23 downto 16));
          when 10     => return x"414F";                -- serial "AOHD00000"
          when 11     => return x"4844";
          when 12     => return x"3030";
@@ -264,8 +268,8 @@ architecture synthesis of pc_mgmt is
          when 50     => return x"4001";
          when 51 | 52 => return x"0200";
          when 53     => return x"0007";
-         when 57 | 60 | 100 => return std_logic_vector(t(15 downto 0));
-         when 58 | 61 | 101 => return std_logic_vector(t(31 downto 16));
+         when 60 | 100 => return std_logic_vector(t(15 downto 0));
+         when 61 | 101 => return std_logic_vector(t(31 downto 16));
          when 59     => return x"0101";                -- multiple: 1
          when 65 to 68 => return x"0078";
          when 80     => return x"007E";
@@ -360,6 +364,10 @@ architecture synthesis of pc_mgmt is
    signal h_present   : std_logic := '0';
    signal h_gen       : std_logic_vector(3 downto 0) := (others => '0');
    signal h_total     : unsigned(31 downto 0) := (others => '0');
+   -- its cylinders of 16 x 63 sectors (p_hcyl: the size / 1008, at most 16383)
+   signal h_cyl       : unsigned(13 downto 0) := (others => '0');
+   signal hc_t        : unsigned(31 downto 0) := (others => '0');   -- the size it is for
+   signal hc_rem      : unsigned(31 downto 0) := (others => '0');
 
    -- the time again once the RTC has been read, and whenever the PC restarts
    signal rtc_tgl     : std_logic := '0';
@@ -405,8 +413,11 @@ architecture synthesis of pc_mgmt is
    -- the IDE transfer: i_act = a block is with the CPU (request 101 continues it)
    signal i_act       : std_logic := '0';
    signal i_wr        : std_logic := '0';
-   signal i_lbam      : std_logic := '0';       -- LBA addressing (else CHS 16 x 256)
+   signal i_lbam      : std_logic := '0';       -- LBA addressing (else CHS 16 x 63)
    signal i_lba       : unsigned(27 downto 0) := (others => '0');
+   signal i_csec      : unsigned(7 downto 0) := (others => '0');   -- CHS: the next sector's
+   signal i_chead     : unsigned(3 downto 0) := (others => '0');
+   signal i_ccyl      : unsigned(15 downto 0) := (others => '0');
    signal i_cnt       : unsigned(7 downto 0) := (others => '0');   -- sectors left; 0 = 256
    signal i_lo        : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -497,8 +508,25 @@ begin
          trace_o          => cd_tr
       ); -- i_cdrom
 
+   -- The hard disk's cylinders for IDENTIFY: its size / 1008 (16 heads x 63 sectors), at most
+   -- 16383, counted out once per size (16383 clocks at most; the BIOS asks long after a mount)
+   p_hcyl : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         if h_total /= hc_t then
+            hc_t   <= h_total;
+            hc_rem <= h_total;
+            h_cyl  <= (others => '0');
+         elsif hc_rem >= 1008 and h_cyl /= 16383 then
+            hc_rem <= hc_rem - 1008;
+            h_cyl  <= h_cyl + 1;
+         end if;
+      end if;
+   end process p_hcyl;
+
    p_mgmt : process (clk_i)
       variable v_byte : std_logic_vector(7 downto 0);
+      variable v_chs  : unsigned(25 downto 0);
       variable v_l    : unsigned(27 downto 0);
       variable v_left : unsigned(7 downto 0);
       variable v_sum  : natural range 0 to 65535;
@@ -1129,9 +1157,15 @@ begin
                if t_dh(6) = '1' then
                   i_lba <= unsigned(std_logic_vector'(t_dh(3 downto 0) & t_cyl & t_sec));
                else
-                  i_lba <= unsigned(std_logic_vector'(t_cyl & t_dh(3 downto 0) &
-                                                      std_logic_vector(unsigned(t_sec) - 1)));
+                  -- CHS: (cylinder * 16 + head) * 63 + sector - 1 (x * 64 - x, x = cyl:head)
+                  v_chs := unsigned(std_logic_vector'(t_cyl & t_dh(3 downto 0) & "000000")) -
+                           unsigned(std_logic_vector'("000000" & t_cyl & t_dh(3 downto 0))) +
+                           unsigned(t_sec) - 1;
+                  i_lba <= "00" & v_chs;
                end if;
+               i_csec  <= unsigned(t_sec);
+               i_chead <= unsigned(t_dh(3 downto 0));
+               i_ccyl  <= unsigned(t_cyl);
                i_cnt <= unsigned(t_cnt);
                if t_dh(4) = '1' or h_present = '0' then
                   w_err <= x"04";                    -- the slave, or no disk: aborted
@@ -1181,7 +1215,7 @@ begin
                pm_address <= C_IDE & x"0F";
                case b_ph is
                   when 0 =>
-                     pm_wdata <= ident(idx, h_total);
+                     pm_wdata <= ident(idx, h_total, h_cyl);
                      b_ph <= 1;
                   when 1 =>
                      pm_write <= '1';
@@ -1293,9 +1327,19 @@ begin
                   w_cyl <= std_logic_vector(v_l(23 downto 8));
                   w_dh  <= t_dh(7) & '1' & t_dh(5 downto 4) & std_logic_vector(v_l(27 downto 24));
                else
-                  w_sec <= std_logic_vector(v_l(7 downto 0) + 1);
-                  w_cyl <= std_logic_vector(v_l(27 downto 12));
-                  w_dh  <= t_dh(7) & '0' & t_dh(5 downto 4) & std_logic_vector(v_l(11 downto 8));
+                  -- CHS: the sector just moved; then on to the next (63 a track, 16 heads)
+                  w_sec <= std_logic_vector(i_csec);
+                  w_cyl <= std_logic_vector(i_ccyl);
+                  w_dh  <= t_dh(7) & '0' & t_dh(5 downto 4) & std_logic_vector(i_chead);
+                  if i_csec >= 63 then
+                     i_csec  <= x"01";
+                     i_chead <= i_chead + 1;
+                     if i_chead = 15 then
+                        i_ccyl <= i_ccyl + 1;
+                     end if;
+                  else
+                     i_csec <= i_csec + 1;
+                  end if;
                end if;
                if v_left = 0 then
                   w_st  <= x"5E";                    -- the last block: ide.v ends with 40h
@@ -1388,9 +1432,19 @@ begin
                   w_cyl <= std_logic_vector(v_l(23 downto 8));
                   w_dh  <= t_dh(7) & '1' & t_dh(5 downto 4) & std_logic_vector(v_l(27 downto 24));
                else
-                  w_sec <= std_logic_vector(v_l(7 downto 0) + 1);
-                  w_cyl <= std_logic_vector(v_l(27 downto 12));
-                  w_dh  <= t_dh(7) & '0' & t_dh(5 downto 4) & std_logic_vector(v_l(11 downto 8));
+                  -- CHS: the sector just moved; then on to the next (63 a track, 16 heads)
+                  w_sec <= std_logic_vector(i_csec);
+                  w_cyl <= std_logic_vector(i_ccyl);
+                  w_dh  <= t_dh(7) & '0' & t_dh(5 downto 4) & std_logic_vector(i_chead);
+                  if i_csec >= 63 then
+                     i_csec  <= x"01";
+                     i_chead <= i_chead + 1;
+                     if i_chead = 15 then
+                        i_ccyl <= i_ccyl + 1;
+                     end if;
+                  else
+                     i_csec <= i_csec + 1;
+                  end if;
                end if;
                if v_left = 0 then
                   w_st  <= x"54";                    -- done, interrupt

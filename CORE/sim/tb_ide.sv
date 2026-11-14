@@ -8,7 +8,8 @@
 // port), with a model of the SD host controller's engine port behind them. The test does what
 // the Bochs BIOS's ATA probe and INT 13h do: soft reset (the master, then the slave, which must
 // read cylinder FFFFh), IDENTIFY, LBA28 reads across the image file's two extents, writes, SET
-// MULTIPLE and READ MULTIPLE, an unknown command (aborted); and the CMOS's hard disk bytes. Then
+// MULTIPLE and READ MULTIPLE, an unknown command (aborted), CHS reads and a write (16 heads x 63
+// sectors, the task file counting on); and the CMOS's hard disk bytes. Then
 // a reset on the clock that starts a sector's copy: the next read's copy still checked.
 // SLOT/CARD0/CARD1: the image on the back card, or a slot without a card (sdslots' ready).
 // CORE/sim/run_disks.sh runs it with xsim.
@@ -383,6 +384,76 @@ module tb_ide #(
         check(bad == 0 && (st & 8'hC9) == 8'h40,
               $sformatf("read %02x LBA %0d-%0d (%0d words wrong, status %02x)", cmd, lba, lba + n - 1, bad, st));
     endtask
+    // CHS, as the BIOS sends it for a disk of 504 MB or less (its translated geometry is the
+    // drive's: 16 heads x 63 sectors): the sectors (c * 16 + h) * 63 + s - 1 on; when the
+    // command ends, the task file holds the last sector moved
+    function automatic integer chs_lba(input integer c, input integer h, input integer s);
+        chs_lba = (c * 16 + h) * 63 + s - 1;
+    endfunction
+    task automatic chs_cmd(input [7:0] cmd, input integer c, input integer h, input integer s,
+                           input integer n);
+        outb(16'h1f2, n[7:0]);
+        outb(16'h1f3, s[7:0]); outb(16'h1f4, c[7:0]); outb(16'h1f5, c[15:8]);
+        outb(16'h1f6, 8'ha0 | h[3:0]);
+        outb(16'h1f7, cmd);
+    endtask
+    task automatic chs_regs(input integer c, input integer h, input integer s, input integer n,
+                            input string what);
+        integer lc, lh, ls, k;
+        reg [7:0] sn, cl, ch, dh;
+        lc = c; lh = h; ls = s;
+        for (k = 1; k < n; k++) begin
+            ls++;
+            if (ls > 63) begin ls = 1; lh++; if (lh > 15) begin lh = 0; lc++; end end
+        end
+        inb(16'h1f3, sn); inb(16'h1f4, cl); inb(16'h1f5, ch); inb(16'h1f6, dh);
+        check(sn == ls && {ch, cl} == lc && dh[3:0] == lh && !dh[6],
+              $sformatf("  %s: the task file C %0d H %0d S %0d (the last sector: C %0d H %0d S %0d)",
+                        what, {ch, cl}, dh[3:0], sn, lc, lh, ls));
+    endtask
+    task automatic read_chs(input integer c, input integer h, input integer s, input integer n);
+        reg [15:0] w;
+        reg [7:0] st;
+        integer i, k, bad, lba;
+        bad = 0;
+        lba = chs_lba(c, h, s);
+        chs_cmd(8'h20, c, h, s, n);
+        for (i = 0; i < n; i++) begin
+            wait_drq("CHS read");
+            for (k = 0; k < 256; k++) begin
+                inw(w);
+                if (w !== {sdbyte(blk(lba + i), 2 * k + 1), sdbyte(blk(lba + i), 2 * k)}) bad++;
+            end
+        end
+        wait_ready(st);
+        check(bad == 0 && (st & 8'hC9) == 8'h40,
+              $sformatf("CHS read C %0d H %0d S %0d, %0d sectors = LBA %0d-%0d (%0d words wrong, status %02x)",
+                        c, h, s, n, lba, lba + n - 1, bad, st));
+        chs_regs(c, h, s, n, "after it");
+    endtask
+    task automatic write_chs(input integer c, input integer h, input integer s, input integer n);
+        reg [7:0] st;
+        integer i, k, once, lba;
+        integer w_prev [integer];
+        lba = chs_lba(c, h, s);
+        for (i = 0; i < n; i++) begin
+            expect_write_lba[blk(lba + i)] = lba + i;
+            w_prev[i] = written.exists(blk(lba + i)) ? written[blk(lba + i)] : 0;
+        end
+        chs_cmd(8'h30, c, h, s, n);
+        for (i = 0; i < n; i++) begin
+            wait_drq("CHS write");
+            for (k = 0; k < 256; k++) outw(pattern(lba + i, k));
+        end
+        wait_ready(st);
+        once = 0;
+        for (i = 0; i < n; i++)
+            if (written.exists(blk(lba + i)) && written[blk(lba + i)] == w_prev[i] + 1) once++;
+        check((st & 8'hC9) == 8'h40 && write_errors == 0 && once == n,
+              $sformatf("CHS write C %0d H %0d S %0d, %0d sectors = LBA %0d-%0d (status %02x, %0d bytes wrong, %0d of %0d once)",
+                        c, h, s, n, lba, lba + n - 1, st, write_errors, once, n));
+        chs_regs(c, h, s, n, "after it");
+    endtask
     // ... and when the command ends, its data is on the card (the run over, every block once)
     task automatic write_sectors(input integer lba, input integer n);
         reg [7:0] st;
@@ -461,11 +532,16 @@ module tb_ide #(
         wait_drq("IDENTIFY");
         for (k = 0; k < 256; k++) inw(id[k]);
         wait_ready(st);
-        check(id[1] == (TOTAL >> 12) && id[3] == 16 && id[6] == 256 && id[5] == 512 &&
+        // 16 heads x 63 sectors (Linux 2.0-2.4 keep the sectors in a byte: 256 was 0), the
+        // cylinders the size / 1008; the current geometry the same, its capacity C * 1008
+        check(id[1] == TOTAL / 1008 && id[3] == 16 && id[6] == 63 && id[5] == 512 &&
+              id[54] == TOTAL / 1008 && id[55] == 16 && id[56] == 63 &&
+              {id[58], id[57]} == (TOTAL / 1008) * 1008 &&
               {id[61], id[60]} == TOTAL && id[27] == 16'h7A34 && id[47] == 16'h8001 &&
               id[49][9] && (st & 8'hC9) == 8'h40,
-              $sformatf("IDENTIFY: C %0d H %0d S %0d, %0d sectors, model %04x, status %02x",
-                        id[1], id[3], id[6], {id[61], id[60]}, id[27], st));
+              $sformatf("IDENTIFY: C %0d H %0d S %0d (current %0d/%0d/%0d, %0d), %0d sectors, model %04x, status %02x",
+                        id[1], id[3], id[6], id[54], id[55], id[56], {id[58], id[57]},
+                        {id[61], id[60]}, id[27], st));
 
         // reads: across the two extents (79 | 80: two runs), then a single one far in
         k = eng_reads;
@@ -573,6 +649,12 @@ module tb_ide #(
         end
         // and the next write still runs
         write_sectors(6100, 4);
+        // CHS: the first sector; across a head and a cylinder; far in (the second extent);
+        // a write across a head
+        read_chs(0, 0, 1, 1);
+        read_chs(1, 15, 62, 4);
+        read_chs(120, 15, 63, 2);
+        write_chs(3, 2, 63, 3);
         // a reset (pc_mgmt's, with the PC's) on the clock that starts a copy: pc_mgmt's ring
         // address stays 0 through it, as at power-up. The next read's copy must still be
         // checked (disk_sd checks a copy that moves to 0): with FAULT it is the wrong one, and

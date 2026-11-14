@@ -402,7 +402,12 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   CMOS clock otherwise runs on from whatever it was set to);
   then floppy drives A: and B: (`floppy.v`: insert/eject, the sector
   requests) and the hard disk, the master of the first IDE channel (`ide.v`:
-  IDENTIFY, reads and writes, one sector per block), with the CMOS's drive
+  IDENTIFY, reads and writes, one sector per block; 16 heads x 63 sectors,
+  the cylinders the size / 1008, at most 16383, and CHS addresses by that
+  geometry: Main_MiSTer's `ide.cpp` says 256 sectors a track for a raw image,
+  which Linux 2.0-2.4 keep in a byte, so DSL 4.4.10's kernel divided by 0 in
+  `init_idedisk_capacity`; the BIOS's LBA translation takes the capacity
+  only, so partitions stay where they were), with the CMOS's drive
   types following the images; the CD-ROM drive, an ATAPI device on the second
   channel (`pc_cdrom.vhd`, what Main_MiSTer's `ide_cdrom.cpp` does, with
   `cd_audio.vhd` for CD audio and the firmware's `cdimage.asm` for cue sheets),
