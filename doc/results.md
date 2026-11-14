@@ -146,6 +146,42 @@ main_clk at 66 MHz (+0.143 ns at the target), hold +0.048 ns, every clock met, 9
 board (2026-11-14): TinyCore boots to its desktop with the mouse working, with only
 `rootfstype=ramfs` on the boot line.
 
+v0.2.2 test core l (`z486-R6-v022l.cor`, fpu ff2e34d: v022k, plus the hard disk's IDENTIFY
+geometry as 16 heads x 63 sectors, for Linux 2.4's divide error with 256 sectors a track, and
+the task file's CHS addressing to match), `tb_ide` first, `impl strong incr` from v022k's layout
+(99.41 % of cells, 98.39 % of nets reused, 27 minutes with synthesis): **+0.450 ns** on main_clk
+at 66 MHz (+0.150 ns at the target), hold +0.048 ns, every clock met, 90.2K LUTs. On the board
+(2026-11-14): Damn Small Linux 4.4.10 (Linux 2.4) boots from its CD to the desktop. Its hard disk
+install then reports I/O errors and both drives stop: a CD read waiting on a hard disk write
+(fixed in v022m).
+
+v0.2.2 test core m (`z486-R6-v022m.cor`, fpu 12b1743: v022l, plus `disk_sd` waiting for a read's
+block only while the read run is its own, so a CD read during a hard disk write no longer blocks
+both drives), `tb_cdrom` first (a held hard disk write across a CD read), `impl strong incr` from
+v022l's layout (99.61 % of cells, 99.60 % of nets reused, 48 minutes with synthesis): **+0.415 ns**
+on main_clk at 66 MHz (+0.115 ns at the target), hold +0.052 ns, every clock met, 90.2K LUTs. On
+the board (2026-11-14): a full OS/2 Warp 4 install from CD to the hard disk runs through, and OS/2
+boots to its desktop. Windows 98's hard disk boots. Windows 95's `hdd.img` hangs in IO.SYS: its
+start-up files were left swapped by the boot menu's "Previous version of MS-DOS" (DOS 6.22's
+IO.SYS in place), not the core.
+
+v0.2.2 test core n (`z486-R6-v022n.cor`, fpu 1cc7764: v022m, plus the SD host following what SD
+cards do on hardware (MEGA65's `890-sdcard-native` notes): CMD12 before a native start, native and
+SPI start tried twice, a busy that starts up to 48 clocks late, 1.5 s busy limits, DAT0 high before
+a native transfer, a data block only with all four DAT lines low, and in SPI mode four FF bytes
+before a command and to end a busy, the write's data response searched bit by bit),
+`run_sdhost.sh` first (8 cases against a card model; the old SD host fails 6), `impl strong incr`
+from v022m's layout (98.14 % of cells, 98.08 % of nets reused, 29 minutes with synthesis):
+**+0.363 ns** on main_clk at 66 MHz (+0.063 ns at the target), hold +0.052 ns, every clock met,
+90.6K LUTs. On the board (2026-11-14, loaded by JTAG): both SD cards run native 4-bit at 50 MHz,
+the bottom one too. 37,159 sectors read and 24,678 written with none failed or retried, and
+46,427 ring checksums matched. FreeDOS boots from floppy A: with a second image as B:. A program
+from it puts Windows 95's start-up files back, and `hdd.img` boots again. OS/2 boots. The ET4000's
+memory-size registers read as the VGA BIOS leaves them for 2 MB (CR32 = A8h, CR37 = 0Bh) in
+FreeDOS, in Windows 95 and in an OS/2 DOS session. OS/2's SVGA tool still finds 256 KB by its own
+means. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom tray
+empty.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
