@@ -23,6 +23,22 @@
 --     priority: an engine transfer ends at the next block boundary when QNICE issues
 --     a command, and the engine issues the rest again (it counts e_blk_o pulses).
 --
+-- What cards do on hardware (z486MEGA65 2026-11-14, after MEGA65's mega65-core branch
+-- 890-sdcard-native, docs/sdcard-native/architecture.md; CORE/sim/tb_sdhost.vhd has a card
+-- that does each):
+--   * a card left in a multi-block read (by a reset, or by configuring the FPGA) sends
+--     blocks and takes no CMD0: the native init starts with CMD12; a failed native init is
+--     tried once more before SPI (a card leaves SPI mode only when it loses power), and a
+--     failed SPI init once more before giving up,
+--   * a busy may start late (an R1b's: up to 31 SD clocks; SPI: a byte or more after the
+--     data response): native waits C_BUSY_START clocks for it; SPI ends a busy only after
+--     four FF bytes in a row, and before every command but CMD0 and CMD12 waits for four FF
+--     bytes (a busy card holds MISO low, and a command sent then reads 00 as its R1),
+--   * a busy may last longer than 750 ms: C_TMO_BUSY is 1.5 s; native reads and writes
+--     start once DAT0 has been high for 8 clocks,
+--   * some cards send the SPI data response a few bits late: it is searched bit by bit,
+--   * a native data block starts on all four lines low (DAT0 alone low is a busy).
+--
 -- QNICE registers (as sdcard.vhd):
 --   0 : low word of the 32-bit block address
 --   1 : high word of the 32-bit block address
@@ -268,7 +284,10 @@ architecture synthesis of sdhost is
       2,          -- 1110
       1           -- 1111
    );
-   constant C_TMO_BUSY    : natural := 600 * G_MS;    -- programming busy
+   constant C_TMO_BUSY    : natural := 1500 * G_MS;   -- programming busy (MEGA65: 750 ms was
+                                                       -- too short for a slow card)
+   constant C_BUSY_START  : natural := 48;            -- SD clocks for a busy to start (an R1b:
+                                                       -- the card has 31)
    constant C_NCR_MAX     : natural := 255;           -- SD clocks until a response starts
 
    ---------------------------------------------------------------------------------------
@@ -278,12 +297,12 @@ architecture synthesis of sdhost is
    type t_state is (
       S_RESET, S_INIT, S_IDLE, S_DISPATCH, S_FAIL, S_TAIL,
       -- native SD
-      N_PRE, N_INIT, N_CMD_TX, N_CMD_RX, N_BUSY0, N_BUSY1,
+      N_PRE, N_INIT, N_CMD_TX, N_CMD_RX, N_BUSY0, N_BUSY1, N_RDY,
       N_RD_CMD, N_RD_RESP, N_RD_START, N_RD_DATA, N_RD_CRC, N_RD_NEXT, N_STOP, N_STOP_DONE,
       N_WR_CMD, N_WR_RESP, N_WR_GAP, N_WR_DATA, N_WR_CRC, N_WR_END, N_WR_STAT,
       N_WR_STAT_BITS, N_WR_NEXT,
       -- SPI
-      P_PRE, P_INIT, P_CMD, P_RESP, P_RESP_X, P_BUSY, P_DESEL,
+      P_PRE, P_INIT, P_RDY, P_CMD, P_RESP, P_RESP_X, P_BUSY, P_DESEL,
       P_RD_CMD, P_RD_RESP, P_RD_TOKEN, P_RD_DATA, P_RD_NEXT, P_RD_END, P_RD_END2,
       P_WR_CMD, P_WR_RESP, P_WR_TOKEN, P_WR_DATA, P_WR_DRESP, P_WR_NEXT, P_WR_END,
       P_FIN, P_FIN2
@@ -328,6 +347,8 @@ architecture synthesis of sdhost is
    signal rca       : std_logic_vector(15 downto 0) := (others => '0');
    signal native_ok : std_logic := '1';     -- native allowed in this init
    signal retrying  : std_logic := '0';     -- the init is part of a retry
+   signal n_again   : std_logic := '0';     -- the native init failed once (tried again)
+   signal p_again   : std_logic := '0';     -- the SPI init failed once (tried again)
    signal retries   : unsigned(7 downto 0) := (others => '0');
    signal hs        : std_logic := '0';     -- high speed (50 MHz)
    signal hs_ok     : std_logic := '1';     -- high speed allowed in this init
@@ -341,7 +362,7 @@ architecture synthesis of sdhost is
    signal skip      : natural range 0 to 7 := 0;
    signal istep     : natural range 0 to 31 := 0;
    signal tries     : natural range 0 to 15 := 0;
-   signal tmo       : natural range 0 to C_TMO_INIT := 0;
+   signal tmo       : natural range 0 to C_TMO_BUSY := 0;     -- the longest timeout
 
    -- command
    signal c_frame   : std_logic_vector(47 downto 0) := (others => '1');
@@ -360,6 +381,11 @@ architecture synthesis of sdhost is
    signal p_r1      : std_logic_vector(7 downto 0) := x"FF";
    signal p_ext     : std_logic_vector(31 downto 0) := (others => '0');
    signal p_wait    : natural range 0 to 15 := 0;
+   signal tmo2      : natural range 0 to C_TMO_BUSY := 0;   -- SPI: the ready wait before a command
+   signal dr_bits   : natural range 0 to 127 := 0;          -- SPI: bits searched for a data response
+   signal dr_n      : natural range 0 to 4 := 0;            -- its bits found (0: not yet)
+   signal dr_s      : std_logic_vector(2 downto 0) := "000"; -- its status
+   signal dr_busy   : std_logic := '0';                     -- found: the busy now
    signal p_ok      : std_logic := '0';     -- outcome of the transfer being ended
    signal cs        : std_logic := '1';
 
@@ -596,7 +622,7 @@ begin
    -- the controller (rising edge of clk2x_i)
    ---------------------------------------------------------------------------------------
 
-   ctrl : process (clk_i)
+   ctrl : process (clk2x_i)
 
       -- start a command (native or SPI) and come back to `ret`
       procedure do_cmd(idx : natural; arg : std_logic_vector(31 downto 0); resp : t_resp; ret : t_state) is
@@ -608,8 +634,12 @@ begin
          cnt     <= 0;
          if native = '1' then
             st <= N_CMD_TX;
-         else
+         elsif idx = 0 or idx = 12 then
             st <= P_CMD;
+         else
+            tmo2  <= C_TMO_BUSY;
+            p_new <= '0';
+            st    <= P_RDY;
          end if;
       end procedure;
 
@@ -686,6 +716,9 @@ begin
          if tmo /= 0 then
             tmo <= tmo - 1;
          end if;
+         if tmo2 /= 0 then
+            tmo2 <= tmo2 - 1;
+         end if;
 
          ---------------------------------------------------------------------------------
          -- SD clock: a falling edge starts a cycle, only while run = '1'
@@ -740,6 +773,8 @@ begin
                   native_ok <= '0';
                end if;
                retrying  <= '0';
+               n_again   <= '0';
+               p_again   <= '0';
                q_busy    <= '1';
                tmo       <= 2 * G_MS;              -- let the card settle
                st        <= S_INIT;
@@ -790,6 +825,8 @@ begin
                      native_ok <= '0';
                   end if;
                   retrying   <= '0';
+                  n_again    <= '0';
+                  p_again    <= '0';
                   slow       <= '0';
                   hs_ok      <= '1';
                   tmo        <= 0;
@@ -865,11 +902,9 @@ begin
                   end if;
                   run      <= '1';
                   if native = '1' then
-                     if op_wr = '1' then
-                        st <= N_WR_CMD;
-                     else
-                        st <= N_RD_CMD;
-                     end if;
+                     cnt <= 0;
+                     tmo <= C_TMO_BUSY;
+                     st  <= N_RDY;
                   else
                      if op_wr = '1' then
                         st <= P_WR_CMD;
@@ -964,7 +999,13 @@ begin
 
             when N_INIT =>
                case istep is
-                  when 0 =>                        -- CMD0: go idle (no response)
+                  when 0 =>                        -- CMD12: a card left in a multi-block read
+                     -- (by a reset, or by configuring the FPGA) sends blocks and takes no
+                     -- CMD0 (MEGA65's mega65-core, docs/sdcard-native); an idle card ignores
+                     -- it. Its answer and busy are waited for, not checked.
+                     istep <= 23;
+                     do_cmd(12, x"00000000", R_R1B, N_INIT);
+                  when 23 =>                       -- CMD0: go idle (no response)
                      istep <= 1;
                      do_cmd(0, x"00000000", R_NONE, N_INIT);
                   when 1 =>                        -- release DAT3, a few idle clocks
@@ -1188,8 +1229,13 @@ begin
                         cnt    <= 0;
                         st     <= S_TAIL;
                      end if;
-                  when others =>                   -- 30: native failed, init in SPI mode
-                     native_ok <= '0';
+                  when others =>                   -- 30: native failed: once more, then SPI
+                     -- (a card leaves SPI mode only when it loses power: one more native try)
+                     if n_again = '0' then
+                        n_again <= '1';
+                     else
+                        native_ok <= '0';
+                     end if;
                      ready     <= '0';
                      tmo       <= 0;
                      st        <= S_INIT;
@@ -1263,18 +1309,40 @@ begin
                   end if;
                end if;
 
-            -- busy on DAT0: wait up to 16 clocks for low, then for high
+            -- busy on DAT0: wait up to C_BUSY_START clocks for low, then for high
             when N_BUSY0 =>
                if tick = '1' then
                   if dat_in(0) = '0' then
                      tmo <= C_TMO_BUSY;
                      st  <= N_BUSY1;
-                  elsif cnt = 16 then
+                  elsif cnt = C_BUSY_START then
                      cnt <= 0;
                      st  <= ret_st;
                   else
                      cnt <= cnt + 1;
                   end if;
+               end if;
+
+            -- before a read or write command: the card ready, DAT0 high for 8 clocks (a busy
+            -- from before, as after a reset during a write; at most C_TMO_BUSY)
+            when N_RDY =>
+               if tick = '1' then
+                  if dat_in(0) = '0' then
+                     cnt <= 0;
+                  elsif cnt = 8 then
+                     cnt <= 0;
+                     if op_wr = '1' then
+                        st <= N_WR_CMD;
+                     else
+                        st <= N_RD_CMD;
+                     end if;
+                  else
+                     cnt <= cnt + 1;
+                  end if;
+               end if;
+               if tmo = 0 then
+                  c_ok <= '0';
+                  st   <= S_FAIL;
                end if;
 
             when N_BUSY1 =>
@@ -1320,7 +1388,7 @@ begin
                   end if;
                else
                   run <= '1';
-                  if tick = '1' and dat_in(0) = '0' then
+                  if tick = '1' and dat_in = "0000" then   -- (DAT0 alone low is a busy)
                      bidx  <= (others => '0');
                      crc_l <= (others => '0');
                      st    <= N_RD_DATA;
@@ -1686,21 +1754,56 @@ begin
                         st     <= S_IDLE;
                      end if;
                   when others =>                   -- 30: no card / init failed
-                     ready     <= '0';
-                     ctype     <= "00";
-                     cs_v        := '1';
-                     run       <= '0';
-                     q_busy    <= '0';
-                     q_error   <= '1';
-                     q_errcode <= C_ERR_INIT;
-                     if retrying = '1' and op_eng = '1' then
-                        e_busy  <= '0';
-                        e_done  <= '1';
-                        e_error <= '1';
+                     if p_again = '0' then
+                        -- once more (a card's first SPI init after insertion can fail)
+                        p_again <= '1';
+                        ready   <= '0';
+                        cs_v      := '1';
+                        tmo     <= 0;
+                        st      <= S_INIT;
+                     else
+                        ready     <= '0';
+                        ctype     <= "00";
+                        cs_v        := '1';
+                        run       <= '0';
+                        q_busy    <= '0';
+                        q_error   <= '1';
+                        q_errcode <= C_ERR_INIT;
+                        if retrying = '1' and op_eng = '1' then
+                           e_busy  <= '0';
+                           e_done  <= '1';
+                           e_error <= '1';
+                        end if;
+                        retrying <= '0';
+                        st       <= S_IDLE;
                      end if;
-                     retrying <= '0';
-                     st       <= S_IDLE;
                end case;
+
+            -- SPI, before a command but CMD0 and CMD12: FF until the card has sent four FF
+            -- bytes in a row (a busy card holds MISO low, and a command sent then reads 00
+            -- as its R1: lost sectors on hardware), at most C_TMO_BUSY (MEGA65's
+            -- mega65-core, docs/sdcard-native)
+            when P_RDY =>
+               run <= '1';
+               if p_new = '1' then
+                  p_new <= '0';
+                  if p_byte = x"FF" then
+                     if cnt = 3 then
+                        cnt <= 0;
+                        st  <= P_CMD;
+                     else
+                        cnt <= cnt + 1;
+                     end if;
+                  else
+                     cnt <= 0;
+                  end if;
+               end if;
+               if tmo2 = 0 then
+                  c_ok <= '0';
+                  p_r1 <= x"FF";
+                  cnt  <= 0;
+                  st   <= ret_st;
+               end if;
 
             -- SPI command: FF, 6 command bytes, then FF while looking for R1 (bit 7 =
             -- 0); R3/R7 add 4 bytes, R1b a busy phase
@@ -1759,11 +1862,18 @@ begin
                   end if;
                end if;
 
-            when P_BUSY =>                         -- until MISO is high again
-               if p_new = '1' then
+            when P_BUSY =>                         -- until four FF bytes in a row (a busy
+               if p_new = '1' then                 -- may start a byte or more late)
                   p_new <= '0';
-                  if p_byte /= x"00" then
-                     st <= ret_st;
+                  if p_byte = x"FF" then
+                     if cnt = 3 then
+                        cnt <= 0;
+                        st  <= ret_st;
+                     else
+                        cnt <= cnt + 1;
+                     end if;
+                  else
+                     cnt <= 0;
                   end if;
                end if;
                if tmo = 0 then
@@ -1922,8 +2032,9 @@ begin
 
             when P_WR_RESP =>
                if c_ok = '0' or p_r1 /= x"00" then
-                  p_ok <= '0';
-                  st   <= P_WR_END;
+                  p_ok  <= '0';
+                  istep <= 0;
+                  st    <= P_WR_END;
                else
                   cnt <= 0;
                   st  <= P_WR_TOKEN;
@@ -1936,8 +2047,9 @@ begin
                   if ld then
                      run <= '0';
                   elsif run = '0' and preempt = '1' then
-                     p_ok <= '1';
-                     st   <= P_WR_END;
+                     p_ok  <= '1';
+                     istep <= 0;                   -- (after an SPI init it was 12: no FD)
+                     st    <= P_WR_END;
                   end if;
                else
                   run <= '1';
@@ -1967,44 +2079,69 @@ begin
                      txv := crc_l(15 downto 8);
                   else
                      txv := crc_l(7 downto 0);
-                     -- the data response is the byte right after this one: the next
-                     -- two completed bytes (during CRC bytes 1 and 2) are skipped
-                     p_wait <= 0;
-                     p_new  <= '0';
-                     cnt    <= 0;
-                     tmo    <= C_TMO_BUSY;
-                     st     <= P_WR_DRESP;
+                     -- the data response follows, searched bit by bit (the card sends
+                     -- ones until it has the whole block: its first 0 is the token's)
+                     p_wait  <= 0;
+                     p_new   <= '0';
+                     cnt     <= 0;
+                     dr_bits <= 0;
+                     dr_n    <= 0;
+                     dr_busy <= '0';
+                     tmo     <= C_TMO_BUSY;
+                     st      <= P_WR_DRESP;
                   end if;
                   bidx <= bidx + 1;
                end if;
 
             when P_WR_DRESP =>
-               -- data response xxx0sss1, then busy (00) until a non-zero byte
-               if p_new = '1' then
-                  p_new <= '0';
-                  if cnt = 0 then
-                     if p_wait < 2 then
-                        p_wait <= p_wait + 1;
-                     elsif p_byte(4) = '0' and p_byte(0) = '1' then
-                        if p_byte(3 downto 1) = "010" then
-                           cnt <= 1;
+               -- the data response xxx0sss1, searched bit by bit (some cards send it a few
+               -- bits late; Linux's mmc_spi does the same): its 0, three status bits, its 1;
+               -- then the busy, until four FF bytes in a row (it may start a byte or more
+               -- late)
+               if dr_busy = '0' then
+                  if tick = '1' then
+                     if dr_n = 0 then
+                        if dat_in(0) = '0' then
+                           dr_n <= 1;
+                        elsif dr_bits = 96 then    -- the CRC bytes and 10 more
+                           p_ok  <= '0';           -- no data response
+                           istep <= 0;
+                           st    <= P_WR_END;
                         else
-                           p_ok <= '0';
-                           st   <= P_WR_END;
+                           dr_bits <= dr_bits + 1;
                         end if;
-                     elsif p_wait = 10 then
-                        p_ok <= '0';
-                        st   <= P_WR_END;
+                     elsif dr_n < 4 then
+                        dr_s <= dr_s(1 downto 0) & dat_in(0);
+                        dr_n <= dr_n + 1;
                      else
-                        p_wait <= p_wait + 1;
+                        if dat_in(0) = '1' and dr_s = "010" then
+                           dr_busy <= '1';         -- accepted
+                           cnt     <= 0;
+                           p_new   <= '0';
+                        else
+                           p_ok  <= '0';           -- a CRC or write error
+                           istep <= 0;
+                           st    <= P_WR_END;
+                        end if;
                      end if;
-                  elsif p_byte /= x"00" then
-                     st <= P_WR_NEXT;
+                  end if;
+               elsif p_new = '1' then
+                  p_new <= '0';
+                  if p_byte = x"FF" then
+                     if cnt = 3 then
+                        cnt <= 0;
+                        st  <= P_WR_NEXT;
+                     else
+                        cnt <= cnt + 1;
+                     end if;
+                  else
+                     cnt <= 0;
                   end if;
                end if;
                if tmo = 0 then
-                  p_ok <= '0';
-                  st   <= P_WR_END;
+                  p_ok  <= '0';
+                  istep <= 0;
+                  st    <= P_WR_END;
                end if;
 
             when P_WR_NEXT =>
@@ -2032,6 +2169,7 @@ begin
                      istep  <= 1;
                      p_wait <= 0;
                      p_new  <= '0';
+                     cnt    <= 0;
                      tmo    <= C_TMO_BUSY;
                   end if;
                else
@@ -2040,9 +2178,16 @@ begin
                      p_new <= '0';
                      if p_wait < 3 then
                         p_wait <= p_wait + 1;
-                     elsif p_byte /= x"00" then
-                        istep <= 0;
-                        st    <= P_FIN;
+                     elsif p_byte = x"FF" then     -- the busy: until four FF bytes in a row
+                        if cnt = 3 then
+                           cnt   <= 0;
+                           istep <= 0;
+                           st    <= P_FIN;
+                        else
+                           cnt <= cnt + 1;
+                        end if;
+                     else
+                        cnt <= 0;
                      end if;
                   end if;
                   if tmo = 0 then
