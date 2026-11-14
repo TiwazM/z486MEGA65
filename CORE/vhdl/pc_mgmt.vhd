@@ -7,7 +7,7 @@
 -- CMOS (rtc.v).
 --
 --   * At power-up, while the PC is still held in reset: the CMOS configuration (x86_init:
---     equipment, 640 KB base memory, century, LBA translation), the date and time from the
+--     registers A and B, equipment, 640 KB base memory, century, LBA translation), the date and time from the
 --     MEGA65's RTC (again once, when the RTC has been read: rtc_i(64) toggles; and again
 --     whenever the PC restarts, rtc_sync_i: its CMOS clock was the RTC on a PC), both floppy
 --     drives empty with 1.44 MB geometry (fdd_set), no hard disk. The CMOS's drive types (10h
@@ -190,7 +190,13 @@ architecture synthesis of pc_mgmt is
       d : natural range 0 to 255;
    end record;
    type t_pairs is array (natural range <>) of t_pair;
+   -- 0Ah/0Bh as x86_init (and Bochs's own CMOS model): the Bochs BIOS never sets them at POST
+   -- (only INT 1Ah's set calls when the clock looks stopped), and rtc.v's registers start at
+   -- 00h: register B in 12-hour mode, which Linux's rtc_cmos refuses ("only 24-hr supported":
+   -- no /dev/rtc0, and CorePlus's tc-config waits for it for ever).
    constant C_CMOS_MORE : t_pairs := (
+      (16#0A#, 16#26#),             -- register A: 32.768 kHz time base, 1024 Hz periodic rate
+      (16#0B#, 16#02#),             -- register B: 24-hour, BCD, no interrupts
       (16#32#, 16#20#),             -- century (BCD)
       (16#37#, 16#20#),             -- century (PS/2)
       (16#39#, 16#55#));            -- LBA translation for the hard disks

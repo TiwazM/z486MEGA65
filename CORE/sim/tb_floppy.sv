@@ -363,6 +363,13 @@ module tb_floppy #(
             $error("CMOS checksum %02x%02x, the bytes add up to %04x", hi, lo, 16'(sum)); errors++;
         end else
             $display("ok    CMOS checksum %02x%02x", hi, lo);
+        // registers A and B as x86_init writes them (B: 24-hour, else Linux's rtc_cmos refuses
+        // the clock); A's bit 7 is UIP
+        cmos_rd(7'h0A, hi); cmos_rd(7'h0B, lo);
+        if (hi[6:0] != 7'h26 || lo != 8'h02) begin
+            $error("CMOS register A %02x, B %02x (26h, 02h)", hi, lo); errors++;
+        end else
+            $display("ok    CMOS register A %02x, B %02x", hi, lo);
         cmos_rd(7'h00, v); cmos_rd(7'h02, hi); cmos_rd(7'h04, lo);
         $display("      CMOS time %02x:%02x:%02x", lo, hi, v);
         cmos_rd(7'h07, v); cmos_rd(7'h08, hi); cmos_rd(7'h09, lo);
