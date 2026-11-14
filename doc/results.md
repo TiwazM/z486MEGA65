@@ -200,8 +200,12 @@ through twice: 27,872 sectors read and 14,814 written after the first, none fail
 slowest read 46 ms. The second installs GRUB 0.91 (636K lower / 64512K upper), and DSL boots from
 the hard disk. Its framebuffer entries (`vga=791` etc.) stop with "undefined mode number": vesafb
 needs a linear framebuffer, which z486's ET4000 lacks. Its X (Xvesa, the VESA BIOS's banked modes)
-switches between its modes, 800x600 at 24 bits too. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
-tray empty.
+switches between its modes, 800x600 at 24 bits too. The internal slot empty (a power cycle, then a
+JTAG load): slot 0 "no card", the settings file and the hard disk from the back card, the PC boots,
+no failed sector. The back card runs SPI at 25 MHz: with the internal slot empty, the MEGA65's own
+start-up reads the back card in SPI mode, and a card stays in SPI until it loses power; the core
+falls back to SPI after its native tries, as designed. Not tried yet: a disk-heavy run in SPI mode,
+a start from flash or the SD card.
 
 ## Builds
 
