@@ -189,7 +189,10 @@ waits cost nothing. Quake 1.06 from C: with its CD as a BIN/CUE (11 tracks): 16-
 on DMA 5, CD audio, the DOS mouse driver and the joystick found; `timedemo demo2` 8.0 fps (969
 frames, 120.8 s), as v0.2.1. Its music played from the CD into track 5 while the game loaded from
 the hard disk: 39 samples missing in all (under 1 ms, the moments after a PLAY before the first
-sectors arrive), no disk errors, 48,431 ring checksums matched. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+sectors arrive), no disk errors, 48,431 ring checksums matched. PIOTEST: 24 MB in 6 passes without
+a wrong byte, REP INSW 3,270 KB/s, IN loop 3,020, REP INSD 3,856, IN check 3,811 (wrun: 3,040,
+1,918, 3,655, 2,226). QBASIC.EXE copied 5 times on C: and compared with FC: no differences. After a
+JTAG reload with the PC idle, both cards start native 4-bit at 50 MHz again. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
