@@ -181,7 +181,11 @@ memory-size registers read as the VGA BIOS leaves them for 2 MB (CR32 = A8h, CR3
 FreeDOS, in Windows 95 and in an OS/2 DOS session. OS/2's SVGA tool still finds 256 KB by its own
 means. In Windows 95's DOS: Chris's 3D Benchmark 43.3 (25.9 fps), the Superscape benchmark 49.5 fps
 and PC Player Benchmark 13.7 fps, each the same as v0.2.1 and v022c, so the CPU fixes since then cost
-no speed. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
+no speed. SpeedSys 4.78 (MS-DOS 7.10; v022c's run was MS-DOS 6.22): processor benchmark 23.19
+(23.26), memory figures unchanged (93.14 MB/s, L1 41.90, L2 34.92, 30.32), VESA 20520 KB/s
+(20728); hard disk 520C 128H 63S as before, random access 0.36 ms (0.42), buffered read 9549 KB/s
+(9440), linear read 8917 KB/s (8721), hard drive speed **1902.18** (1684.85): the SD host's new
+waits cost nothing. Not tried yet: SPI mode on hardware, a start from flash or the SD card, and the bottom
 tray empty.
 
 ## Builds
