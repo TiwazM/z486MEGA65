@@ -149,6 +149,14 @@ PATCHES = {
          "\t.vga_off           (video_off),\n"
          "\t.vga_565           (video_565),       // MEGA65 (z486_sources.py)\n"
          "\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)"),
+        # vga.v's line doubling (below) out to the wrapper: crt_post.vhd's TV scanlines pair the
+        # PC's lines only when the VGA repeats each row
+        ("\toutput wire        video_dac24,       // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)",
+         "\toutput wire        video_dac24,       // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)\n"
+         "\toutput wire        video_dblscan,     // MEGA65: the VGA repeats each row (z486_sources.py)"),
+        ("\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)",
+         "\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)\n"
+         "\t.vga_dblscan       (video_dblscan),   // MEGA65 (z486_sources.py)"),
     ],
     # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
     # internal drive follows them): the DOR's motor bits, the selected drive and each drive's
@@ -529,8 +537,14 @@ PATCHES = {
         ("\toutput reg          scanline_done\n);",
          "\toutput reg          scanline_done,\n\n"
          "\toutput              vga_565,           // MEGA65: the HiColor DAC is in 16-bit 565 (z486_sources.py)\n"
-         "\toutput              vga_dac24          // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)\n"
+         "\toutput              vga_dac24,         // MEGA65: the HiColor DAC is in 24-bit mode (z486_sources.py)\n"
+         "\toutput              vga_dblscan        // MEGA65: the CRTC repeats each row (z486_sources.py)\n"
          ");"),
+        # the CRTC repeats each row: CR09 bit 7 or maximum scan line 1 (320x200, 320x240 and the
+        # other 200-line modes, which reach the scaler as 400 or 480 lines)
+        ("wire vertical_doublescan = crtc_vertical_doublescan || crtc_row_max == 5'd1;",
+         "wire vertical_doublescan = crtc_vertical_doublescan || crtc_row_max == 5'd1;\n"
+         "assign vga_dblscan = vertical_doublescan;   // MEGA65 (z486_sources.py)"),
         ("always @(posedge clk_sys) if(~rst_n) dac_mask <= 8'hFF; else if(io_c_write && io_address == 4'h6) dac_mask <= io_writedata[7:0];",
          "// MEGA65: the HiColor DAC's command and extended registers (z486_sources.py)\n"
          "reg  [2:0] hdac_cnt;                   // reads of 3C6h in a row, up to 4\n"

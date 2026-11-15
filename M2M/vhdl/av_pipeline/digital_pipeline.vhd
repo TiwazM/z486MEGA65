@@ -272,7 +272,10 @@ begin
    -- M2M-UPSTREAM rtg-native-modes (Megamiga 2026-10-15): entries 7 and 8
    -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-10-31): entry 9
    -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): entries 10 and 11
-   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(11) when hdmi_video_mode_i = C_VIDEO_VGA_720_70   else
+   -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-11-15): entry 12, 1280x960 (4:3: the whole
+   -- picture, as the window's defaults below)
+   hdmi_video_mode <= G_VIDEO_MODE_VECTOR(12) when hdmi_video_mode_i = C_VIDEO_SVGA_960_60  else
+                      G_VIDEO_MODE_VECTOR(11) when hdmi_video_mode_i = C_VIDEO_VGA_720_70   else
                       G_VIDEO_MODE_VECTOR(10) when hdmi_video_mode_i = C_VIDEO_VGA_640_70   else
                       G_VIDEO_MODE_VECTOR(9) when hdmi_video_mode_i = C_VIDEO_SVGA_1280_60  else
                       G_VIDEO_MODE_VECTOR(8) when hdmi_video_mode_i = C_VIDEO_HDMI_1080_30  else
@@ -304,6 +307,7 @@ begin
    assert G_VIDEO_MODE_VECTOR(7).H_PIXELS <= G_VIDEO_MODE_VECTOR(7).V_PIXELS*4/3;  -- M2M-UPSTREAM rtg-native-modes
    assert G_VIDEO_MODE_VECTOR(8).H_PIXELS >= G_VIDEO_MODE_VECTOR(8).V_PIXELS*4/3;  -- M2M-UPSTREAM rtg-native-modes
    assert G_VIDEO_MODE_VECTOR(9).H_PIXELS <= G_VIDEO_MODE_VECTOR(9).V_PIXELS*4/3;  -- M2M-UPSTREAM sxga-mode
+   assert G_VIDEO_MODE_VECTOR(12).H_PIXELS = G_VIDEO_MODE_VECTOR(12).V_PIXELS*4/3; -- M2M-UPSTREAM sxga-mode
 
    -- In HDMI 4:3 mode, ignore crop (zoom-in).
    -- We are using constants here to avoid that large networks are synthesized.

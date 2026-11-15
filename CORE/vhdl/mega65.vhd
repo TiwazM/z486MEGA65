@@ -367,17 +367,18 @@ constant C_MENU_HDMI_720P     : natural := 28;
 constant C_MENU_HDMI_480P     : natural := 29;
 constant C_MENU_HDMI_800      : natural := 30;
 constant C_MENU_HDMI_1024     : natural := 31;
-constant C_MENU_HDMI_1280     : natural := 32;  -- M2M-UPSTREAM sxga-mode
-constant C_MENU_HDMI_NATIVE   : natural := 33;  -- M2M-UPSTREAM native: the PC's own resolution
-constant C_MENU_FLT_SMOOTH    : natural := 40;  -- (39: Sharp, the default)
-constant C_MENU_FLT_PIXELS    : natural := 41;
-constant C_MENU_CRT_VGA       : natural := 48;  -- CRT: a VGA monitor (47: off, the default)
-constant C_MENU_CRT_TV        : natural := 49;  -- CRT: a TV, 200 scanlines
-constant C_MENU_CRT_TRIN      : natural := 50;  -- CRT: a Trinitron, crisp
-constant C_MENU_RF_ORIG       : natural := 57;  -- the VGA's own refresh (56: 60 Hz, the default)
-constant C_MENU_JOY_P5        : natural := 64;  -- the game port's fire 2 on pin 5 (63: pin 9)
-constant C_MENU_JOY_OFF       : natural := 65;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 70;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_HDMI_960      : natural := 32;  -- M2M-UPSTREAM sxga-mode: 1280x960
+constant C_MENU_HDMI_1280     : natural := 33;  -- M2M-UPSTREAM sxga-mode
+constant C_MENU_HDMI_NATIVE   : natural := 34;  -- M2M-UPSTREAM native: the PC's own resolution
+constant C_MENU_FLT_SMOOTH    : natural := 41;  -- (40: Sharp, the default)
+constant C_MENU_FLT_PIXELS    : natural := 42;
+constant C_MENU_CRT_VGA       : natural := 49;  -- CRT: a VGA monitor (48: off, the default)
+constant C_MENU_CRT_TV        : natural := 50;  -- CRT: a TV, 200 scanlines
+constant C_MENU_CRT_TRIN      : natural := 51;  -- CRT: a Trinitron, crisp
+constant C_MENU_RF_ORIG       : natural := 58;  -- the VGA's own refresh (57: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 65;  -- the game port's fire 2 on pin 5 (64: pin 9)
+constant C_MENU_JOY_OFF       : natural := 66;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 71;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -430,6 +431,8 @@ signal main_dbg_vga_checked   : std_logic;
 signal main_dbg_vga_bad       : std_logic;
 signal main_dbg_first_instr   : std_logic;
 signal main_dbg_post_code     : std_logic_vector(7 downto 0);
+signal main_vga_dbl           : std_logic;                       -- the VGA repeats each row
+signal qnice_vga_dbl          : std_logic_vector(0 downto 0);    -- (crt_post's TV scanlines)
 signal main_dbg_post_write    : std_logic;
 signal main_dbg_cpu_pe        : std_logic;
 signal main_dbg_cpu_cs        : std_logic_vector(15 downto 0);
@@ -782,6 +785,7 @@ component z486_mega65 is
       dbg_first_instr    : out   std_logic;
       dbg_post_code      : out   std_logic_vector(7 downto 0);
       dbg_post_write     : out   std_logic;
+      vga_dblscan        : out   std_logic;
       dbg_cpu_pe         : out   std_logic;
       dbg_cpu_cs         : out   std_logic_vector(15 downto 0);
       dbg_cpu_eip        : out   std_logic_vector(31 downto 0);
@@ -1207,6 +1211,7 @@ begin
          dbg_vga_sig_bad    => main_dbg_vga_bad,
          dbg_first_instr    => main_dbg_first_instr,
          dbg_post_code      => main_dbg_post_code,
+         vga_dblscan        => main_vga_dbl,
          dbg_post_write     => main_dbg_post_write,
          dbg_cpu_pe         => main_dbg_cpu_pe,
          dbg_cpu_cs         => main_dbg_cpu_cs,
@@ -1821,6 +1826,19 @@ begin
          dst_data_o => main_iot_arm
       ); -- i_cdc_iot_arm
 
+   -- the VGA repeats each row (200/240-line modes): crt_post.vhd's TV scanlines pair the lines
+   i_cdc_vga_dbl : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 1,
+         G_REGISTER_SRC => true
+      )
+      port map (
+         src_clk_i     => main_clk,
+         src_data_i(0) => main_vga_dbl,
+         dst_clk_i     => qnice_clk_i,
+         dst_data_o    => qnice_vga_dbl
+      ); -- i_cdc_vga_dbl
+
    i_cdc_iot_stat : entity work.cdc_stable
       generic map (
          G_DATA_SIZE    => 18,
@@ -2145,6 +2163,7 @@ begin
 
    qnice_hdmi_mode    <= qnice_nat_mode        when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
                          C_VIDEO_SVGA_1280_60  when qnice_osm_control_i(C_MENU_HDMI_1280) = '1' else
+                         C_VIDEO_SVGA_960_60   when qnice_osm_control_i(C_MENU_HDMI_960)  = '1' else
                          C_VIDEO_SVGA_1024_60  when qnice_osm_control_i(C_MENU_HDMI_1024) = '1' else
                          C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_HDMI_800)  = '1' else
                          C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_480P) = '1' else
@@ -2178,8 +2197,9 @@ begin
    -- the CRT emulation after the scaler (crt_post.vhd), none in native mode (no scaling, the
    -- PC's own pixels): the CRT menu's modes,
    --    VGA monitor  medium scanlines on the PC's 400 lines, soft beam, the 1084's mask, glow
-   --    TV           200 scanlines (a pair of the VGA's lines each, the strong profile), soft
-   --                 beam, the 1084's mask, glow
+   --    TV           200 scanlines (a pair of the VGA's lines each, the strong profile) when the
+   --                 VGA repeats each row (320x200, 320x240), else one strong scanline a line
+   --                 (text, 640x480: no detail lost); soft beam, the 1084's mask, glow
    --    Trinitron    a crisp late-90s monitor: light scanlines, the aperture grille
    -- all three with CRT colours
    qnice_crt_on               <= (qnice_osm_control_i(C_MENU_CRT_VGA) or
@@ -2197,7 +2217,8 @@ begin
    qnice_crt_o(2)             <= qnice_crt_soft;                              -- glow
    qnice_crt_o(3)             <= qnice_crt_on;                                -- CRT colours
    qnice_crt_o(4)             <= qnice_crt_soft;                              -- soft beam
-   qnice_crt_o(5)             <= qnice_crt_on and qnice_osm_control_i(C_MENU_CRT_TV);  -- TV
+   qnice_crt_o(5)             <= qnice_crt_on and qnice_osm_control_i(C_MENU_CRT_TV) and
+                                 qnice_vga_dbl(0);                            -- TV: pairs
    qnice_ascal_triplebuf_o    <= '1';         -- whole frames: the PC's 70 Hz text mode on 60 Hz
                                               -- HDMI tore while the screen changed
    qnice_flip_joyports_o      <= '0';

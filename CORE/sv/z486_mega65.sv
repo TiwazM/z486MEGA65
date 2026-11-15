@@ -138,6 +138,8 @@ module z486_mega65 #(
     output wire        dbg_first_instr,    // the CPU executed F000:FFF0
     output wire  [7:0] dbg_post_code,      // the last write to port 0x80 or 0x190
     output wire        dbg_post_write,
+    output wire        vga_dblscan,        // the VGA repeats each row: 200/240-line modes (crt_post's
+                                           // TV scanlines pair the lines only then)
     output wire        dbg_cpu_pe,
     output wire [15:0] dbg_cpu_cs,
     output wire [31:0] dbg_cpu_eip,
@@ -562,6 +564,7 @@ system #(
     .video_off           (vga_off),
     .video_565           (vga_565),
     .video_dac24         (vga_dac24),
+    .video_dblscan       (vga_dblscan),
     .video_pal_a         (vga_pal_a),
     .video_pal_d         (vga_pal_d),
     .video_pal_we        (vga_pal_we),

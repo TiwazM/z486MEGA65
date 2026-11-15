@@ -252,6 +252,28 @@ package video_modes_pkg is
       V_POL       => '0'         -- CVT-RB's (positive H, negative V)
    );
 
+   -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-11-15): 1280x960 @ 60.02 Hz with reduced
+   -- blanking on the same 90 MHz and 63.20 kHz lines as 1280x1024 (CVT-RB's 4:3 sync width of 4
+   -- lines, 93 blanking lines): a 4:3 picture filling the mode (640x480 doubled exactly), for a
+   -- monitor that scales a 4:3 input to its height. No CEA VIC.
+   constant C_SVGA_1280_960_60 : video_modes_t := (
+      CLK_KHZ     => 90000,      -- 90.000 MHz
+      CLK_SEL     => "110",
+      CEA_CTA_VIC => 0,          -- not a CEA mode
+      ASPECT      => "01",       -- aspect ratio: 01=4:3, 10=16:9
+      PIXEL_REP   => '0',        -- no pixel repetition
+      H_PIXELS    => 1280,       -- horizontal display width in pixels
+      V_PIXELS    => 960,        -- vertical display width in rows
+      H_FP        => 40,         -- horizontal front porch width in pixels
+      H_PULSE     => 32,         -- horizontal sync pulse width in pixels
+      H_BP        => 72,         -- horizontal back porch width in pixels
+      V_FP        => 3,          -- vertical front porch width in rows
+      V_PULSE     => 4,          -- vertical sync pulse width in rows (CVT: 4 = 4:3)
+      V_BP        => 86,         -- vertical back porch width in rows
+      H_POL       => '1',        -- horizontal sync pulse polarity (1 = positive, 0 = negative):
+      V_POL       => '0'         -- CVT-RB's (positive H, negative V)
+   );
+
    -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06): a VGA card's 400-line modes at 70 Hz,
    -- for a core whose own picture runs at 70 Hz (a PC's text and 320x200 modes), shown at its
    -- own rate instead of converted to 60 Hz. The IBM VGA's timings (31.47 kHz, negative H,
@@ -310,7 +332,9 @@ package video_modes_pkg is
       C_VIDEO_SVGA_1280_60  ,  -- 1280x1024        @ 59.79 Hz, reduced blanking
       -- M2M-UPSTREAM vga70 (z486 for MEGA65, 2026-11-06)
       C_VIDEO_VGA_640_70    ,  -- VGA  640x400     @ 70.09 Hz
-      C_VIDEO_VGA_720_70       -- VGA  720x400     @ 70.11 Hz
+      C_VIDEO_VGA_720_70    ,  -- VGA  720x400     @ 70.11 Hz
+      -- M2M-UPSTREAM sxga-mode (z486 for MEGA65, 2026-11-15)
+      C_VIDEO_SVGA_960_60      -- 1280x960         @ 60.02 Hz, reduced blanking
    );
 
    pure function video_mode_to_slv(video_mode : video_mode_type) return std_logic_vector;
@@ -336,6 +360,7 @@ package body video_modes_pkg is
          when C_VIDEO_SVGA_1280_60  => return "1001";   -- M2M-UPSTREAM sxga-mode
          when C_VIDEO_VGA_640_70    => return "1010";   -- M2M-UPSTREAM vga70
          when C_VIDEO_VGA_720_70    => return "1011";   -- M2M-UPSTREAM vga70
+         when C_VIDEO_SVGA_960_60   => return "1100";   -- M2M-UPSTREAM sxga-mode
       end case;
    end function video_mode_to_slv;
 
@@ -354,6 +379,7 @@ package body video_modes_pkg is
          when "1001" => return C_VIDEO_SVGA_1280_60;    -- M2M-UPSTREAM sxga-mode
          when "1010" => return C_VIDEO_VGA_640_70;      -- M2M-UPSTREAM vga70
          when "1011" => return C_VIDEO_VGA_720_70;      -- M2M-UPSTREAM vga70
+         when "1100" => return C_VIDEO_SVGA_960_60;     -- M2M-UPSTREAM sxga-mode
          when others => return C_VIDEO_HDMI_16_9_50;
       end case;
    end function slv_to_video_mode;
