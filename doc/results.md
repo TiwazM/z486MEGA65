@@ -210,6 +210,18 @@ v022n's SPI rules): PIOTEST 24 MB in 6 passes without a wrong byte, REP INSW 1,9
 compared: no differences; no failed sector, no retry, no checksum mismatch, the slowest write
 7.2 ms. Not tried yet: a start from flash or the SD card.
 
+v0.2.2 test core sdi (`z486-R6-v022sdi.cor`, fpu 798f04c: v022n's hardware with new firmware,
+`tools/build_r6.sh patch` in 1.5 minutes): the file browser's list of the cards has "<SD card info>"
+under each card. It shows each slot's card type and bus (native 4-bit at 25 or 50 MHz, SPI at 25 or
+12.5 MHz, and "re-insert for native" when the card was already in SPI mode), the controller's last
+error, CSR and mode register, the FAT32 result, and the settings file's card; the same text follows
+a fatal start-up message. On the second MEGA65 (2026-11-15, flashed with MEGAFLASH, both cards in):
+both cards SPI at 25 MHz, no errors (mode 0004). The MEGA65's own software read them in SPI mode
+before z486 started, although the internal slot was full. The back card taken out and put back at a
+DOS prompt, with the PC running from `hdd.img` on it: native 4-bit at 50 MHz at once (mode 0035),
+and C: kept working without a remount. Not tried yet: a plain start from flash, without MEGAFLASH
+first.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
