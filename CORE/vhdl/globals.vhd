@@ -61,10 +61,10 @@ constant VGA_DY               : natural := 400;
 constant VGA_LINEDOUBLER      : boolean := true;
 
 -- The scaler's interpolators that are built (M2M-UPSTREAM ascal-mask; bit 0 nearest, 1 bilinear,
--- 2 sharp bilinear, 3 bicubic, 4 polyphase): z486 uses sharp bilinear (mega65.vhd) and polyphase
--- for the Filter menu's CRT; bicubic's DSP paths were the HDMI clock's slowest, too slow for the
--- 90 MHz of 1280x1024
-constant ASCAL_MASK           : std_logic_vector(7 downto 0) := x"17";
+-- 2 sharp bilinear, 3 bicubic, 4 polyphase): z486 uses sharp bilinear (mega65.vhd), and bicubic's
+-- DSP paths were the HDMI clock's slowest, too slow for the 90 MHz of 1280x1024 (the CRT emulation
+-- is after the scaler, crt_post.vhd, not ascal's polyphase filter)
+constant ASCAL_MASK           : std_logic_vector(7 downto 0) := x"07";
 -- ascal's adaptive polyphase (M2M-UPSTREAM ascal-adaptive: a second coefficient set blended by
 -- brightness, for MiSTer's adaptive scanline filters): off, the firmware loads one set
 constant ASCAL_ADAPTIVE       : boolean := false;

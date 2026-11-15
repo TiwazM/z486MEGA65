@@ -244,9 +244,10 @@ port (
    qnice_ascal_triplebuf_i : in    std_logic;
    -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31; crt-post 2026-11-15): scanlines on
    -- the core's own lines, 00 off, 01 light, 10 medium, 11 strong; qnice_crt_i bits 1..0 the
-   -- mask, bit 2 glow, bit 3 CRT gamma (crt_post.vhd via digital_pipeline.vhd)
+   -- mask, bit 2 glow, bit 3 CRT colours, bit 4 soft beam, bit 5 TV scanlines (crt_post.vhd via
+   -- digital_pipeline.vhd)
    qnice_scanlines_i       : in    std_logic_vector(1 downto 0) := "00";
-   qnice_crt_i             : in    std_logic_vector(3 downto 0) := "0000";
+   qnice_crt_i             : in    std_logic_vector(5 downto 0) := "000000";
    -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = the picture unscaled in a
    -- window of 23..12 x 11..0 HDMI pixels in the middle (digital_pipeline.vhd)
    qnice_native_i          : in    std_logic_vector(24 downto 0) := (others => '0');

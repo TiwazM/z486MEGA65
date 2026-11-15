@@ -5,20 +5,24 @@
 --
 -- Between ascal and the on-screen menu, one output pixel per clock, each part on its own:
 --
---   1. Gamma: a CRT's response (out = in ** C_GAMMA), darker mid-tones.
+--   1. CRT colours: a CRT's response (out = in ** C_GAMMA, darker mid-tones) and 1/8 less
+--      saturation (towards the pixel's brightness).
 --   2. Scanlines on the input's own lines at any scale: ascal tells each output line's place
---      between two input lines (vfrac_i: 0 = on the upper one); the line's brightness follows
---      an electron beam's profile across that gap, its width growing with the pixel's
---      brightness (a bright line is thicker, as on a CRT), and the lines are brightened to
---      win back part of what the gaps take (C_SL: light, medium, strong).
---   3. Mask: the phosphor pattern by output pixel, MiSTer's shadowmask.sv way (per pixel and
---      colour a multiplier of 0..1.94: an aperture grille, a slot mask, the Commodore 1084's
---      shadow mask from M2M/video_filters).
---   4. Glow: what is brighter than C_GLOW_T, blurred (7 pixels across, this and two lines up)
+--      between two input lines (vfrac_i: 0 = on the upper one) and which line of a pair the
+--      upper one is (vodd_i). The line's brightness follows an electron beam's profile across
+--      the gap, its width growing with the pixel's brightness (dark lines thin, bright ones
+--      nearly filling the gaps), brightened to win back part of what the gaps take (C_SL:
+--      light, medium, strong). With tv_i the beams are a pair of input lines high: 320x200 as
+--      the VGA doubles it to 400 lines gets a TV's 200 scanlines (the strong profile).
+--   3. A soft beam (soft_i): [1 4 6 4 1] / 16 across.
+--   4. Mask: the phosphor pattern by output pixel, MiSTer's shadowmask.sv way (per pixel and
+--      colour a multiplier of 0..1.94), at half the usual strength: an aperture grille, a slot
+--      mask, the Commodore 1084's shadow mask from M2M/video_filters.
+--   5. Glow: what is brighter than C_GLOW_T, blurred (7 pixels across, this and two lines up)
 --      and half of it added back after the mask: bright areas bleed a little and win back
 --      some of the mask's darkening.
 --
--- The tables are constants (no loader). Latency C_LAT clocks; syncs and display enable are
+-- The tables are constants (no loader). Latency 12 clocks; syncs and display enable are
 -- delayed alike.
 --
 -- done by the z486MEGA65 project in 2026 and licensed under GPL v3
@@ -42,10 +46,14 @@ entity crt_post is
       mask_i   : in  std_logic_vector(1 downto 0);     -- 00 off, 01 aperture grille, 10 slot
                                                        -- mask, 11 shadow mask (Commodore 1084)
       glow_i   : in  std_logic;
-      gamma_i  : in  std_logic;
+      gamma_i  : in  std_logic;                     -- CRT colours: gamma and a little less
+                                                       -- saturation
+      soft_i   : in  std_logic := '0';               -- a soft beam: 5 pixels across
+      tv_i     : in  std_logic := '0';               -- scanlines a pair of input lines high
 
       -- ascal's output; vfrac_i is constant over a line
       vfrac_i  : in  unsigned(11 downto 0);
+      vodd_i   : in  std_logic := '0';               -- the upper input line's lowest bit
       r_i      : in  unsigned(7 downto 0);
       g_i      : in  unsigned(7 downto 0);
       b_i      : in  unsigned(7 downto 0);
@@ -91,9 +99,9 @@ architecture synthesis of crt_post is
    end record;
    type t_sl_pars is array (1 to 3) of t_sl_par;
    constant C_SL : t_sl_pars := (
-      1 => (sd => 0.34, sb => 0.56, comp => 0.5, cap => 1.30),   -- light
-      2 => (sd => 0.26, sb => 0.47, comp => 0.6, cap => 1.45),   -- medium
-      3 => (sd => 0.20, sb => 0.39, comp => 0.7, cap => 1.60));  -- strong
+      1 => (sd => 0.24, sb => 0.80, comp => 0.5, cap => 1.30),   -- light
+      2 => (sd => 0.18, sb => 0.62, comp => 0.6, cap => 1.40),   -- medium
+      3 => (sd => 0.14, sb => 0.48, comp => 0.7, cap => 1.50));  -- strong
    type t_sl_tab is array (0 to 4095) of unsigned(8 downto 0);
    function sl_tab return t_sl_tab is
       variable t                   : t_sl_tab;
@@ -164,27 +172,27 @@ architecture synthesis of crt_post is
    end function mk;
    constant C_MASKS : t_masks := (
       -- aperture grille: red, green, blue stripes
-      1 => mk(2, 0, (16#44A#, 16#24A#, 16#14A#)),
+      1 => mk(2, 0, (16#42D#, 16#22D#, 16#12D#)),
       -- slot mask: triads, every other one with a dark row, staggered
-      2 => mk(5, 3, (16#44A#, 16#24A#, 16#14A#,
-                     16#44A#, 16#24A#, 16#14A#,
-                     16#44A#, 16#24A#, 16#14A#,
-                     16#006#, 16#006#, 16#006#,
-                     16#44A#, 16#24A#, 16#14A#,
-                     16#44A#, 16#24A#, 16#14A#,
-                     16#006#, 16#006#, 16#006#,
-                     16#44A#, 16#24A#, 16#14A#)),
+      2 => mk(5, 3, (16#42D#, 16#22D#, 16#12D#,
+                     16#42D#, 16#22D#, 16#12D#,
+                     16#42D#, 16#22D#, 16#12D#,
+                     16#00B#, 16#00B#, 16#00B#,
+                     16#42D#, 16#22D#, 16#12D#,
+                     16#42D#, 16#22D#, 16#12D#,
+                     16#00B#, 16#00B#, 16#00B#,
+                     16#42D#, 16#22D#, 16#12D#)),
       -- the Commodore 1084's shadow mask (M2M/video_filters/Commodore_1084_BGR_1987.txt, by
       -- TrashUncle, its base size)
-      3 => mk(5, 2, (16#14C#, 16#24C#, 16#44C#,
+      3 => mk(5, 2, (16#12E#, 16#22E#, 16#42E#,
                      16#11F#, 16#21F#, 16#41F#,
                      16#11F#, 16#21F#, 16#41F#,
-                     16#14C#, 16#24C#, 16#44C#,
-                     16#14C#, 16#24C#, 16#44C#,
-                     16#14C#, 16#24C#, 16#44C#)));
+                     16#12E#, 16#22E#, 16#42E#,
+                     16#12E#, 16#22E#, 16#42E#,
+                     16#12E#, 16#22E#, 16#42E#)));
 
    -- Glow: what is above C_GLOW_T, blurred, half of it added
-   constant C_GLOW_T : natural := 128;
+   constant C_GLOW_T : natural := 96;
 
    ---------------------------------------------------------------------------------------------
    -- Pipeline
@@ -200,6 +208,7 @@ architecture synthesis of crt_post is
    signal c1, c2, c3, c4, c6 : t_rgb;
    signal s1, s2, s3, s4, s5, s6 : t_sync := C_SYNC0;
    signal f1, f2, f3       : unsigned(5 downto 0);
+   signal tv3              : std_logic := '0';
    signal lum3             : unsigned(7 downto 0);
    signal w4               : unsigned(8 downto 0);
    type t_prod is array (0 to 2) of unsigned(16 downto 0);
@@ -208,12 +217,13 @@ architecture synthesis of crt_post is
    -- 7..9: the glow's window across (7 pixels, centre 3 back) and the main picture with it
    type t_win is array (0 to 6) of t_rgb;
    signal win              : t_win;
-   type t_cdl is array (0 to 3) of t_rgb;
+   type t_cdl is array (0 to 5) of t_rgb;
    signal cdl              : t_cdl;
    type t_sdl is array (0 to 3) of t_sync;
    signal sdl              : t_sdl := (others => C_SYNC0);
    type t_sum is array (0 to 2) of unsigned(9 downto 0);
    signal ha8, hb8, hc8, hd8 : t_sum;
+   signal sa8, sb8, sc8    : t_sum;
    signal c8, c9, c10      : t_rgb;
    signal s8, s9, s10, s11 : t_sync := C_SYNC0;
    signal h9               : t_rgb;
@@ -258,12 +268,19 @@ begin
       variable p    : unsigned(12 downto 0);
       variable v    : unsigned(9 downto 0);
       variable hsum : unsigned(10 downto 0);
+      variable ssum : unsigned(11 downto 0);
+      variable v13  : unsigned(13 downto 0);
       variable osum : unsigned(9 downto 0);
    begin
       if rising_edge(clk_i) then
          -- 1: in
          c1 <= (r_i, g_i, b_i);
-         f1 <= vfrac_i(11 downto 6);
+         if tv_i = '1' then
+            v13 := ('0' & vodd_i & "000000000000") + resize(vfrac_i, 14) + 6144;
+            f1  <= v13(12 downto 7);
+         else
+            f1  <= vfrac_i(11 downto 6);
+         end if;
          s1 <= (hs_i, vs_i, de_i);
 
          -- 2: gamma
@@ -281,12 +298,23 @@ begin
          lum3 <= to_unsigned((2 * to_integer(c2(0)) + 5 * to_integer(c2(1)) + to_integer(c2(2))) / 8, 8);
          c3   <= c2;
          f3   <= f2;
+         tv3  <= tv_i;
          s3   <= s2;
 
          -- 4: the scanline weight (block RAM)
-         ad := to_integer(unsigned(sl_i)) * 1024 + to_integer(f3) * 16 + to_integer(lum3(7 downto 4));
+         if tv3 = '1' then
+            ad := 3 * 1024 + to_integer(f3) * 16 + to_integer(lum3(7 downto 4));
+         else
+            ad := to_integer(unsigned(sl_i)) * 1024 + to_integer(f3) * 16 + to_integer(lum3(7 downto 4));
+         end if;
          w4 <= C_SL_TAB(ad);
-         c4 <= c3;
+         for i in 0 to 2 loop
+            if gamma_i = '1' then
+               c4(i) <= to_unsigned((to_integer(c3(i)) * 7 + to_integer(lum3)) / 8, 8);
+            else
+               c4(i) <= c3(i);
+            end if;
+         end loop;
          s4 <= s3;
 
          -- 5, 6: weighted
@@ -311,8 +339,10 @@ begin
          end loop;
          cdl(0) <= c6;
          sdl(0) <= s6;
-         for k in 1 to 3 loop
+         for k in 1 to 5 loop
             cdl(k) <= cdl(k - 1);
+         end loop;
+         for k in 1 to 3 loop
             sdl(k) <= sdl(k - 1);
          end loop;
 
@@ -323,6 +353,12 @@ begin
             hc8(i) <= resize(win(2)(i), 10) + win(4)(i);
             hd8(i) <= resize(win(3)(i), 10);
          end loop;
+         -- the soft beam [1 4 6 4 1] / 16 around cdl(3) (pixels outside the line are black)
+         for i in 0 to 2 loop
+            sa8(i) <= resize(cdl(1)(i), 10) + cdl(5)(i);
+            sb8(i) <= resize(cdl(2)(i), 10) + cdl(4)(i);
+            sc8(i) <= resize(cdl(3)(i), 10);
+         end loop;
          c8 <= cdl(3);
          s8 <= sdl(3);
 
@@ -332,7 +368,14 @@ begin
                     shift_left(resize(hd8(i), 11), 2);
             h9(i) <= resize(hsum / 16, 8);
          end loop;
-         c9 <= c8;
+         for i in 0 to 2 loop
+            if soft_i = '1' then
+               ssum := resize(sa8(i), 12) + shift_left(resize(sb8(i), 12), 2) + resize(sc8(i) * 6, 12);
+               c9(i) <= resize(ssum / 16, 8);
+            else
+               c9(i) <= c8(i);
+            end if;
+         end loop;
          s9 <= s8;
          lb1_q <= lb1(to_integer(x9));
          lb2_q <= lb2(to_integer(x9));

@@ -442,7 +442,7 @@ architecture synthesis of mega65_r6 is
    signal qnice_ascal_polyphase  : std_logic;
    signal qnice_ascal_triplebuf  : std_logic;
    signal qnice_scanlines        : std_logic_vector(1 downto 0);   -- M2M-UPSTREAM scanlines
-   signal qnice_crt              : std_logic_vector(3 downto 0);   -- M2M-UPSTREAM crt-post
+   signal qnice_crt              : std_logic_vector(5 downto 0);   -- M2M-UPSTREAM crt-post
    signal qnice_native           : std_logic_vector(24 downto 0);  -- M2M-UPSTREAM native
    signal qnice_retro15kHz       : std_logic;
    signal qnice_osm_cfg_scaling  : std_logic_vector(8 downto 0);

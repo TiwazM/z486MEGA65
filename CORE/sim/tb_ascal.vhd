@@ -77,6 +77,7 @@ architecture sim of tb_ascal is
    signal o_r, o_g, o_b : unsigned(7 downto 0);
    signal o_hs, o_vs, o_de : std_logic;
    signal o_vlf : unsigned(11 downto 0);
+   signal o_vlo : std_logic;
 
    signal avl_waitrequest   : std_logic := '1';
    signal avl_readdata      : std_logic_vector(C_DW-1 downto 0) := (others => '0');
@@ -171,7 +172,7 @@ begin
          i_r => i_r, i_g => i_g, i_b => i_b, i_hs => i_hs, i_vs => i_vs, i_fl => '0',
          i_de => i_de, i_ce => '1', i_clk => i_clk,
          o_r => o_r, o_g => o_g, o_b => o_b, o_hs => o_hs, o_vs => o_vs, o_de => o_de,
-         o_vbl => open, o_brd => open, o_vline_frac => o_vlf, o_ce => '1', o_clk => o_clk,
+         o_vbl => open, o_brd => open, o_vline_frac => o_vlf, o_vline_odd => o_vlo, o_ce => '1', o_clk => o_clk,
          o_border => x"000000",
          o_fb_ena => '0', o_fb_hsize => 0, o_fb_vsize => 0, o_fb_format => "000101",
          o_fb_base => x"0000_0000", o_fb_stride => (others => '0'),
@@ -363,7 +364,7 @@ begin
                  mod 16777213;
             if frame = 4 and x = G_OW / 2 then
                write(l, integer'image(y) & " " & integer'image(to_integer(o_vlf)) & " " &
-                        integer'image(to_integer(o_r)));
+                        integer'image(to_integer(o_r)) & " " & std_logic'image(o_vlo));
                writeline(f_vf, l);
             end if;
             if frame = 4 then

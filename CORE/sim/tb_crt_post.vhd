@@ -28,6 +28,7 @@ architecture sim of tb_crt_post is
    signal r_i, g_i, b_i, r_o, g_o, b_o : unsigned(7 downto 0) := (others => '0');
    signal hs_i, vs_i, de_i, hs_o, vs_o, de_o : std_logic := '0';
    signal vfrac : unsigned(11 downto 0) := (others => '0');
+   signal vodd : std_logic := '0';
    signal done : boolean := false;
    signal frame_i : natural := 0;
 
@@ -85,7 +86,7 @@ begin
          mask_i  => std_logic_vector(to_unsigned(G_MASK, 2)),
          glow_i  => to_unsigned(G_GLOW, 1)(0),
          gamma_i => to_unsigned(G_GAMMA, 1)(0),
-         vfrac_i => vfrac,
+         vfrac_i => vfrac, vodd_i => vodd,
          r_i => r_i, g_i => g_i, b_i => b_i, hs_i => hs_i, vs_i => vs_i, de_i => de_i,
          r_o => r_o, g_o => g_o, b_o => b_o, hs_o => hs_o, vs_o => vs_o, de_o => de_o);
 
@@ -114,6 +115,7 @@ begin
             n := integer(pos - 0.4999999);
             f := pos - real(n);
             vfrac <= to_unsigned(integer(f * 4095.0), 12);
+            vodd <= to_unsigned(n, 1)(0);
             for x in 0 to G_OW - 1 loop
                ix := x * C_IW / G_OW;
                a := vga(ix, n);

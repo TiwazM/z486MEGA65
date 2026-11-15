@@ -66,8 +66,8 @@ port (
    qnice_scanlines_o       : out std_logic_vector(1 downto 0);  -- 00 off, 01 light, 10 medium,
                                                                 -- 11 strong (crt_post.vhd)
    -- M2M-UPSTREAM crt-post: bits 1..0 the mask (00 off, 01 aperture grille, 10 slot mask, 11
-   -- shadow mask), bit 2 glow, bit 3 CRT gamma
-   qnice_crt_o             : out std_logic_vector(3 downto 0);
+   -- shadow mask), bit 2 glow, bit 3 CRT colours, bit 4 soft beam, bit 5 TV scanlines
+   qnice_crt_o             : out std_logic_vector(5 downto 0);
    -- M2M-UPSTREAM native: bit 24 = the picture unscaled in a 23..12 x 11..0 window
    qnice_native_o          : out std_logic_vector(24 downto 0);
    qnice_retro15kHz_o      : out std_logic;              -- 0 = normal frequency, 1 = retro 15 kHz frequency
@@ -371,19 +371,23 @@ constant C_MENU_HDMI_1280     : natural := 32;  -- M2M-UPSTREAM sxga-mode
 constant C_MENU_HDMI_NATIVE   : natural := 33;  -- M2M-UPSTREAM native: the PC's own resolution
 constant C_MENU_FLT_SMOOTH    : natural := 40;  -- (39: Sharp, the default)
 constant C_MENU_FLT_PIXELS    : natural := 41;
-constant C_MENU_FLT_CRT       : natural := 42;  -- ascal's polyphase filter (CRT emulation)
-constant C_MENU_SL_LIGHT      : natural := 49;  -- post-scale scanlines (48: Off, the default)
-constant C_MENU_SL_MED        : natural := 50;
-constant C_MENU_SL_STRONG     : natural := 51;
-constant C_MENU_MASK_AG       : natural := 58;  -- aperture grille (57: no mask, the default)
-constant C_MENU_MASK_SLOT     : natural := 59;  -- slot mask
-constant C_MENU_MASK_1084     : natural := 60;  -- the Commodore 1084's shadow mask
-constant C_MENU_GLOW          : natural := 63;  -- glow (single-select)
-constant C_MENU_GAMMA         : natural := 64;  -- CRT gamma (single-select)
-constant C_MENU_RF_ORIG       : natural := 69;  -- the VGA's own refresh (68: 60 Hz, the default)
-constant C_MENU_JOY_P5        : natural := 76;  -- the game port's fire 2 on pin 5 (75: pin 9)
-constant C_MENU_JOY_OFF       : natural := 77;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 82;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_CRT_NORMAL    : natural := 48;  -- CRT: a VGA monitor (47: off, the default)
+constant C_MENU_CRT_STRONG    : natural := 49;  -- CRT: a TV
+constant C_MENU_CRT_CUSTOM    : natural := 50;  -- CRT: the settings below
+constant C_MENU_SL_LIGHT      : natural := 57;  -- Custom: scanlines (56: off)
+constant C_MENU_SL_MED        : natural := 58;  --   (the default)
+constant C_MENU_SL_STRONG     : natural := 59;
+constant C_MENU_SL_TV         : natural := 60;  --   200 lines: a pair of VGA lines a scanline
+constant C_MENU_MASK_AG       : natural := 67;  -- Custom: aperture grille (66: no mask)
+constant C_MENU_MASK_SLOT     : natural := 68;  --   slot mask
+constant C_MENU_MASK_1084     : natural := 69;  --   the Commodore 1084's shadow mask
+constant C_MENU_GLOW          : natural := 72;  -- Custom: glow (single-select, default on)
+constant C_MENU_SOFT          : natural := 73;  -- Custom: soft beam (single-select, default on)
+constant C_MENU_COLOURS       : natural := 74;  -- Custom: CRT colours (single-select, default on)
+constant C_MENU_RF_ORIG       : natural := 79;  -- the VGA's own refresh (78: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 86;  -- the game port's fire 2 on pin 5 (85: pin 9)
+constant C_MENU_JOY_OFF       : natural := 87;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 92;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -557,7 +561,8 @@ signal main_nat_f             : std_logic := '0';     -- the last frame was shor
 signal qnice_nat_size         : std_logic_vector(24 downto 0);
 signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
 signal qnice_hdmi_mode        : video_mode_type;   -- the HDMI mode (native's or the menu's)
-signal qnice_flt_crt          : std_logic;         -- the Filter menu's CRT (polyphase)
+signal qnice_crt_on           : std_logic;         -- the CRT menu: a preset or Custom
+signal qnice_crt_cust         : std_logic;         -- the CRT menu: Custom
 signal qnice_nat_on           : std_logic := '0';
 signal qnice_nat_w            : natural range 0 to 4095 := 640;
 signal qnice_nat_h            : natural range 0 to 4095 := 480;
@@ -2174,38 +2179,40 @@ begin
                                                   qnice_hdmi_mode = C_VIDEO_VGA_720_70    else
                                  "000000001";
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
-   -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0]), and
-   -- CRT: ascal's polyphase filter (MODE 100), with the coefficients the firmware loads at start
-   -- (M2M/rom/filters.asm: lanczos2_12 across, Scan_Br_110_80 down, the C64MEGA65 core's CRT
-   -- emulation): each output line is weighted by its place between two of the PC's lines, so
-   -- the scanlines follow the PC's lines at any scale. Not in native mode (no scaling).
-   qnice_flt_crt              <= qnice_osm_control_i(C_MENU_FLT_CRT) and
-                                 not qnice_osm_control_i(C_MENU_HDMI_NATIVE);
+   -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
    qnice_ascal_mode_o         <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
-                                 "00" when qnice_flt_crt = '1' else
                                  "01" when qnice_osm_control_i(C_MENU_FLT_SMOOTH) = '1' else
                                  "00" when qnice_osm_control_i(C_MENU_FLT_PIXELS) = '1' else
                                  "10";
-   qnice_ascal_polyphase_o    <= qnice_flt_crt;
-   -- the CRT emulation after the scaler (crt_post.vhd), each part on its own, none in native
-   -- mode (no scaling, the PC's own pixels): the Scanlines menu (on the PC's own lines at any
-   -- scale; off with the CRT filter, which draws its own: config.vhd greys them out), the Mask
-   -- menu, Glow, CRT gamma
-   qnice_scanlines_o          <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
-                                 "00" when qnice_osm_control_i(C_MENU_FLT_CRT) = '1' else
+   qnice_ascal_polyphase_o    <= '0';
+   -- the CRT emulation after the scaler (crt_post.vhd), none in native mode (no scaling, the
+   -- PC's own pixels): the CRT menu's presets, Normal (a VGA monitor: medium scanlines on the
+   -- PC's 400 lines) and Strong (a TV: 200 scanlines), both with soft beam, the 1084's mask,
+   -- glow and CRT colours; or Custom: the Scanlines and Mask menus, Glow, Soft beam, CRT colours
+   qnice_crt_on               <= (qnice_osm_control_i(C_MENU_CRT_NORMAL) or
+                                  qnice_osm_control_i(C_MENU_CRT_STRONG) or
+                                  qnice_osm_control_i(C_MENU_CRT_CUSTOM)) and
+                                 not qnice_osm_control_i(C_MENU_HDMI_NATIVE);
+   qnice_crt_cust             <= qnice_osm_control_i(C_MENU_CRT_CUSTOM);
+   qnice_scanlines_o          <= "00" when qnice_crt_on = '0' else
+                                 "10" when qnice_osm_control_i(C_MENU_CRT_NORMAL) = '1' else
+                                 "11" when qnice_osm_control_i(C_MENU_CRT_STRONG) = '1' else
                                  "01" when qnice_osm_control_i(C_MENU_SL_LIGHT) = '1' else
                                  "10" when qnice_osm_control_i(C_MENU_SL_MED) = '1' else
-                                 "11" when qnice_osm_control_i(C_MENU_SL_STRONG) = '1' else
+                                 "11" when qnice_osm_control_i(C_MENU_SL_STRONG) = '1' or
+                                           qnice_osm_control_i(C_MENU_SL_TV) = '1' else
                                  "00";
-   qnice_crt_o(1 downto 0)    <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+   qnice_crt_o(1 downto 0)    <= "00" when qnice_crt_on = '0' else
+                                 "11" when qnice_crt_cust = '0' else
                                  "01" when qnice_osm_control_i(C_MENU_MASK_AG) = '1' else
                                  "10" when qnice_osm_control_i(C_MENU_MASK_SLOT) = '1' else
                                  "11" when qnice_osm_control_i(C_MENU_MASK_1084) = '1' else
                                  "00";
-   qnice_crt_o(2)             <= qnice_osm_control_i(C_MENU_GLOW) and
-                                 not qnice_osm_control_i(C_MENU_HDMI_NATIVE);
-   qnice_crt_o(3)             <= qnice_osm_control_i(C_MENU_GAMMA) and
-                                 not qnice_osm_control_i(C_MENU_HDMI_NATIVE);
+   qnice_crt_o(2)             <= qnice_crt_on and (not qnice_crt_cust or qnice_osm_control_i(C_MENU_GLOW));
+   qnice_crt_o(3)             <= qnice_crt_on and (not qnice_crt_cust or qnice_osm_control_i(C_MENU_COLOURS));
+   qnice_crt_o(4)             <= qnice_crt_on and (not qnice_crt_cust or qnice_osm_control_i(C_MENU_SOFT));
+   qnice_crt_o(5)             <= qnice_crt_on and (qnice_osm_control_i(C_MENU_CRT_STRONG) or
+                                                   (qnice_crt_cust and qnice_osm_control_i(C_MENU_SL_TV)));
    qnice_ascal_triplebuf_o    <= '1';         -- whole frames: the PC's 70 Hz text mode on 60 Hz
                                               -- HDMI tore while the screen changed
    qnice_flip_joyports_o      <= '0';

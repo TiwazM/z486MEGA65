@@ -113,10 +113,10 @@ entity digital_pipeline is
       -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31; crt-post 2026-11-15): scanlines on
       -- the core's own lines at any scale, 00 off, 01 light, 10 medium, 11 strong, and
       -- (hdmi_crt_i) bits 1..0 the mask (00 off, 01 aperture grille, 10 slot mask, 11 the
-      -- Commodore 1084's shadow mask), bit 2 glow, bit 3 CRT gamma (crt_post.vhd; hdmi_clk_i
-      -- domain)
+      -- Commodore 1084's shadow mask), bit 2 glow, bit 3 CRT colours, bit 4 soft beam, bit 5
+      -- TV scanlines (crt_post.vhd; hdmi_clk_i domain)
       hdmi_scanlines_i         : in  std_logic_vector(1 downto 0) := "00";
-      hdmi_crt_i               : in  std_logic_vector(3 downto 0) := "0000";
+      hdmi_crt_i               : in  std_logic_vector(5 downto 0) := "000000";
       -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = ascal's window is 23..12 x
       -- 11..0 output pixels in the middle of the picture instead of the video mode's 4:3 one:
       -- the core asks for an HDMI mode at its own resolution and a window of its picture's
@@ -230,6 +230,7 @@ architecture synthesis of digital_pipeline is
    signal hdmi_sl_vs             : std_logic;
    signal hdmi_sl_de             : std_logic;
    signal hdmi_vline_frac        : unsigned(11 downto 0);          -- M2M-UPSTREAM crt-post
+   signal hdmi_vline_odd         : std_logic;
 
    -- After OSM
    signal hdmi_osm_red           : std_logic_vector(7 downto 0);
@@ -521,6 +522,7 @@ begin
          o_de              => hdmi_de,                      -- output
          o_vbl             => open,                         -- output
          o_vline_frac      => hdmi_vline_frac,              -- output, M2M-UPSTREAM crt-post
+         o_vline_odd       => hdmi_vline_odd,               -- output, M2M-UPSTREAM crt-post
          o_ce              => '1',                          -- input
          o_clk             => hdmi_clk_i,                   -- input
 
@@ -660,7 +662,10 @@ begin
          mask_i   => hdmi_crt_i(1 downto 0),
          glow_i   => hdmi_crt_i(2),
          gamma_i  => hdmi_crt_i(3),
+         soft_i   => hdmi_crt_i(4),
+         tv_i     => hdmi_crt_i(5),
          vfrac_i  => hdmi_vline_frac,
+         vodd_i   => hdmi_vline_odd,
          r_i      => hdmi_red,
          g_i      => hdmi_green,
          b_i      => hdmi_blue,
