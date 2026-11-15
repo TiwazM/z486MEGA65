@@ -222,6 +222,25 @@ DOS prompt, with the PC running from `hdd.img` on it: native 4-bit at 50 MHz at 
 and C: kept working without a remount. Not tried yet: a plain start from flash, without MEGAFLASH
 first.
 
+CRT emulation test cores (2026-11-15), each `impl strong incr` from the one before, every clock met:
+v022crt (591143a, ascal's polyphase filter with MiSTer's Scan_Br_110_80 as a "CRT" filter; hdmi_clk
++0.528 ns at 90 MHz, ascal without its adaptive part 700 LUTs smaller): on the board mild, and an
+ultrawide (ASUS ProArt PA348CGV, 4:3 setting) scaling 1024x768 by 1.875 blurred it further. v022post
+(9dbfd5a, `crt_post.vhd` after the scaler: scanlines on ascal's line position, mask, glow, gamma;
++0.549 ns, 909 LUTs): works, but the scanlines too even, the characters too sharp, the mask too
+strong, the colours too saturated. v022tv (aefc292: scanlines wider on bright pixels, TV scanlines
+on pairs of lines, soft beam, half-strength masks, CRT colours; +0.415 ns, 1,227 LUTs): Normal and
+Strong (TV) look right on DOS text, Destruction Derby and Duke Nukem 3D, but the 25-line main menu
+needed 27 rows of the menu's 40x25 cells and its bottom wrapped to the top. v022trin (bc975c2: the
+CRT menu with three modes, the main menu back to 20 lines; +0.429 ns): Trinitron keeps Windows 3.11
+crisp. v022v960 (831bc72: HDMI 1280x960, TV pairs only lines the VGA doubles; +0.536 ns, main_clk
++0.449 ns, 91.1K LUTs): fine on the board; released as v0.2.2.5.
+
+Seen with every core since v0.2.2.1 or earlier, CRT off too: now and then stray pixels at the right
+end of DOS text lines in 1024x768 on the ASUS, just below bright characters. tb_ascal (720x400 into
+1024x768 with a real line length, slow memory against fast) gives the same lines, so not the
+scaler's line fetch as far as its memory model goes; not found yet.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard

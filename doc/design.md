@@ -282,11 +282,27 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   interpolates sharp bilinear by default: the 720x400 text mode scales by 1.2
   (480p, 720x480) or 1.8 (720p), and nearest-neighbour made diagonal strokes
   uneven. The menu's "Filter" switches it (Sharp, Smooth = bilinear, Pixels =
-  nearest neighbour), and "Scanlines" darkens every second output line by
-  25 % or 50 % (a register stage behind ascal, M2M-UPSTREAM scanlines,
-  `digital_pipeline.vhd`). They line up with the PC's lines only in 1280x1024,
-  where a 480-line mode is exactly two lines each; in the other modes a PC
-  line is 1.25 to 1.92 output lines and the dark lines beat into bands.
+  nearest neighbour). The CRT emulation is a stage behind ascal
+  (`crt_post.vhd`, M2M-UPSTREAM crt-post, `digital_pipeline.vhd`), one HDMI
+  pixel a clock: CRT colours (gamma 1.15 and 1/8 less saturation), scanlines,
+  a soft beam ([1 4 6 4 1] / 16 across), a phosphor mask by output pixel
+  (MiSTer's shadowmask.sv way, at half strength) and glow (what is above 96,
+  blurred over 7 pixels and this and two lines up, half of it added back). The
+  scanlines sit on the PC's own lines at any scale: ascal passes each output
+  line's place between two input lines (its vertical fraction, `o_vline_frac`)
+  and the input line's lowest bit (`o_vline_odd`) with the pixels, and the
+  stage weights the line by an electron beam's profile across the gap, wider
+  on bright pixels (a table of curves by place and brightness). For the TV
+  scanlines the beam is a pair of input lines high, but only while the VGA
+  repeats each row (CR09 bit 7 or maximum scan line 1: vga.v's
+  `vertical_doublescan`, brought out by `tools/z486_sources.py`): 320x200 gets
+  200 scanlines, text and 640x480 one a line. The menu's "CRT" picks a set:
+  VGA monitor, TV (200 lines), Trinitron. The old "Scanlines" (every second
+  output line darker) lined up with the PC's lines only in 1280x1024; in the
+  other modes the dark lines beat into bands.
+  `CORE/sim/run_crt_post.sh` runs the stage (everything off passes the picture
+  through); `run_ascal.sh` run 6 checks ascal's line position and pair bit
+  against the pixels.
   ascal's bilinear path (Smooth, Sharp) left one clock before the nearest one
   and wrote every pixel one output pixel to the left: the picture moved left,
   at 800x600 the PC's first column was gone, and thin strokes broke (the top
@@ -437,8 +453,8 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   runs `cdimage.asm` in the QNICE emulator on FAT32 images (mtools) with ISO,
   BIN and cue sheets, checked against its own layout of the disc.
 - Menu: floppy A:, floppy B:, the internal drive (off, sounds, drive A: or
-  drive B:), hard disk, CD-ROM, real floppy speed, HDMI mode, filter,
-  scanlines, refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
+  drive B:), hard disk, CD-ROM, real floppy speed, HDMI mode, filter, CRT
+  (off, VGA monitor, TV, Trinitron), refresh ("60 Hz (HDMI)" or "Original (VGA)"), the joystick's fire 2 (pin 9 or pin 5),
   help, "Reset the PC".
   The internal drive's Sounds is only available with "Real floppy speed" (the
   Megamiga fork's menu-rows rule, config.vhd `OPTM_AVAIL`, served through
@@ -460,7 +476,7 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   menu has no memory before that, and the line read "Hard disk:  Hard
   dis..." (the line's own text taken for the name).
 - HDMI modes: 720p 60 Hz (the PC's 4:3 picture between bars), 480p, 800x600,
-  1024x768 and 1280x1024 at 60 Hz, and "Native resolution": the HDMI output
+  1024x768, 1280x960 and 1280x1024 at 60 Hz, and "Native resolution": the HDMI output
   follows the PC's own picture size and the monitor does the only scaling
   (M2M-UPSTREAM native, `digital_pipeline.vhd`: ascal's window is the
   picture's size in the middle of the output). `mega65.vhd` measures the
@@ -491,6 +507,10 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   instead of five times the pixel clock: `CORE/sim/run_video_clock.sh`
   programs every entry into Vivado's MMCME2_ADV model and measures both
   clocks (all eight right now; the six the modes used already were).
+  1280x960 runs on the same 90 MHz and 63.2 kHz lines with 1053 lines a frame
+  (60.02 Hz, CVT-RB's 4:3 sync width): the 4:3 picture fills it, 640x480
+  doubled exactly, for a monitor that scales a 4:3 input to its height (a
+  1440-line ultrawide in its 4:3 setting scales it 1.5x).
   1280x1024 is a 5:4 monitor's own resolution: the picture is 1280x960 between bars and the monitor scales
   nothing, where 480p or 720p are scaled twice (by the core and by the
   monitor). It uses reduced blanking (the 63.2 kHz / 59.79 Hz of VESA's

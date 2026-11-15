@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 66 MHz, boots DOS, Windows 3.11 to 98, OS/2 Warp 4 and Linux, and
-plays games from the CD era. The current version is **v0.2.2.1** (see
+plays games from the CD era. The current version is **v0.2.2.5** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -21,10 +21,15 @@ plays games from the CD era. The current version is **v0.2.2.1** (see
   High Color (32K and 64K colours) up to 1024x768 and True Color up to 800x600,
   through a HiColor DAC as Tseng's BIOS expects it, so the VESA modes report
   correctly
-- HDMI out at 720p, 480p, 800x600, 1024x768, 1280x1024, or the PC's own native
-  resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
+- HDMI out at 720p, 480p, 800x600, 1024x768, 1280x960 (4:3), 1280x1024 (5:4),
+  or the PC's own native resolution (with "Refresh: Original (VGA)", DOS text and 320x200 at 70 Hz,
   as a VGA card sends them)
-- Scaling filters (Sharp, Smooth, Pixels) and optional scanlines (25 % or 50 %)
+- Scaling filters (Sharp, Smooth, Pixels)
+- CRT emulation after the scaler, at any HDMI resolution: "VGA monitor"
+  (scanlines on the PC's own lines, wider on bright pixels, a soft beam, the
+  Commodore 1084's shadow mask, a little glow), "TV (200 lines)" (one scanline
+  per game row in 320x200 and 320x240 games) and "Trinitron" (crisp, an
+  aperture grille, for Windows and SVGA)
 - No tearing on HDMI (the scaler keeps three frames)
 - VGA out: the HDMI picture, menu included, on the same steady clock, so LCDs
   sample it cleanly. For an analog monitor or a CRT, set HDMI to "Native" and
@@ -63,7 +68,7 @@ plays games from the CD era. The current version is **v0.2.2.1** (see
 
 **Core**
 - Menu on HELP: floppies, internal drive, hard disk, CD-ROM, real floppy
-  speed, boot order, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
+  speed, boot order, HDMI mode, filter, CRT, refresh (HDMI or VGA),
   joystick, reset; settings are saved to the SD card, the hard disk mounted
   last too
 - `<SD card info>` in the file browser, under each card on the list of the
