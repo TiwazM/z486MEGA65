@@ -62,7 +62,8 @@ FILTER_FILES    XOR     R8, R8
 ; into the device.
 ; The browser's "<No Disk>" (BROWSE_EXTRA, SF_VIRTUAL /= 0: an empty handle)
 ; ejects the line's drive instead (DISK_EJECT); the line then shows
-; "<No Disk>".
+; "<No Disk>". Its "<SD card info>" (SF_VIRTUAL = 2) shows the cards' state
+; (sd_diag.asm) and changes nothing.
 ; Output: R8: 0 = OK, else an error code; R9: image type (0) or the error text
 PREP_LOAD_IMAGE XOR     R9, R9                  ; R9: the unit
                 CMP     PC_OPTM_G_FDD_B, R10
@@ -89,7 +90,16 @@ _PLI_GO         MOVE    R10, @--SP
 _PLI_RET        ADD     1, SP
                 RET
 _PLI_EJECT      MOVE    @SP++, R10
-                CMP     2, R9                   ; the hard disk: remembered
+                MOVE    SF_VIRTUAL, R8          ; "<SD card info>" (id 1, on
+                CMP     2, @R8                  ; the list of the cards): the
+                RBRA    _PLI_NOINFO, !Z         ; cards' state as the error
+                RSUB    SDD_RESTORE, 1          ; text; the drive and its line
+                XOR     R8, R8                  ; stay as they were
+                RSUB    SD_DIAG, 1              ; (sd_diag.asm)
+                MOVE    R8, R9                  ; no error: information
+                MOVE    M2M$LOAD_INFO, R8       ; (shell.asm shows no code)
+                RET
+_PLI_NOINFO     CMP     2, R9                   ; the hard disk: remembered
                 RBRA    _PLI_EJ, !Z             ; as none
                 RSUB    HDD_REM_NONE, 1
 _PLI_EJ         RSUB    DISK_EJECT, 1
@@ -557,15 +567,20 @@ _DAN_RET        SYSCALL(leave, 1)
 ; = 0xFFFF in a directory, else the slot (the list of the cards). Output: R8 =
 ; its name (0: no more), R9 = its id; R10..R12 preserved.
 ; The disk lines (manual loads) start every directory with "<No Disk>", right
-; after "<..>": it ejects the line's drive (PREP_LOAD_IMAGE, DISK_EJECT).
+; after "<..>": it ejects the line's drive (PREP_LOAD_IMAGE, DISK_EJECT). On
+; the list of the cards, every card has "<SD card info>" (id 1, sd_diag.asm).
 BROWSE_EXTRA    CMP     0, R8                   ; one entry
                 RBRA    _BX_NONE, !Z
                 CMP     CTX_LOAD_ROM, R9
                 RBRA    _BX_NONE, !Z
                 CMP     0xFFFF, R11             ; in a directory
-                RBRA    _BX_NONE, !Z
+                RBRA    _BX_INFO, !Z
                 MOVE    BX_NO_DISK, R8
                 XOR     R9, R9
+                RET
+_BX_INFO        RSUB    SDD_SNAP, 1             ; on the list of the cards:
+                MOVE    BX_SD_INFO, R8          ; "<SD card info>"; keep the
+                MOVE    1, R9                   ; line (sd_diag.asm)
                 RET
 _BX_NONE        XOR     R8, R8
                 RET
@@ -602,6 +617,8 @@ PREP_START      INCRB
                 MOVE    R10, R0                 ; R10..R12 preserved
                 MOVE    R11, R1
                 MOVE    R12, R2
+                MOVE    SDD_SV_UNIT, R3         ; no disk line kept yet (RAM
+                MOVE    0xFFFF, @R3             ; outlives a reset; sd_diag.asm)
 
                 ; clear the window
                 MOVE    PC_ROM_WIN, R3          ; R3: 4K window
@@ -716,7 +733,10 @@ _PCS_GO         MOVE    M2M$RAMROM_DEV, R8
                 XOR     R8, R8
                 XOR     R9, R9
 
-_PCS_RET        MOVE    R0, R10
+_PCS_RET        CMP     0, R8                   ; fatal: the SD cards' state
+                RBRA    _PCS_RET2, Z            ; after the message
+                RSUB    SD_DIAG, 1              ; (sd_diag.asm)
+_PCS_RET2       MOVE    R0, R10
                 MOVE    R1, R11
                 MOVE    R2, R12
                 DECRB
@@ -829,6 +849,7 @@ BPT_POKE        INCRB
                 RET
 
 #include "bios_patch.asm"
+#include "sd_diag.asm"
 
 ; ----------------------------------------------------------------------------
 ; Core specific callback functions: OSM selections
@@ -1206,6 +1227,15 @@ DAN_PEND        .BLOCK  4
 HDD_PATH_MAX    .EQU    160
 HDD_PATH        .BLOCK  HDD_PATH_MAX
 
+; SD_DIAG's text and the disk line kept around "<SD card info>" (sd_diag.asm):
+; taken off the heap (HEAP_SIZE)
+SDD_BUF         .BLOCK  320
+SDD_LINE        .BLOCK  64                      ; SDD_LINE_MAX
+SDD_SV_UNIT     .BLOCK  1                       ; its unit (0xFFFF: none)
+SDD_SV_W        .BLOCK  1                       ; its words
+SDD_SV_LDF      .BLOCK  1                       ; its "loaded" flag
+SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
+
 ; CD_PREP's (cdimage.asm)
 #include "cdimage_vars.asm"
 
@@ -1229,8 +1259,9 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 18528                      ; (18656 before MENU_HEAP_SIZE
-HEAP            .BLOCK 1                        ; grew by 128: the same end)
+HEAP_SIZE       .EQU 18139                      ; (18656 before MENU_HEAP_SIZE
+HEAP            .BLOCK 1                        ; grew by 128: the same end;
+                                                ; 18528 before sd_diag.asm's 389)
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's
                                                 ; larger device handle (main_vars.asm)

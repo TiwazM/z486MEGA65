@@ -477,6 +477,8 @@ _HM_SDMOUNTED5  MOVE    SCR$OSM_O_DX, R8        ; set "%s is replaced" flag
                 RSUB    SCR$CLRINNER, 1         ; print error message
                 MOVE    R8, R0
                 MOVE    R9, R1
+                CMP     M2M$LOAD_INFO, R0       ; M2M-UPSTREAM load-info: R9's
+                RBRA    _HM_SDMOUNTED5I, Z      ; text is no error: no code
                 MOVE    WRN_ERROR_CODE, R8
                 RSUB    SCR$PRINTSTR, 1
                 MOVE    R0, R8
@@ -492,7 +494,7 @@ _HM_SDMOUNTED5  MOVE    SCR$OSM_O_DX, R8        ; set "%s is replaced" flag
                 ; retrieve error string from CRT/ROM device and put it
                 ; temporarily on the stack so that we can print the
                 ; error message on screen
-                CMP     1, R5                   ; CRT/ROM: switch device..
+_HM_SDMOUNTED5I CMP     1, R5                   ; CRT/ROM: switch device..
                 RBRA    _HM_SDMOUNTED5S, !Z     ; ..to make string visible
 
                 MOVE    SCRATCH_HEX, R8         ; save screen device

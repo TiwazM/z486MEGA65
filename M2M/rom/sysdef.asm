@@ -216,6 +216,11 @@ M2M$SDRAM           .EQU 0x0005     ; @TODO/RESERVED for future R4 boards
 
 M2M$SYS_INFO        .EQU 0x00FF     ; Device for System Info
 
+; M2M-UPSTREAM load-info (z486 SD card info): PREP_LOAD_IMAGE returns this
+; instead of an error code when R9's text is information, not an error: the
+; Shell shows the text without "Error code:" and goes back to the browser
+M2M$LOAD_INFO       .EQU 0x7FF0
+
 ; M2M-UPSTREAM cfg-strings (cfgstr.asm): text in the settings file
 CFGS_MAX            .EQU 512        ; buffer size (words), and the most text:
 CFGS_MAXC           .EQU 511        ; CFGS_MAX - 1 characters
