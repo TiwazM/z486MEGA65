@@ -16,6 +16,11 @@
 -- Writes one checksum per output line of frames 3 .. G_FRAMES-1 to build/ascal_<G_RUN>.txt,
 -- and frame 4 as a P3 picture to build/ascal_<G_RUN>.ppm. run_ascal.sh compares the runs.
 --
+-- G_PAT 2 (M2M-UPSTREAM crt-post): input lines alternately white and black; per output line of
+-- frame 4 the line position ascal gives crt_post.vhd (o_vline_frac) and the pixel in the middle
+-- go to build/ascal_<G_RUN>_vf.txt: bilinear, the pixel is 255 x (1 - frac) after a white line,
+-- 255 x frac after a black one (run_ascal.sh checks it).
+--
 -- The filters (G_MODE) on a text screen: G_PAT 1 is 720x400 of "68" in the VGA font's 9x16
 -- cells (G_IW, G_IH), scaled into a G_OW x G_OH window (1280x960 as in 1280x1024, 800x600).
 --
@@ -34,7 +39,7 @@ entity tb_ascal is
       G_FRAMES : natural := 7;
       G_MODE   : natural := 10;      -- ascal's mode: 8 nearest, 9 bilinear, 10 sharp bilinear
                                      -- (+ triple buffering)
-      G_PAT    : natural := 0;       -- 0 colour ramps, 1 "68" text
+      G_PAT    : natural := 0;       -- 0 colour ramps, 1 "68" text, 2 white and black lines
       G_IW     : natural := 320;     -- the input's active size
       G_IH     : natural := 240;
       G_OW     : natural := 640;     -- the output window (2x by default)
@@ -61,6 +66,7 @@ architecture sim of tb_ascal is
 
    signal o_r, o_g, o_b : unsigned(7 downto 0);
    signal o_hs, o_vs, o_de : std_logic;
+   signal o_vlf : unsigned(11 downto 0);
 
    signal avl_waitrequest   : std_logic := '1';
    signal avl_readdata      : std_logic_vector(C_DW-1 downto 0) := (others => '0');
@@ -117,7 +123,13 @@ begin
          i_de <= '1' when hc < G_IW and vc < G_IH else '0';
          i_hs <= '1' when hc >= G_IW + 20 and hc < G_IW + 50 else '0';
          i_vs <= '1' when vc >= G_IH + 5 and vc < G_IH + 7 else '0';
-         if G_PAT = 1 then
+         if G_PAT = 2 then
+            if vc mod 2 = 0 and hc < G_IW and vc < G_IH then
+               i_r <= x"FF"; i_g <= x"FF"; i_b <= x"FF";
+            else
+               i_r <= x"00"; i_g <= x"00"; i_b <= x"00";
+            end if;
+         elsif G_PAT = 1 then
             -- "68" in every pair of cells; column 0 and the last one marked (the edges)
             cx := (hc / 9) mod 2;
             v_on := (hc mod 9) < 8 and vc < G_IH and hc < G_IW and
@@ -149,7 +161,7 @@ begin
          i_r => i_r, i_g => i_g, i_b => i_b, i_hs => i_hs, i_vs => i_vs, i_fl => '0',
          i_de => i_de, i_ce => '1', i_clk => i_clk,
          o_r => o_r, o_g => o_g, o_b => o_b, o_hs => o_hs, o_vs => o_vs, o_de => o_de,
-         o_vbl => open, o_brd => open, o_ce => '1', o_clk => o_clk,
+         o_vbl => open, o_brd => open, o_vline_frac => o_vlf, o_ce => '1', o_clk => o_clk,
          o_border => x"000000",
          o_fb_ena => '0', o_fb_hsize => 0, o_fb_vsize => 0, o_fb_format => "000101",
          o_fb_base => x"0000_0000", o_fb_stride => (others => '0'),
@@ -301,6 +313,7 @@ begin
    p_out : process (o_clk)
       file     f_txt   : text;
       file     f_ppm   : text;
+      file     f_vf    : text;
       variable opened  : boolean := false;
       variable l       : line;
       variable frame   : integer := -1;
@@ -314,6 +327,7 @@ begin
          if not opened then
             file_open(f_txt, "ascal_" & integer'image(G_RUN) & ".txt", write_mode);
             file_open(f_ppm, "ascal_" & integer'image(G_RUN) & ".ppm", write_mode);
+            file_open(f_vf, "ascal_" & integer'image(G_RUN) & "_vf.txt", write_mode);
             write(l, "P3 " & integer'image(G_OW) & " " & integer'image(G_OH + 32) & " 255");
             writeline(f_ppm, l);
             opened := true;
@@ -324,6 +338,7 @@ begin
             if frame = G_FRAMES then
                file_close(f_txt);
                file_close(f_ppm);
+               file_close(f_vf);
                report "tb_ascal: done, run " & integer'image(G_RUN) severity note;
                std.env.finish;
             end if;
@@ -336,6 +351,11 @@ begin
             end if;
             h := (h * 33 + to_integer(o_r) * 65536 + to_integer(o_g) * 256 + to_integer(o_b))
                  mod 16777213;
+            if frame = 4 and x = G_OW / 2 then
+               write(l, integer'image(y) & " " & integer'image(to_integer(o_vlf)) & " " &
+                        integer'image(to_integer(o_r)));
+               writeline(f_vf, l);
+            end if;
             if frame = 4 then
                write(l, integer'image(to_integer(o_r)) & " " & integer'image(to_integer(o_g)) &
                         " " & integer'image(to_integer(o_b)) & " ");

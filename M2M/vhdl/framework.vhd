@@ -242,9 +242,11 @@ port (
    qnice_ascal_mode_i      : in    std_logic_vector(1 downto 0);
    qnice_ascal_polyphase_i : in    std_logic;
    qnice_ascal_triplebuf_i : in    std_logic;
-   -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second HDMI line darker,
-   -- 00 off, 01 25 %, 10 50 % (digital_pipeline.vhd)
+   -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31; crt-post 2026-11-15): scanlines on
+   -- the core's own lines, 00 off, 01 light, 10 medium, 11 strong; qnice_crt_i bits 1..0 the
+   -- mask, bit 2 glow, bit 3 CRT gamma (crt_post.vhd via digital_pipeline.vhd)
    qnice_scanlines_i       : in    std_logic_vector(1 downto 0) := "00";
+   qnice_crt_i             : in    std_logic_vector(3 downto 0) := "0000";
    -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = the picture unscaled in a
    -- window of 23..12 x 11..0 HDMI pixels in the middle (digital_pipeline.vhd)
    qnice_native_i          : in    std_logic_vector(24 downto 0) := (others => '0');
@@ -1024,6 +1026,7 @@ begin
          qnice_poly_wr_i         => qnice_poly_wr,
          qnice_ascal_mode_i      => qnice_ascal_mode,
          qnice_scanlines_i       => qnice_scanlines_i,   -- M2M-UPSTREAM scanlines
+         qnice_crt_i             => qnice_crt_i,         -- M2M-UPSTREAM crt-post
          qnice_native_i          => qnice_native_i,      -- M2M-UPSTREAM native
 
          -- M2M-UPSTREAM screen-center: HDMI ascal INPUT-crop per-edge offsets from

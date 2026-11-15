@@ -110,9 +110,13 @@ entity digital_pipeline is
 
       -- QNICE connection to ascal's mode register
       qnice_ascal_mode_i       : in  unsigned(4 downto 0);
-      -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second line of the HDMI
-      -- picture darker by 25 % (01) or 50 % (10), 00 off (hdmi_clk_i domain)
+      -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31; crt-post 2026-11-15): scanlines on
+      -- the core's own lines at any scale, 00 off, 01 light, 10 medium, 11 strong, and
+      -- (hdmi_crt_i) bits 1..0 the mask (00 off, 01 aperture grille, 10 slot mask, 11 the
+      -- Commodore 1084's shadow mask), bit 2 glow, bit 3 CRT gamma (crt_post.vhd; hdmi_clk_i
+      -- domain)
       hdmi_scanlines_i         : in  std_logic_vector(1 downto 0) := "00";
+      hdmi_crt_i               : in  std_logic_vector(3 downto 0) := "0000";
       -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = ascal's window is 23..12 x
       -- 11..0 output pixels in the middle of the picture instead of the video mode's 4:3 one:
       -- the core asks for an HDMI mode at its own resolution and a window of its picture's
@@ -225,8 +229,7 @@ architecture synthesis of digital_pipeline is
    signal hdmi_sl_hs             : std_logic;
    signal hdmi_sl_vs             : std_logic;
    signal hdmi_sl_de             : std_logic;
-   signal hdmi_sl_de_d           : std_logic := '0';
-   signal hdmi_sl_y              : unsigned(11 downto 0) := (others => '0');
+   signal hdmi_vline_frac        : unsigned(11 downto 0);          -- M2M-UPSTREAM crt-post
 
    -- After OSM
    signal hdmi_osm_red           : std_logic_vector(7 downto 0);
@@ -517,6 +520,7 @@ begin
          o_vs              => hdmi_vs,                      -- output
          o_de              => hdmi_de,                      -- output
          o_vbl             => open,                         -- output
+         o_vline_frac      => hdmi_vline_frac,              -- output, M2M-UPSTREAM crt-post
          o_ce              => '1',                          -- input
          o_clk             => hdmi_clk_i,                   -- input
 
@@ -644,42 +648,32 @@ begin
          m_avm_waitrequest_i   => hr_waitrequest_i
       ); -- i_avm_decrease
 
-   -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): every second line of the picture
-   -- (counted from the window's first line, vmin) darker by 25 % or 50 %, lined up with the
-   -- core's lines where it shows its picture at exactly 2x (z486: 640x480 as 1280x960 in
-   -- 1280x1024; in its other modes the dark lines beat). The output's
-   -- lines are counted from its vertical sync. One register stage for all of ascal's outputs:
-   -- the overlay's blending behind it is this domain's slowest path.
-   p_scanlines : process (hdmi_clk_i)
-      variable v_dark : boolean;
-   begin
-      if rising_edge(hdmi_clk_i) then
-         hdmi_sl_de_d <= hdmi_de;
-         if hdmi_vs = '1' then
-            hdmi_sl_y <= (others => '0');
-         elsif hdmi_de = '0' and hdmi_sl_de_d = '1' then
-            hdmi_sl_y <= hdmi_sl_y + 1;
-         end if;
-         v_dark := hdmi_scanlines_i /= "00" and
-                   ((hdmi_sl_y(0) = '1') xor (hdmi_vmin_base mod 2 = 1));
-         if v_dark and hdmi_scanlines_i(1) = '1' then
-            hdmi_sl_red   <= '0' & hdmi_red(7 downto 1);
-            hdmi_sl_green <= '0' & hdmi_green(7 downto 1);
-            hdmi_sl_blue  <= '0' & hdmi_blue(7 downto 1);
-         elsif v_dark then
-            hdmi_sl_red   <= hdmi_red   - ("00" & hdmi_red(7 downto 2));
-            hdmi_sl_green <= hdmi_green - ("00" & hdmi_green(7 downto 2));
-            hdmi_sl_blue  <= hdmi_blue  - ("00" & hdmi_blue(7 downto 2));
-         else
-            hdmi_sl_red   <= hdmi_red;
-            hdmi_sl_green <= hdmi_green;
-            hdmi_sl_blue  <= hdmi_blue;
-         end if;
-         hdmi_sl_hs <= hdmi_hs;
-         hdmi_sl_vs <= hdmi_vs;
-         hdmi_sl_de <= hdmi_de;
-      end if;
-   end process p_scanlines;
+   -- M2M-UPSTREAM crt-post (z486 for MEGA65, 2026-11-15; was M2M-UPSTREAM scanlines, every
+   -- second HDMI line darker): CRT emulation after the scaler and before the menu overlay:
+   -- gamma, scanlines on the core's own lines (ascal's o_vline_frac) at any scale, a phosphor
+   -- mask, glow. All off: the picture as it was, 12 clocks later (registered: the overlay's
+   -- blending behind it is this domain's slowest path).
+   i_crt_post : entity work.crt_post
+      port map (
+         clk_i    => hdmi_clk_i,
+         sl_i     => hdmi_scanlines_i,
+         mask_i   => hdmi_crt_i(1 downto 0),
+         glow_i   => hdmi_crt_i(2),
+         gamma_i  => hdmi_crt_i(3),
+         vfrac_i  => hdmi_vline_frac,
+         r_i      => hdmi_red,
+         g_i      => hdmi_green,
+         b_i      => hdmi_blue,
+         hs_i     => hdmi_hs,
+         vs_i     => hdmi_vs,
+         de_i     => hdmi_de,
+         r_o      => hdmi_sl_red,
+         g_o      => hdmi_sl_green,
+         b_o      => hdmi_sl_blue,
+         hs_o     => hdmi_sl_hs,
+         vs_o     => hdmi_sl_vs,
+         de_o     => hdmi_sl_de
+      ); -- i_crt_post
 
    i_video_overlay : entity work.video_overlay
       generic  map (

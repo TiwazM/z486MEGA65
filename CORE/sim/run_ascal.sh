@@ -5,6 +5,8 @@
 # then compares the output lines. With CORE/sim/build/ascal_orig.vhd (an ascal without the
 # patch, e.g. git show 4096e0e:M2M/vhdl/av_pipeline/ascal.vhd) it runs that one the same way.
 # Run 5 resets ascal in the middle of an input write burst (G_RST, M2M-UPSTREAM reset-write).
+# Run 6 checks the line position ascal gives crt_post.vhd (o_vline_frac, M2M-UPSTREAM crt-post):
+# 320x200 of white and black lines, bilinear 2.4x into 640x480 (ascal_vf_check.py).
 # Output in CORE/sim/build/ (ascal_<run>.txt line checksums, ascal_<run>.ppm frame 4).
 set -e
 root=${0:A:h:h:h}
@@ -26,12 +28,15 @@ docker run --init --rm --platform linux/amd64 --user 1000:1000 -e HOME=/home/use
         chk xelab -debug off pat.tb_ascal -generic_top G_LAT=2  -generic_top G_GAP=1 -generic_top G_RUN=1 -s ascal_s1 &&
         chk xelab -debug off pat.tb_ascal -generic_top G_LAT=16 -generic_top G_GAP=8 -generic_top G_RUN=2 -s ascal_s2 &&
         chk xelab -debug off pat.tb_ascal -generic_top G_RST=1 -generic_top G_FRAMES=4 -generic_top G_RUN=5 -s ascal_s5 &&
+        chk xelab -debug off pat.tb_ascal -generic_top G_LAT=2 -generic_top G_GAP=1 -generic_top G_PAT=2 \
+            -generic_top G_MODE=9 -generic_top G_IH=200 -generic_top G_OH=480 -generic_top G_FRAMES=5 \
+            -generic_top G_RUN=6 -s ascal_s6 &&
         if [ $orig = 1 ]; then
             chk xvhdl -2008 -work orig ascal_orig.vhd /core/CORE/sim/tb_ascal.vhd &&
             chk xelab -debug off orig.tb_ascal -generic_top G_LAT=2  -generic_top G_GAP=1 -generic_top G_RUN=3 -s ascal_s3 &&
             chk xelab -debug off orig.tb_ascal -generic_top G_LAT=16 -generic_top G_GAP=8 -generic_top G_RUN=4 -s ascal_s4
         fi &&
-        for r in 1 2 3 4 5; do
+        for r in 1 2 3 4 5 6; do
             [ -d xsim.dir/ascal_s\$r ] && xsim ascal_s\$r -R -log xsim_ascal_\$r.log > /dev/null &
         done; wait"
 
@@ -47,6 +52,7 @@ if grep -q FAIL xsim_ascal_5.log; then
 else
     print "reset in a write burst: ok"
 fi
+print "line position (crt-post): $(python3 -I $root/CORE/sim/ascal_vf_check.py ascal_6_vf.txt 17 494 | tail -1)"
 if (( orig )); then
     cmp_runs 1 3 "original, fast memory"
     cmp_runs 1 4 "original, slow memory"

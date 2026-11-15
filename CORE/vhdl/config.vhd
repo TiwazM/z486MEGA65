@@ -234,46 +234,58 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    41    Pixels                C_MENU_FLT_PIXELS: nearest neighbour
 --    42    CRT                   C_MENU_FLT_CRT: ascal's polyphase filter, MiSTer's
 --                                lanczos2_12 across and Scan_Br_110_80 down (the
---                                C64MEGA65 core's CRT emulation): scanlines on the PC's
---                                own lines at any scale; greys out Scanlines 25 %/50 %
+--                                C64MEGA65 core's CRT emulation, for comparison): scanlines
+--                                on the PC's own lines at any scale; greys out Scanlines
 --    43    ----
 --    44    Back to main menu
---    45  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only;
---                                off with the CRT filter)
+--    45  Scanlines: %s           submenu: post-scale scanlines (crt_post.vhd) on the PC's own lines
+--                                at any scale (ascal's line position); off with the CRT filter
 --    46    Scanlines             headline
 --    47    ----
 --    48    Off                   C_MENU_SL_OFF (default)
---    49    25%                   C_MENU_SL_25
---    50    50%                   C_MENU_SL_50
---    51    ----
---    52    Back to main menu
---    53  Refresh: %s             submenu: the PC's refresh rate (z486's video_f60)
---    54    PC refresh rate       headline
---    55    ----
---    56    60 Hz (HDMI)          (default) every mode retimed to 60 Hz: smooth on 60 Hz HDMI
---    57    Original (VGA)        C_MENU_RF_ORIG: the VGA's own timing (DOS text 70 Hz,
+--    49    Light                 C_MENU_SL_LIGHT: a wide beam, gaps 25-50 % darker
+--    50    Medium                C_MENU_SL_MED
+--    51    Strong                C_MENU_SL_STRONG: a narrow beam, dark gaps
+--    52    ----
+--    53    Back to main menu
+--    54  Mask: %s                submenu: the phosphor pattern by HDMI pixel (crt_post.vhd)
+--    55    Phosphor mask         headline
+--    56    ----
+--    57    Off                   (default)
+--    58    Aperture grille       C_MENU_MASK_AG: red, green, blue stripes (Trinitron)
+--    59    Slot mask             C_MENU_MASK_SLOT: staggered triads
+--    60    Shadow mask (1084)    C_MENU_MASK_1084: the Commodore 1084's (MiSTer's mask file)
+--    61    ----
+--    62    Back to main menu
+--    63  Glow                    C_MENU_GLOW (default off): bright areas bleed a little
+--    64  CRT gamma               C_MENU_GAMMA (default off): a CRT's darker mid-tones
+--    65  Refresh: %s             submenu: the PC's refresh rate (z486's video_f60)
+--    66    PC refresh rate       headline
+--    67    ----
+--    68    60 Hz (HDMI)          (default) every mode retimed to 60 Hz: smooth on 60 Hz HDMI
+--    69    Original (VGA)        C_MENU_RF_ORIG: the VGA's own timing (DOS text 70 Hz,
 --                                31.5 kHz); native HDMI, and VGA (the HDMI picture), follow
---    58    ----
---    59    Back to main menu
---    60  Joystick: %s            submenu: the game port's joystick (port 2)
---    61    Joystick (port 2)     headline
---    62    ----
---    63    Pin 9 fire 2          (default) fire 2 on POT X, as the C64GS's second button
---    64    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
---    65    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
---    66    ----
---    67    Back to main menu
---    68  ----
---    69  Help
---    70  Reset the PC            C_MENU_RESET
---    71  ----
---    72  Close Menu
+--    70    ----
+--    71    Back to main menu
+--    72  Joystick: %s            submenu: the game port's joystick (port 2)
+--    73    Joystick (port 2)     headline
+--    74    ----
+--    75    Pin 9 fire 2          (default) fire 2 on POT X, as the C64GS's second button
+--    76    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
+--    77    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
+--    78    ----
+--    79    Back to main menu
+--    80  ----
+--    81  Help
+--    82  Reset the PC            C_MENU_RESET
+--    83  ----
+--    84  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change (and MENU_HEAP_SIZE there when the menu grows).
-constant OPTM_SIZE         : natural := 73;
+constant OPTM_SIZE         : natural := 85;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 20;   -- the main menu's lines (0-4, 13-16, 24-25, 36, 45, 53, 60, 68-72)
+constant OPTM_DY           : natural := 23;   -- the main menu's lines (0-4, 13-16, 24-25, 36, 45, 54, 63-65, 72, 80-84)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -325,10 +337,22 @@ constant OPTM_ITEMS        : string :=
    " Scanlines\n"             &
    "\n"                       &
    " Off\n"                   &
-   " 25%\n"                   &
-   " 50%\n"                   &
+   " Light\n"                 &
+   " Medium\n"                &
+   " Strong\n"                &
    "\n"                       &
    " Back to main menu\n"     &
+   " Mask: %s\n"              &
+   " Phosphor mask\n"         &
+   "\n"                       &
+   " Off\n"                   &
+   " Aperture grille\n"       &
+   " Slot mask\n"             &
+   " Shadow mask (1084)\n"    &
+   "\n"                       &
+   " Back to main menu\n"     &
+   " Glow\n"                  &
+   " CRT gamma\n"             &
    " Refresh: %s\n"           &
    " PC refresh rate\n"       &
    "\n"                       &
@@ -364,6 +388,9 @@ constant OPTM_G_REFRESH    : integer := 10;
 constant OPTM_G_SOUND      : integer := 11;
 constant OPTM_G_SPEED      : integer := 12;
 constant OPTM_G_BOOT       : integer := 13;
+constant OPTM_G_MASK       : integer := 14;
+constant OPTM_G_GLOW       : integer := 15;
+constant OPTM_G_GAMMA      : integer := 16;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -416,30 +443,42 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 46 Scanlines
                                              OPTM_G_LINE,                              -- 47
                                              OPTM_G_SCAN + OPTM_G_STDSEL,              -- 48 Off
-                                             OPTM_G_SCAN,                              -- 49 25%
-                                             OPTM_G_SCAN,                              -- 50 50%
-                                             OPTM_G_LINE,                              -- 51
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 52 Back
-                                             OPTM_G_SUBMENU,                           -- 53 Refresh: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 54 PC refresh rate
-                                             OPTM_G_LINE,                              -- 55
-                                             OPTM_G_REFRESH + OPTM_G_STDSEL,           -- 56 60 Hz (HDMI)
-                                             OPTM_G_REFRESH,                           -- 57 Original (VGA)
-                                             OPTM_G_LINE,                              -- 58
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 59 Back
-                                             OPTM_G_SUBMENU,                           -- 60 Joystick: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 61 Joystick (port 2)
-                                             OPTM_G_LINE,                              -- 62
-                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 63 Pin 9 fire 2
-                                             OPTM_G_JOY,                               -- 64 Pin 5 fire 2
-                                             OPTM_G_JOY,                               -- 65 Off
-                                             OPTM_G_LINE,                              -- 66
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 67 Back
-                                             OPTM_G_LINE,                              -- 68
-                                             OPTM_G_HELP,                              -- 69 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 70 Reset the PC
-                                             OPTM_G_LINE,                              -- 71
-                                             OPTM_G_CLOSE                              -- 72 Close Menu
+                                             OPTM_G_SCAN,                              -- 49 Light
+                                             OPTM_G_SCAN,                              -- 50 Medium
+                                             OPTM_G_SCAN,                              -- 51 Strong
+                                             OPTM_G_LINE,                              -- 52
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 53 Back
+                                             OPTM_G_SUBMENU,                           -- 54 Mask: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 55 Phosphor mask
+                                             OPTM_G_LINE,                              -- 56
+                                             OPTM_G_MASK + OPTM_G_STDSEL,              -- 57 Off
+                                             OPTM_G_MASK,                              -- 58 Aperture grille
+                                             OPTM_G_MASK,                              -- 59 Slot mask
+                                             OPTM_G_MASK,                              -- 60 Shadow mask (1084)
+                                             OPTM_G_LINE,                              -- 61
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 62 Back
+                                             OPTM_G_GLOW + OPTM_G_SINGLESEL,           -- 63 Glow
+                                             OPTM_G_GAMMA + OPTM_G_SINGLESEL,          -- 64 CRT gamma
+                                             OPTM_G_SUBMENU,                           -- 65 Refresh: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 66 PC refresh rate
+                                             OPTM_G_LINE,                              -- 67
+                                             OPTM_G_REFRESH + OPTM_G_STDSEL,           -- 68 60 Hz (HDMI)
+                                             OPTM_G_REFRESH,                           -- 69 Original (VGA)
+                                             OPTM_G_LINE,                              -- 70
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 71 Back
+                                             OPTM_G_SUBMENU,                           -- 72 Joystick: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 73 Joystick (port 2)
+                                             OPTM_G_LINE,                              -- 74
+                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 75 Pin 9 fire 2
+                                             OPTM_G_JOY,                               -- 76 Pin 5 fire 2
+                                             OPTM_G_JOY,                               -- 77 Off
+                                             OPTM_G_LINE,                              -- 78
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 79 Back
+                                             OPTM_G_LINE,                              -- 80
+                                             OPTM_G_HELP,                              -- 81 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 82 Reset the PC
+                                             OPTM_G_LINE,                              -- 83
+                                             OPTM_G_CLOSE                              -- 84 Close Menu
                                            );
 
 -- Greyed out (M2M-UPSTREAM menu-rows, as Megamiga's config.vhd): an item of group "grp" whose
@@ -455,9 +494,9 @@ type OPTM_ATYPE is array (natural range <>) of OPTM_AREC;
 constant OPTM_AVAIL : OPTM_ATYPE := (
    -- the internal drive's Sounds (item 1 of its group) only with "Real floppy speed"
    0 => (OPTM_G_SOUND, 2, OPTM_G_SPEED, 1),
-   -- Scanlines 25 % and 50 % (items 1 and 2) only with Sharp, Smooth or Pixels (items 0..2 of
-   -- the Filter group): the CRT filter draws its own scanlines
-   1 => (OPTM_G_SCAN, 6, OPTM_G_FILTER, 7)
+   -- Scanlines Light, Medium and Strong (items 1..3) only with Sharp, Smooth or Pixels (items
+   -- 0..2 of the Filter group): the CRT filter draws its own scanlines
+   1 => (OPTM_G_SCAN, 14, OPTM_G_FILTER, 7)
 );
 
 -- The layout word of every item (SEL_OPTM_ROWS; menu_rows.asm): bit 1 = greyed-out rule with

@@ -154,6 +154,10 @@ ENTITY ascal IS
     o_de  : OUT std_logic; -- Display Enable
     o_vbl : OUT std_logic; -- V blank
     o_brd : OUT std_logic; -- border enable
+    -- M2M-UPSTREAM crt-post (z486 for MEGA65, 2026-11-15): the output line's place between two
+    -- input lines (o_vfrac: 0 = on the upper one, 4095 = almost on the lower one), constant
+    -- over a line, with o_r/o_g/o_b (crt_post.vhd's scanlines)
+    o_vline_frac : OUT unsigned(11 DOWNTO 0);
     o_ce  : IN  std_logic; -- Clock Enable
     o_clk : IN  std_logic; -- Output clock
     
@@ -2983,6 +2987,7 @@ BEGIN
         o_g<=x"00";
         o_b<=x"00";
         o_brd<= not o_pev(9);
+        o_vline_frac<=o_vfrac;          -- M2M-UPSTREAM crt-post
             
         CASE o_vmode(2 DOWNTO 0) IS
           WHEN "000" => -- Nearest

@@ -442,6 +442,7 @@ architecture synthesis of mega65_r6 is
    signal qnice_ascal_polyphase  : std_logic;
    signal qnice_ascal_triplebuf  : std_logic;
    signal qnice_scanlines        : std_logic_vector(1 downto 0);   -- M2M-UPSTREAM scanlines
+   signal qnice_crt              : std_logic_vector(3 downto 0);   -- M2M-UPSTREAM crt-post
    signal qnice_native           : std_logic_vector(24 downto 0);  -- M2M-UPSTREAM native
    signal qnice_retro15kHz       : std_logic;
    signal qnice_osm_cfg_scaling  : std_logic_vector(8 downto 0);
@@ -810,6 +811,7 @@ begin
       qnice_ascal_polyphase_i => qnice_ascal_polyphase,
       qnice_ascal_triplebuf_i => qnice_ascal_triplebuf,
       qnice_scanlines_i       => qnice_scanlines,         -- M2M-UPSTREAM scanlines
+      qnice_crt_i             => qnice_crt,               -- M2M-UPSTREAM crt-post
       qnice_native_i          => qnice_native,            -- M2M-UPSTREAM native
       qnice_flip_joyports_i   => qnice_flip_joyports,
       qnice_osm_control_m_o   => qnice_osm_control_m,
@@ -872,6 +874,7 @@ begin
          qnice_ascal_polyphase_o => qnice_ascal_polyphase,
          qnice_ascal_triplebuf_o => qnice_ascal_triplebuf,
          qnice_scanlines_o       => qnice_scanlines,      -- M2M-UPSTREAM scanlines
+         qnice_crt_o             => qnice_crt,            -- M2M-UPSTREAM crt-post
          qnice_native_o          => qnice_native,         -- M2M-UPSTREAM native
          qnice_retro15kHz_o      => qnice_retro15kHz,
          qnice_osm_cfg_scaling_o => qnice_osm_cfg_scaling,

@@ -99,6 +99,7 @@ entity av_pipeline is
       qnice_ascal_mode_i      : in  std_logic_vector( 4 downto 0);
       -- M2M-UPSTREAM scanlines (z486 for MEGA65, 2026-10-31): see digital_pipeline.vhd
       qnice_scanlines_i       : in  std_logic_vector( 1 downto 0) := "00";
+      qnice_crt_i             : in  std_logic_vector( 3 downto 0) := "0000";  -- M2M-UPSTREAM crt-post
       -- M2M-UPSTREAM native (z486 for MEGA65, 2026-10-31): bit 24 = the picture unscaled in
       -- a window of 23..12 x 11..0 output pixels in the middle (see digital_pipeline.vhd)
       qnice_native_i          : in  std_logic_vector(24 downto 0) := (others => '0');
@@ -263,6 +264,7 @@ signal video_h_freq           : std_logic_vector(15 downto 0); -- horizontal syn
 -- On-Screen-Menu (OSM) for HDMI
 signal hdmi_osm_cfg_scaling   : std_logic_vector(8 downto 0);
 signal hdmi_scanlines         : std_logic_vector(1 downto 0);   -- M2M-UPSTREAM scanlines
+signal hdmi_crt               : std_logic_vector(3 downto 0);   -- M2M-UPSTREAM crt-post
 signal hdmi_native            : std_logic_vector(24 downto 0);  -- M2M-UPSTREAM native
 signal hdmi_osm_cfg_enable    : std_logic;
 signal hdmi_osm_cfg_xy        : std_logic_vector(15 downto 0);
@@ -789,7 +791,7 @@ begin
    -- Clock domain crossing: QNICE to HDMI
    i_qnice2hdmi: xpm_cdc_array_single
       generic map (
-         WIDTH => 74                                  -- M2M-UPSTREAM scanlines, native (was 47)
+         WIDTH => 78                                  -- M2M-UPSTREAM scanlines, native, crt-post (was 47)
       )
       port map (
          src_clk                => qnice_clk_i,
@@ -801,6 +803,7 @@ begin
          src_in(46 downto 38)   => qnice_osm_cfg_scaling_i,
          src_in(48 downto 47)   => qnice_scanlines_i,
          src_in(73 downto 49)   => qnice_native_i,
+         src_in(77 downto 74)   => qnice_crt_i,
          dest_clk               => hdmi_clk_i,
          dest_out(15 downto 0)  => hdmi_osm_cfg_xy,
          dest_out(31 downto 16) => hdmi_osm_cfg_dxdy,
@@ -809,7 +812,8 @@ begin
          dest_out(37)           => hdmi_zoom_crop,
          dest_out(46 downto 38) => hdmi_osm_cfg_scaling,
          dest_out(48 downto 47) => hdmi_scanlines,
-         dest_out(73 downto 49) => hdmi_native
+         dest_out(73 downto 49) => hdmi_native,
+         dest_out(77 downto 74) => hdmi_crt
       ); -- i_qnice2hdmi
 
 
@@ -915,6 +919,7 @@ begin
          -- QNICE connection to ascal's mode register
          qnice_ascal_mode_i       => unsigned(qnice_ascal_mode_i),
          hdmi_scanlines_i         => hdmi_scanlines,       -- M2M-UPSTREAM scanlines
+         hdmi_crt_i               => hdmi_crt,             -- M2M-UPSTREAM crt-post
          hdmi_native_i            => hdmi_native,          -- M2M-UPSTREAM native
 
          -- M2M-UPSTREAM screen-center: per-edge ascal INPUT-crop offsets (video domain)

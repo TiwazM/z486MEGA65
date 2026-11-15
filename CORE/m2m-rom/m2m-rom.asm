@@ -1105,8 +1105,10 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "17"                   ; 17: the Filter menu's "CRT" (73
-                                                ; lines); 16: "Boot" under "Real
+CFG_SIG_VAL     .ASCII_W "18"                   ; 18: Scanlines Light/Medium/Strong,
+                                                ; "Mask", "Glow", "CRT gamma" (85
+                                                ; lines); 17: the Filter menu's "CRT"
+                                                ; (73 lines); 16: "Boot" under "Real
                                                 ; floppy speed" (72 lines); 15:
                                                 ; "Real floppy speed",
                                                 ; "Internal drive" (64 lines)
@@ -1242,9 +1244,10 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 73-line menu: 20 + 761 item characters + 1 + 5 x 73 (the line
-; arrays and the dependency array) + 1 + (7 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1460 words (the 72-line one before "CRT": 1450; the
+; for this 85-line menu: 20 + 890 item characters + 1 + 5 x 85 (the line
+; arrays and the dependency array) + 1 + (8 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 1675 words (the 73-line one before the CRT emulation:
+; 1460; the 72-line one before "CRT": 1450; the
 ; 64-line one before "Boot": 1292; the
 ; 63-line "Internal drive" one: 1268; the
 ; 61-line "Drive sounds" one: 1230; the
@@ -1254,7 +1257,7 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 ; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
 ; 46-line one needed 939 of 960, before the "Refresh" submenu).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 1472
+MENU_HEAP_SIZE  .EQU 1696
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -1262,9 +1265,11 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 18139                      ; (18656 before MENU_HEAP_SIZE
+HEAP_SIZE       .EQU 17915                      ; (18656 before MENU_HEAP_SIZE
 HEAP            .BLOCK 1                        ; grew by 128: the same end;
-                                                ; 18528 before sd_diag.asm's 389)
+                                                ; 18528 before sd_diag.asm's 389;
+                                                ; 18139 before MENU_HEAP_SIZE grew
+                                                ; by 224)
 
                 .ORG    0xFED0                  ; as Megamiga: the FAT32 write layer's
                                                 ; larger device handle (main_vars.asm)
