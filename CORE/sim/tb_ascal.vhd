@@ -47,6 +47,8 @@ entity tb_ascal is
       G_MEMW   : natural := 65536;   -- memory words (16 bytes)
       G_RAM    : natural := 2**18;   -- ascal's RAMSIZE (one frame buffer)
       G_RST    : natural := 0;       -- 1: a reset in the middle of a write burst
+      G_HTOT   : natural := 0;       -- the output line's clocks (0: G_OW + 72, short blanking);
+                                     -- 1862 is 1024x768's 20.7 us line at the 90 MHz o_clk
       G_RUN    : natural := 0        -- output file number
    );
 end entity tb_ascal;
@@ -56,6 +58,14 @@ architecture sim of tb_ascal is
    constant C_DW : natural := 128;
    constant C_AW : natural := 19;
    constant C_MEMW : natural := G_MEMW;  -- addresses wrap
+   function htot return natural is
+   begin
+      if G_HTOT = 0 then
+         return G_OW + 72;
+      end if;
+      return G_HTOT;
+   end function htot;
+   constant C_HTOT : natural := htot;
 
    signal i_clk, o_clk, avl_clk : std_logic := '0';
    signal reset_na : std_logic := '0';
@@ -173,7 +183,7 @@ begin
          iauto => '1', himin => 0, himax => 0, vimin => 0, vimax => 0,
          i_hdmax => open, i_vdmax => open, i_interlaced => open,
          run => '1', freeze => '0', mode => to_unsigned(G_MODE, 5),
-         htotal => G_OW + 72, hsstart => G_OW + 20, hsend => G_OW + 36, hdisp => G_OW,
+         htotal => C_HTOT, hsstart => G_OW + 20, hsend => G_OW + 36, hdisp => G_OW,
          hmin => 0, hmax => G_OW - 1,
          vtotal => G_OH + 48, vsstart => G_OH + 35, vsend => G_OH + 39, vdisp => G_OH + 32,
          vmin => 16, vmax => G_OH + 15,
