@@ -367,12 +367,13 @@ constant C_MENU_HDMI_1280     : natural := 32;  -- M2M-UPSTREAM sxga-mode
 constant C_MENU_HDMI_NATIVE   : natural := 33;  -- M2M-UPSTREAM native: the PC's own resolution
 constant C_MENU_FLT_SMOOTH    : natural := 40;  -- (39: Sharp, the default)
 constant C_MENU_FLT_PIXELS    : natural := 41;
-constant C_MENU_SL_25         : natural := 48;  -- (47: Off, the default)
-constant C_MENU_SL_50         : natural := 49;
-constant C_MENU_RF_ORIG       : natural := 56;  -- the VGA's own refresh (55: 60 Hz, the default)
-constant C_MENU_JOY_P5        : natural := 63;  -- the game port's fire 2 on pin 5 (62: pin 9)
-constant C_MENU_JOY_OFF       : natural := 64;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 69;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_FLT_CRT       : natural := 42;  -- ascal's polyphase filter (CRT emulation)
+constant C_MENU_SL_25         : natural := 49;  -- (48: Off, the default)
+constant C_MENU_SL_50         : natural := 50;
+constant C_MENU_RF_ORIG       : natural := 57;  -- the VGA's own refresh (56: 60 Hz, the default)
+constant C_MENU_JOY_P5        : natural := 64;  -- the game port's fire 2 on pin 5 (63: pin 9)
+constant C_MENU_JOY_OFF       : natural := 65;  -- no joystick on the game port (201h reads FFh)
+constant C_MENU_RESET         : natural := 70;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -546,6 +547,7 @@ signal main_nat_f             : std_logic := '0';     -- the last frame was shor
 signal qnice_nat_size         : std_logic_vector(24 downto 0);
 signal qnice_nat_mode         : video_mode_type := C_VIDEO_HDMI_640_60;
 signal qnice_hdmi_mode        : video_mode_type;   -- the HDMI mode (native's or the menu's)
+signal qnice_flt_crt          : std_logic;         -- the Filter menu's CRT (polyphase)
 signal qnice_nat_on           : std_logic := '0';
 signal qnice_nat_w            : natural range 0 to 4095 := 640;
 signal qnice_nat_h            : natural range 0 to 4095 := 480;
@@ -2162,18 +2164,27 @@ begin
                                                   qnice_hdmi_mode = C_VIDEO_VGA_720_70    else
                                  "000000001";
    -- the Filter menu: sharp bilinear (the default: 720x400 text at x1.2 (480p) or x1.8 (720p)
-   -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0])
+   -- without uneven strokes, still crisp), bilinear, nearest neighbour (ascal's MODE[1:0]), and
+   -- CRT: ascal's polyphase filter (MODE 100), with the coefficients the firmware loads at start
+   -- (M2M/rom/filters.asm: lanczos2_12 across, Scan_Br_110_80 down, the C64MEGA65 core's CRT
+   -- emulation): each output line is weighted by its place between two of the PC's lines, so
+   -- the scanlines follow the PC's lines at any scale. Not in native mode (no scaling).
+   qnice_flt_crt              <= qnice_osm_control_i(C_MENU_FLT_CRT) and
+                                 not qnice_osm_control_i(C_MENU_HDMI_NATIVE);
    qnice_ascal_mode_o         <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                                 "00" when qnice_flt_crt = '1' else
                                  "01" when qnice_osm_control_i(C_MENU_FLT_SMOOTH) = '1' else
                                  "00" when qnice_osm_control_i(C_MENU_FLT_PIXELS) = '1' else
                                  "10";
+   qnice_ascal_polyphase_o    <= qnice_flt_crt;
    -- the Scanlines menu, in every HDMI mode: lined up in 1280x1024 only, where a 480-line mode
-   -- is exactly doubled (in the others a line is 1.25 to 1.92 output lines, the dark lines beat)
+   -- is exactly doubled (in the others a line is 1.25 to 1.92 output lines, the dark lines beat);
+   -- off with the CRT filter, which draws its own (config.vhd greys 25 %/50 % out)
    qnice_scanlines_o          <= "00" when qnice_osm_control_i(C_MENU_HDMI_NATIVE) = '1' else
+                                 "00" when qnice_osm_control_i(C_MENU_FLT_CRT) = '1' else
                                  "01" when qnice_osm_control_i(C_MENU_SL_25) = '1' else
                                  "10" when qnice_osm_control_i(C_MENU_SL_50) = '1' else
                                  "00";
-   qnice_ascal_polyphase_o    <= '0';
    qnice_ascal_triplebuf_o    <= '1';         -- whole frames: the PC's 70 Hz text mode on 60 Hz
                                               -- HDMI tore while the screen changed
    qnice_flip_joyports_o      <= '0';

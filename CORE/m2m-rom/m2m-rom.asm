@@ -1105,8 +1105,10 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "16"                   ; 16: "Boot" under "Real floppy speed"
-                                                ; (72 lines); 15: "Real floppy speed",
+CFG_SIG_VAL     .ASCII_W "17"                   ; 17: the Filter menu's "CRT" (73
+                                                ; lines); 16: "Boot" under "Real
+                                                ; floppy speed" (72 lines); 15:
+                                                ; "Real floppy speed",
                                                 ; "Internal drive" (64 lines)
 
 ; ----------------------------------------------------------------------------
@@ -1240,9 +1242,10 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 72-line menu: 20 + 756 item characters + 1 + 5 x 72 (the line
+; for this 73-line menu: 20 + 761 item characters + 1 + 5 x 73 (the line
 ; arrays and the dependency array) + 1 + (7 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1450 words (the 64-line one before "Boot": 1292; the
+; 26 (SCR$OSM_O_DX) = 1460 words (the 72-line one before "CRT": 1450; the
+; 64-line one before "Boot": 1292; the
 ; 63-line "Internal drive" one: 1268; the
 ; 61-line "Drive sounds" one: 1230; the
 ; 54-line one before it: 1100; the 53-line one before the joystick's "Off":

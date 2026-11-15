@@ -30,7 +30,10 @@ entity digital_pipeline is
       -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): ascal's MASK, the interpolators
       -- that are built (bit 0 nearest, 1 bilinear, 2 sharp bilinear, 3 bicubic, 4 polyphase);
       -- a core that never selects bicubic or polyphase leaves out their long DSP paths
-      G_ASCAL_MASK           : std_logic_vector(7 downto 0) := x"ff"
+      G_ASCAL_MASK           : std_logic_vector(7 downto 0) := x"ff";
+      -- M2M-UPSTREAM ascal-adaptive (z486 for MEGA65, 2026-11-15): ascal's ADAPTIVE (a second
+      -- polyphase coefficient set blended by brightness); false leaves its logic out
+      G_ASCAL_ADAPTIVE       : boolean := true
    );
    port (
       -- Input from Core (video and audio)
@@ -473,7 +476,8 @@ begin
          DOWNSCALE => false,        -- Not needed: We use ascal only to upscale
          DOWNSCALE_NN => true,      -- Not needed: true = remove logic
          BYTESWAP  => true,
-         ADAPTIVE  => true,         -- Needed for advanced scanlines emulation in polyphase mode
+         ADAPTIVE  => G_ASCAL_ADAPTIVE, -- M2M-UPSTREAM ascal-adaptive (was true: needed for advanced
+                                    -- scanlines emulation in polyphase mode)
          -- M2M-UPSTREAM rtg-framebuffer: ascal builds the core palette (pal2) only with PALETTE
          -- as well (GenPal2 = PALETTE and PALETTE2; the palette index logic is in GenPal1). The
          -- pal1 memory is never written and is trimmed. Original:

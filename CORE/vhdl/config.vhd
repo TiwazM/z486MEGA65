@@ -232,43 +232,48 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    39    Sharp                 C_MENU_FLT_SHARP (default): sharp bilinear
 --    40    Smooth                C_MENU_FLT_SMOOTH: bilinear
 --    41    Pixels                C_MENU_FLT_PIXELS: nearest neighbour
---    42    ----
---    43    Back to main menu
---    44  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only)
---    45    Scanlines             headline
---    46    ----
---    47    Off                   C_MENU_SL_OFF (default)
---    48    25%                   C_MENU_SL_25
---    49    50%                   C_MENU_SL_50
---    50    ----
---    51    Back to main menu
---    52  Refresh: %s             submenu: the PC's refresh rate (z486's video_f60)
---    53    PC refresh rate       headline
---    54    ----
---    55    60 Hz (HDMI)          (default) every mode retimed to 60 Hz: smooth on 60 Hz HDMI
---    56    Original (VGA)        C_MENU_RF_ORIG: the VGA's own timing (DOS text 70 Hz,
+--    42    CRT                   C_MENU_FLT_CRT: ascal's polyphase filter, MiSTer's
+--                                lanczos2_12 across and Scan_Br_110_80 down (the
+--                                C64MEGA65 core's CRT emulation): scanlines on the PC's
+--                                own lines at any scale; greys out Scanlines 25 %/50 %
+--    43    ----
+--    44    Back to main menu
+--    45  Scanlines: %s           submenu: every second line darker (lined up in 1280x1024 only;
+--                                off with the CRT filter)
+--    46    Scanlines             headline
+--    47    ----
+--    48    Off                   C_MENU_SL_OFF (default)
+--    49    25%                   C_MENU_SL_25
+--    50    50%                   C_MENU_SL_50
+--    51    ----
+--    52    Back to main menu
+--    53  Refresh: %s             submenu: the PC's refresh rate (z486's video_f60)
+--    54    PC refresh rate       headline
+--    55    ----
+--    56    60 Hz (HDMI)          (default) every mode retimed to 60 Hz: smooth on 60 Hz HDMI
+--    57    Original (VGA)        C_MENU_RF_ORIG: the VGA's own timing (DOS text 70 Hz,
 --                                31.5 kHz); native HDMI, and VGA (the HDMI picture), follow
---    57    ----
---    58    Back to main menu
---    59  Joystick: %s            submenu: the game port's joystick (port 2)
---    60    Joystick (port 2)     headline
---    61    ----
---    62    Pin 9 fire 2          (default) fire 2 on POT X, as the C64GS's second button
---    63    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
---    64    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
---    65    ----
---    66    Back to main menu
---    67  ----
---    68  Help
---    69  Reset the PC            C_MENU_RESET
---    70  ----
---    71  Close Menu
+--    58    ----
+--    59    Back to main menu
+--    60  Joystick: %s            submenu: the game port's joystick (port 2)
+--    61    Joystick (port 2)     headline
+--    62    ----
+--    63    Pin 9 fire 2          (default) fire 2 on POT X, as the C64GS's second button
+--    64    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
+--    65    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
+--    66    ----
+--    67    Back to main menu
+--    68  ----
+--    69  Help
+--    70  Reset the PC            C_MENU_RESET
+--    71  ----
+--    72  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change (and MENU_HEAP_SIZE there when the menu grows).
-constant OPTM_SIZE         : natural := 72;
+constant OPTM_SIZE         : natural := 73;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 20;   -- the main menu's lines (0-4, 13-16, 24-25, 36, 44, 52, 59, 67-71)
+constant OPTM_DY           : natural := 20;   -- the main menu's lines (0-4, 13-16, 24-25, 36, 45, 53, 60, 68-72)
 
 constant OPTM_ITEMS        : string :=
    " z486\n"                  &
@@ -313,6 +318,7 @@ constant OPTM_ITEMS        : string :=
    " Sharp\n"                 &
    " Smooth\n"                &
    " Pixels\n"                &
+   " CRT\n"                   &
    "\n"                       &
    " Back to main menu\n"     &
    " Scanlines: %s\n"         &
@@ -403,36 +409,37 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_FILTER + OPTM_G_STDSEL,            -- 39 Sharp
                                              OPTM_G_FILTER,                            -- 40 Smooth
                                              OPTM_G_FILTER,                            -- 41 Pixels
-                                             OPTM_G_LINE,                              -- 42
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 43 Back
-                                             OPTM_G_SUBMENU,                           -- 44 Scanlines: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 45 Scanlines
-                                             OPTM_G_LINE,                              -- 46
-                                             OPTM_G_SCAN + OPTM_G_STDSEL,              -- 47 Off
-                                             OPTM_G_SCAN,                              -- 48 25%
-                                             OPTM_G_SCAN,                              -- 49 50%
-                                             OPTM_G_LINE,                              -- 50
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 51 Back
-                                             OPTM_G_SUBMENU,                           -- 52 Refresh: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 53 PC refresh rate
-                                             OPTM_G_LINE,                              -- 54
-                                             OPTM_G_REFRESH + OPTM_G_STDSEL,           -- 55 60 Hz (HDMI)
-                                             OPTM_G_REFRESH,                           -- 56 Original (VGA)
-                                             OPTM_G_LINE,                              -- 57
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 58 Back
-                                             OPTM_G_SUBMENU,                           -- 59 Joystick: %s
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 60 Joystick (port 2)
-                                             OPTM_G_LINE,                              -- 61
-                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 62 Pin 9 fire 2
-                                             OPTM_G_JOY,                               -- 63 Pin 5 fire 2
-                                             OPTM_G_JOY,                               -- 64 Off
-                                             OPTM_G_LINE,                              -- 65
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 66 Back
-                                             OPTM_G_LINE,                              -- 67
-                                             OPTM_G_HELP,                              -- 68 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 69 Reset the PC
-                                             OPTM_G_LINE,                              -- 70
-                                             OPTM_G_CLOSE                              -- 71 Close Menu
+                                             OPTM_G_FILTER,                            -- 42 CRT
+                                             OPTM_G_LINE,                              -- 43
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 44 Back
+                                             OPTM_G_SUBMENU,                           -- 45 Scanlines: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 46 Scanlines
+                                             OPTM_G_LINE,                              -- 47
+                                             OPTM_G_SCAN + OPTM_G_STDSEL,              -- 48 Off
+                                             OPTM_G_SCAN,                              -- 49 25%
+                                             OPTM_G_SCAN,                              -- 50 50%
+                                             OPTM_G_LINE,                              -- 51
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 52 Back
+                                             OPTM_G_SUBMENU,                           -- 53 Refresh: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 54 PC refresh rate
+                                             OPTM_G_LINE,                              -- 55
+                                             OPTM_G_REFRESH + OPTM_G_STDSEL,           -- 56 60 Hz (HDMI)
+                                             OPTM_G_REFRESH,                           -- 57 Original (VGA)
+                                             OPTM_G_LINE,                              -- 58
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 59 Back
+                                             OPTM_G_SUBMENU,                           -- 60 Joystick: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 61 Joystick (port 2)
+                                             OPTM_G_LINE,                              -- 62
+                                             OPTM_G_JOY + OPTM_G_STDSEL,               -- 63 Pin 9 fire 2
+                                             OPTM_G_JOY,                               -- 64 Pin 5 fire 2
+                                             OPTM_G_JOY,                               -- 65 Off
+                                             OPTM_G_LINE,                              -- 66
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 67 Back
+                                             OPTM_G_LINE,                              -- 68
+                                             OPTM_G_HELP,                              -- 69 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 70 Reset the PC
+                                             OPTM_G_LINE,                              -- 71
+                                             OPTM_G_CLOSE                              -- 72 Close Menu
                                            );
 
 -- Greyed out (M2M-UPSTREAM menu-rows, as Megamiga's config.vhd): an item of group "grp" whose
@@ -447,7 +454,10 @@ end record;
 type OPTM_ATYPE is array (natural range <>) of OPTM_AREC;
 constant OPTM_AVAIL : OPTM_ATYPE := (
    -- the internal drive's Sounds (item 1 of its group) only with "Real floppy speed"
-   0 => (OPTM_G_SOUND, 2, OPTM_G_SPEED, 1)
+   0 => (OPTM_G_SOUND, 2, OPTM_G_SPEED, 1),
+   -- Scanlines 25 % and 50 % (items 1 and 2) only with Sharp, Smooth or Pixels (items 0..2 of
+   -- the Filter group): the CRT filter draws its own scanlines
+   1 => (OPTM_G_SCAN, 6, OPTM_G_FILTER, 7)
 );
 
 -- The layout word of every item (SEL_OPTM_ROWS; menu_rows.asm): bit 1 = greyed-out rule with

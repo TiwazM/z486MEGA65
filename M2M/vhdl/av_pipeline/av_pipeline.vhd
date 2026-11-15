@@ -34,7 +34,9 @@ entity av_pipeline is
       -- Hq2x (needs 4 x). false keeps the original behaviour.
       G_VGA_LINEDOUBLER       : boolean := false;
       -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): see digital_pipeline.vhd
-      G_ASCAL_MASK            : std_logic_vector(7 downto 0) := x"ff"
+      G_ASCAL_MASK            : std_logic_vector(7 downto 0) := x"ff";
+      -- M2M-UPSTREAM ascal-adaptive (z486 for MEGA65, 2026-11-15): see digital_pipeline.vhd
+      G_ASCAL_ADAPTIVE        : boolean := true
    );
    port (
       -- From CORE
@@ -843,7 +845,8 @@ begin
          G_FONT_FILE         => G_FONT_FILE,
          G_FONT_DX           => G_FONT_DX,
          G_FONT_DY           => G_FONT_DY,
-         G_ASCAL_MASK        => G_ASCAL_MASK         -- M2M-UPSTREAM ascal-mask
+         G_ASCAL_MASK        => G_ASCAL_MASK,        -- M2M-UPSTREAM ascal-mask
+         G_ASCAL_ADAPTIVE    => G_ASCAL_ADAPTIVE     -- M2M-UPSTREAM ascal-adaptive
       )
       port map (
          -- Input from Core (video and audio)

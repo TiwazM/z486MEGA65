@@ -967,7 +967,10 @@ begin
          G_VGA_LINEDOUBLER       => VGA_LINEDOUBLER,
          -- M2M-UPSTREAM ascal-mask (z486 for MEGA65, 2026-10-31): the interpolators the core
          -- builds, from its globals.vhd
-         G_ASCAL_MASK            => ASCAL_MASK
+         G_ASCAL_MASK            => ASCAL_MASK,
+         -- M2M-UPSTREAM ascal-adaptive (z486 for MEGA65, 2026-11-15): ascal's ADAPTIVE, from the
+         -- core's globals.vhd
+         G_ASCAL_ADAPTIVE        => ASCAL_ADAPTIVE
       )
       port map (
          -- Input from Core
