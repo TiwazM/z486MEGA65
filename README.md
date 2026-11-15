@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 66 MHz, boots DOS, Windows 3.11 to 98, OS/2 Warp 4 and Linux, and
-plays games from the CD era. The current version is **v0.2.2** (see
+plays games from the CD era. The current version is **v0.2.2.1** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -66,6 +66,8 @@ plays games from the CD era. The current version is **v0.2.2** (see
   speed, boot order, HDMI mode, filter, scanlines, refresh (HDMI or VGA),
   joystick, reset; settings are saved to the SD card, the hard disk mounted
   last too
+- `<SD card info>` in the file browser, under each card on the list of the
+  cards: each card's bus (native 4-bit, or the slower SPI mode) and its errors
 - Boot order: floppy then hard disk (the default), CD-ROM then hard disk (a
   bootable CD, El Torito), or the hard disk only; it counts from the next reset
 - Real floppy speed (off by default): the floppy images run at a real drive's
@@ -251,10 +253,13 @@ printed on the MEGA65's keycaps:
   cursor), so it can flicker when the picture under it changes.
 - In native HDMI mode the picture is measured one line short: the top line
   can be missing.
-- With the internal SD slot empty, the MEGA65's own start-up reads the back
-  card in SPI mode, and a card stays in SPI mode until it loses power. The PC's
-  disks then run about 40 % slower. Take the card out and put it back in, or
-  start the MEGA65 with a card in the internal slot.
+- The MEGA65's own software can leave the SD cards in SPI mode before the core
+  starts: the back card when the internal slot is empty, both cards after
+  MEGAFLASH has read them. A card stays in SPI mode until it loses power, and
+  the PC's disks then run about 40 % slower. `<SD card info>` shows it ("SPI
+  25 MHz", "re-insert for native"). Take the card out and put it back in: it
+  comes back native at once, also at a DOS prompt with the PC running from it
+  (not while it writes).
 
 ## Documentation
 

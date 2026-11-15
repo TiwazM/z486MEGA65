@@ -118,13 +118,17 @@ the floppies (checked before `floppy.v`'s FIFO gets the sector).
 `qmon.py disks` counts them: copies that matched, copies that did not,
 sectors read again fresh and how many of those came right.
 
-An SD card that a core has used in SPI mode (MegaMac does) stays in SPI mode
-until it loses power, and loading z486 over JTAG does not power it: the SD
-host's native 4-bit bus then fails and it falls back to SPI at 25 MHz, which
-works but makes the disks about 8x slower (PIOTEST 1,940 instead of 3,000+
-KB/s). `qmon.py disks` shows each slot's bus (native 4-bit at 50 MHz, or SPI);
-take the card out and put it back in once (or switch off) to bring it back to
-the native bus.
+An SD card that was used in SPI mode before z486 started stays in SPI mode
+until it loses power: the MEGA65's own start-up reads the back card in SPI
+mode when the internal slot is empty, MEGAFLASH reads both, and some cores
+(MegaMac) only use SPI. Loading z486 does not power the card: the SD host's
+native 4-bit bus then fails and it falls back to SPI at 25 MHz, which works but
+makes the disks about 40 % slower (PIOTEST's REP INSW 1,982 instead of 3,270
+KB/s). `<SD card info>` in the file browser (under each card on the list of the
+cards) and `qmon.py disks` show each slot's bus (native 4-bit at 50 MHz, or
+SPI); take the card out and put it back in once (or switch off) to bring it
+back to the native bus. That works with the PC running from the card too (at a
+DOS prompt, not while it writes): the disks carry on without a remount.
 
 `tools/dos/` has the test programs, on `tools/dos/build/z486test.iso` for
 the CD-ROM drive (`tools/dos/build.sh`, GNU as in the build image):
