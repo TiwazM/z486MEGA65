@@ -274,11 +274,13 @@ Ultrasound Classic, the MPU-401 and the game port without a conflict, and MOD4WI
 XM; Gravis' PLAYMIDI plays General MIDI with its patches; Wing Commander III with GUS music and
 effects (started through `WC3GRAV.BAT`); Jazz Jackrabbit's joystick with "Count" after a new
 calibration, and with port 2 debounced (v022deb, v022gk) its menus step one entry a tap (before, a
-tap down could skip an entry). Gabriel Knight's speech (Gravis' GUSDAC.DRV) stopped within a word until v022gk: the
-driver reads only 8Fh for its looping speech voice, and gf1.v cleared the IRQ of the voice two slots
-below, so the speech voice's IRQ came back every 75 us and the refills stopped. With v022gk, speech,
-effects and GUSMIDI music play together; a few speech lines end with a click. Quake's sound through
-the GUS crackles: its ring holds 53 ms, and at 8 fps Quake refills it in time only just.
+tap down could skip an entry). TIE Fighter (v0.3) finds the Gravis, plays its sound tests through
+it, and finds the joystick with "Count". Gabriel Knight's speech (Gravis' GUSDAC.DRV) stopped within
+a word until v022gk: the driver reads only 8Fh for its looping speech voice, and gf1.v cleared the
+IRQ of the voice two slots below, so the speech voice's IRQ came back every 75 us and the refills
+stopped. With v022gk, speech, effects and GUSMIDI music play together; a few speech lines end with a
+click. Quake's sound through the GUS crackles: its ring holds 53 ms, and at 8 fps Quake refills it
+in time only just.
 
 ## Builds
 

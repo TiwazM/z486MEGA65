@@ -113,12 +113,12 @@ Linux (TinyCore with CorePlus, Damn Small Linux installed onto the hard disk),
 DOOM, SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The
 7th Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The
 Secret of Monkey Island (CD, with its CD music), Gabriel Knight (CD), Jazz
-Jackrabbit, and Quake (slowly: 8.0 fps in
+Jackrabbit, TIE Fighter, and Quake (slowly: 8.0 fps in
 `timedemo demo1` and `demo2`, its CD music playing from a BIN/CUE while it
 loads from the hard disk; 486Quake, a build tuned for 486s, 8.5 fps at 64 MHz).
 On the Gravis Ultrasound: Second Reality, DOOM, Wing Commander III, Gabriel
-Knight (music and speech), XTC-Play and Open Cubic Player in DOS, MOD4WIN in
-Windows 95.
+Knight (music and speech), TIE Fighter, XTC-Play and Open Cubic Player in DOS,
+MOD4WIN in Windows 95.
 Benchmarks: Chris's 3D Benchmark 43.3 (25.9 fps), SpeedSys 4.78 (CPU 23.19,
 hard drive 1902), PC Player Benchmark 13.7 fps, Superscape 49.5 fps.
 
@@ -260,7 +260,8 @@ printed on the MEGA65's keycaps:
   time; "Count" answers by the number of reads, for games that count them in a
   loop and on this fast PC run out before the stick answers. Jazz Jackrabbit
   needs "Count" (set it before starting the game, then calibrate in Jazz's
-  options): with "Timed" its calibration doesn't follow the stick.
+  options): with "Timed" its calibration doesn't follow the stick. TIE
+  Fighter finds the stick with "Count" too.
   A calibration made with "Timed" leaves Jazz reading the centred stick as
   pushed, so its menus ignore the keys: set the Joystick menu to "Off", answer
   Jazz's questions with the keys, set it back, and calibrate again with "Count".
@@ -312,9 +313,10 @@ heard at once.
 ## Known limits
 
 - A 486 at 66 MHz with a microcoded FPU: Pentium-era 3D games are slow.
-- Some games don't detect the joystick. TIE Fighter does when the stick is
-  held to the upper left while it starts (as on ao486 on MiSTer); try the
-  Joystick menu's "Timing: Count" for such games.
+- Some games don't detect the joystick with the default "Timing: Timed": set
+  the Joystick menu's Timing to "Count" for them. TIE Fighter finds the stick
+  with "Count"; with "Timed" only when the stick is held to the upper left
+  while it starts (as on ao486 on MiSTer).
 - The core fixes z486_MiSTer's `boot0.rom` as it loads it, so the mouse can't
   get stuck out of step. With another system BIOS, the pointer can start
   jumping between the screen edges when a program starts or quits while the

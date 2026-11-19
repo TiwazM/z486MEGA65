@@ -39,9 +39,6 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     over the time the reading before took (at most ~16 ms); what is left when
     the next comes goes with it. `tb_pc_mouse_pot.vhd` 6.: 6 counts every
     10 ms at 40 packets a second, 12 or 18 counts a packet before, 15 each now.
-  - TIE Fighter does not see the stick unless it is held to the upper left
-    while the game starts (on ao486 on MiSTer too): to try with the
-    Joystick menu's "Timing: Count" (below).
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known. With the Pro option
@@ -411,6 +408,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   about 1000 (a note in `joystick.v`), and this port answers faster than an
   ISA card: with "Timed" its count ran out before the centre, and the
   calibration stayed at the lower right; with "Count" any loop speed works.
+  TIE Fighter, which with "Timed" saw the stick only when it was held to the
+  upper left while the game started (on ao486 on MiSTer too), finds it with
+  "Count" (on the board, 2026-11-19).
   Port 2's directions and fire are debounced in `mega65.vhd`'s `p_main_joy`
   (2026-11-18): the framework passes the DB9 lines raw (`M2M/vhdl/debouncer.vhd`
   is two flip-flops, since its 1 ms filter swallowed the Amiga mouse's
