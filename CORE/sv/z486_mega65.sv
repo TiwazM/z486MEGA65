@@ -108,6 +108,12 @@ module z486_mega65 #(
     // 2 down, 3 up, 4..7 buttons 1..4); a 4-button joystick, joystick 2 absent
     input  wire  [7:0] joy_dig,
     input  wire        joy_off,            // joystick 1 absent too: the game port reads FFh
+    input  wire        joy_count,          // the axes count 201h reads (MiSTer's "Count 6+256")
+                                           // instead of time (the IBM formula): the menu's Timing
+
+    input  wire        sb_enable,          // the Sound Blaster 16 is there at 220h (the menu's Sound)
+    input  wire        gus_enable,         // the Gravis Ultrasound is there (gus.sv; the menu's Sound)
+    input  wire  [1:0] gus_vol,            // its level in the output: 0 full, 1 -6 dB, 2 -12 dB
 
     input  wire        cpu_slow,           // the CPU at 33 MHz (z486's throttle), else full speed
     input  wire        video_f60,          // every VGA mode retimed to 60 Hz (MiSTer's default);
@@ -162,6 +168,7 @@ module z486_mega65 #(
     input  wire        sb_soft,            // the DSP's output stage on (main clock)
     output wire [47:0] dbg_pic,            // the PICs: IRR, ISR, IMR of the master, the slave
     output wire [15:0] dbg_irq,            // the IRQ lines into them
+    output wire [15:0] dbg_gus,            // the GUS's IRQ and DMA state (gus.sv's dbg)
     output wire [15:0] dbg_ps2,            // the 8042: IRQs, output buffer, enables, states
     output wire [15:0] dbg_ps2_fifo,       // the bytes in its mouse and keyboard FIFOs
     output wire [15:0] dbg_inta_bad,       // INTAs the PIC acknowledged with another vector
@@ -173,10 +180,11 @@ module z486_mega65 #(
     input  wire [15:0] cd_r
 );
 
-// z486_mister.sv's build: 8 KB + 8 KB L1, critical-word-first line reads, x87 on, no CMS
-localparam DCACHE_SET_BITS  = 7;
+// 16 KB + 16 KB L1 (set bits 8; z486_mister.sv's build has 8 KB + 8 KB, set bits 7),
+// critical-word-first line reads, x87 on, no CMS
+localparam DCACHE_SET_BITS  = 8;
 localparam DCACHE_LINE_WRAP = 1'b1;
-localparam ICACHE_SET_BITS  = 7;
+localparam ICACHE_SET_BITS  = 8;
 localparam ENABLE_X87       = 1'b1;
 localparam ENABLE_CMS       = 1'b0;
 
@@ -240,13 +248,19 @@ wire        guest_mem1_ready;
 wire        guest_mem1_valid;
 wire        guest_mem1_write;
 
-// The L2 cache between the CPU's port and the SDRAM's port 0; DMA writes (port 1) drop lines
+// The L2 cache between the CPU's port and the SDRAM's port 0; DMA writes (port 1) drop lines.
+// Its size: L2_IDX 14 = 256 KB (69 block RAMs), 13 = 128 KB, 12 = 64 KB; 0 = none (every
+// request passes through, as with `qmon.py l2 off`; the unused RAMs are trimmed). 0 since
+// 2026-11-17: its 69 block RAMs hold the GUS's second 256 KB instead (Quake 7.8 fps without
+// it, 7.9 with; Dr. Hardware's RAM average 25.3 MB/s, 32.4 with)
+localparam int L2_IDX = 0;
+
 guest_l2 #(
-    .IDX_BITS(14)                          // 256 KB, 72 block RAM tiles
+    .IDX_BITS(L2_IDX != 0 ? L2_IDX : 4)
 ) l2 (
     .clk          (clk_sys),
     .reset        (core_reset),
-    .enable       (l2_enable),
+    .enable       (L2_IDX != 0 && l2_enable),
     .u_valid      (cpu_mem0_valid),
     .u_ready      (cpu_mem0_ready),
     .u_write      (cpu_mem0_write),
@@ -364,6 +378,8 @@ wire        sample_sb_new;     // toggles with each sample the DSP outputs (clk_
 wire        sample_sb_mute;    // the DSP holds its output at 0 (clk_audio)
 wire [15:0] sample_opl_l;
 wire [15:0] sample_opl_r;
+wire [15:0] sample_gus_l;      // the Gravis Ultrasound's DAC (clk_sys)
+wire [15:0] sample_gus_r;
 wire        speaker_out;
 wire        sbp;
 wire  [4:0] vol_master_l;
@@ -402,6 +418,10 @@ system #(
     .fdd_chg_en          (fdd_chg_en),
     .fdd_chg             (fdd_chg),
     .fdd_real_speed      (fdd_real_speed),
+    .sb_enable           (sb_enable),
+    .gus_enable          (gus_enable),
+    .sample_gus_l        (sample_gus_l),
+    .sample_gus_r        (sample_gus_r),
     .ide0_request        (ide0_request),
     .ide1_request        (ide1_request),
     .floppy_wp           (fdd_wp),
@@ -412,7 +432,7 @@ system #(
     .joystick_ana_1      (16'd0),          // no stick movement: the axes follow the directions
     .joystick_ana_2      (16'd0),
     .joystick_mode       (3'd1),           // 4 buttons: buttons 3 and 4 are joystick 1's
-    .joystick_timed      (2'd0),
+    .joystick_timed      (joy_count ? 2'd3 : 2'd0), // Count 6+256 or Timed (static: the menu)
 
     .mgmt_address        (mgmt_address),
     .mgmt_read           (mgmt_read),
@@ -626,6 +646,7 @@ system #(
     .inta_hold           (inta_hold),
     .dbg_pic             (dbg_pic),
     .dbg_irq             (dbg_irq),
+    .dbg_gus             (dbg_gus),
     .dbg_ps2             (dbg_ps2),
     .dbg_ps2_fifo        (dbg_ps2_fifo),
     .dbg_inta_bad        (dbg_inta_bad),
@@ -744,6 +765,8 @@ assign fb_pal_wr = vga_pal_we;
 // Audio (clk_audio): z486_mister.sv's mix without CMS and MT-32. The SB Pro mixer volumes
 // apply to the voice (SB), MIDI (OPL) and CD channels and, as master, to the whole mix; the
 // mixer's output switches (vol_en) turn the CD's left and right on and off, as on MiSTer.
+// The Gravis Ultrasound is a card of its own: added after the SB Pro mixer, which never
+// touches it, at its own level (its voices' volumes, its line out switch: gus.sv).
 // ------------------------------------------------------------------------------------------
 
 wire [15:0] cdda_l;
@@ -756,6 +779,19 @@ cdc_vector_handshake_continuous #(
     .clk_out (clk_audio),
     .data_in ({cd_l, cd_r}),
     .data_out({cdda_l, cdda_r})
+);
+
+// The Gravis Ultrasound's samples (gus.sv, clk_sys)
+wire [15:0] gus_l;
+wire [15:0] gus_r;
+
+cdc_vector_handshake_continuous #(
+    .DATA_WIDTH(32)
+) gus_cdc (
+    .clk_in  (clk_sys),
+    .clk_out (clk_audio),
+    .data_in ({sample_gus_l, sample_gus_r}),
+    .data_out({gus_l, gus_r})
 );
 
 wire        speaker_out_audio;
@@ -801,6 +837,25 @@ reg  [16:0] mix_tmp_l;
 reg  [16:0] mix_tmp_r;
 wire [15:0] master_l, master_r, sb_l, sb_r, opl_l, opl_r, cdv_l, cdv_r;
 wire        sb_volume_valid;
+// the Gravis Ultrasound's level (the menu's "GUS volume", static: two flops into clk_audio):
+// its full scale is the output's, the SB16's comes through its mixer (-14 dB master and voice
+// after a reset), so "Full" is loud; -6 dB by default
+wire [1:0]  gus_vol_audio;
+
+synchronizer #(
+    .DATA_WIDTH(2)
+) gus_vol_sync (
+    .clk(clk_audio),
+    .in (gus_vol),
+    .out(gus_vol_audio)
+);
+
+wire [15:0] gus_lv = $signed(gus_l) >>> gus_vol_audio;
+wire [15:0] gus_rv = $signed(gus_r) >>> gus_vol_audio;
+
+// the mix after the SB Pro mixer, the Gravis Ultrasound added (saturating)
+wire [16:0] out_sum_l = {master_l[15], master_l} + {gus_lv[15], gus_lv};
+wire [16:0] out_sum_r = {master_r[15], master_r} + {gus_rv[15], gus_rv};
 
 sb_volume #(
     .NUM_CH(8),
@@ -825,8 +880,8 @@ sb_volume #(
 
 always @(posedge clk_audio) begin
     if (sb_volume_valid) begin
-        audio_l   <= master_l;
-        audio_r   <= master_r;
+        audio_l   <= (^out_sum_l[16:15]) ? {out_sum_l[16], {15{out_sum_l[15]}}} : out_sum_l[15:0];
+        audio_r   <= (^out_sum_r[16:15]) ? {out_sum_r[16], {15{out_sum_r[15]}}} : out_sum_r[15:0];
         mix_tmp_l <= spk_out + {sb_l[15], sb_l} + {opl_l[15], opl_l}
                    + (vol_en[2] ? {cdv_l[15], cdv_l} : 17'd0);
         mix_tmp_r <= spk_out + {sb_r[15], sb_r} + {opl_r[15], opl_r}

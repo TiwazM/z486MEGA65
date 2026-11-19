@@ -27,13 +27,16 @@
 #                             DMA requests' long waits and the DMA commands its DSP held back,
 #                             with microseconds, and its samples' big jumps; stops it first
 #                             ("peek": reads it running)
-#   qmon.py iotrace start [freeze] [once] [quiet] [timer]
+#   qmon.py iotrace start [freeze] [once] [quiet] [timer] [gus]
 #                             start it again (empty); "freeze": stop at the card's first 1 ms
 #                             wait; "once": stop when full (the first 1024 entries); "quiet":
 #                             leave out DMA flip-flop clears and status reads (a driver polling
 #                             its position fills the trace with them in a tenth of a second);
 #                             "timer": the PIT (40-43h) and port 61h too, writes and reads that
-#                             change (what a program waits on there)
+#                             change (what a program waits on there); "gus": the Gravis
+#                             Ultrasound's ports (240-24F, 340-347, its GF1 registers named),
+#                             the DMA controllers, the PICs without the timer's, keyboard's and
+#                             mouse's interrupts, and IRQ 3/5/7/9/10/11 rising and falling
 #   qmon.py iotrace jump [N]  the smallest sample jump it logs, N/256 of the full range
 #                             (default 64)
 #   qmon.py sbfix [on|off]    the Sound Blaster's stalled-transfer fix (sound_dsp.v's
@@ -477,8 +480,70 @@ DSP_CMD = {0x10: ("direct 8-bit sample", 1), 0x14: ("8-bit single-cycle DMA", 2)
            0xF2: ("IRQ 8-bit", 0), 0xF3: ("IRQ 16-bit", 0)}
 
 
+# The Gravis Ultrasound at 240h (gus.sv): its ports, the GF1's registers (3x3 picks one, 3x4
+# and 3x5 are its low and high byte; 80h and up read the voice registers back)
+GUS_PORT = {0x240: "GUS mix control", 0x246: "GUS IRQ status", 0x248: "GUS timer control",
+            0x249: "GUS timer data", 0x24A: "GUS 2xA", 0x24B: "GUS IRQ/DMA latch",
+            0x24C: "GUS 2xC", 0x24D: "GUS 2xD", 0x24E: "GUS 2xE", 0x24F: "GUS register controls",
+            0x340: "GUS MIDI control/status", 0x341: "GUS MIDI data", 0x342: "GUS voice",
+            0x343: "GUS register", 0x344: "GUS data low", 0x345: "GUS data high",
+            0x347: "GUS DRAM"}
+GF1_REG = {0x00: "voice control", 0x01: "frequency", 0x02: "start hi", 0x03: "start lo",
+           0x04: "end hi", 0x05: "end lo", 0x06: "ramp rate", 0x07: "ramp start",
+           0x08: "ramp end", 0x09: "volume", 0x0A: "position hi", 0x0B: "position lo",
+           0x0C: "pan", 0x0D: "volume control", 0x0E: "active voices", 0x0F: "IRQ source",
+           0x41: "DRAM DMA control", 0x42: "DMA address", 0x43: "DRAM address lo",
+           0x44: "DRAM address hi", 0x45: "timer control", 0x46: "timer 1 count",
+           0x47: "timer 2 count", 0x48: "sampling rate", 0x49: "sampling control",
+           0x4B: "joystick trim", 0x4C: "reset"}
+GUS_BITS = {  # 8-bit registers whose bits say more (in 3x5)
+    0x00: ("stopped", "stop", "16-bit", "loop", "bidirectional", "wave IRQ on", "backwards",
+           "wave IRQ pending"),
+    0x0D: ("stopped", "stop", "rollover", "loop", "bidirectional", "ramp IRQ on", "down",
+           "ramp IRQ pending"),
+    0x41: ("on", "to the PC", "16-bit channel", "rate 1", "rate 2", "TC IRQ on", "TC pending",
+           "invert MSB"),
+    0x45: ("", "AdLib NMI", "timer 1 IRQ", "timer 2 IRQ", "", "SB NMI", "", ""),
+    0x49: ("on", "stereo", "16-bit channel", "", "", "TC IRQ on", "TC pending", "invert MSB"),
+    0x4C: ("running", "DAC on", "IRQs on", "", "", "", "", "")}
+
+
+def gus_bits(names, val):
+    return ", ".join(n for i, n in enumerate(names) if n and val >> i & 1) or "-"
+
+
+def gus_port(port, val, wr, gus):
+    name = GUS_PORT.get(port, "GUS port %03X" % port)
+    if port == 0x342 and wr:
+        gus["voice"] = val & 0x1F
+        name += " %d" % gus["voice"]
+    elif port == 0x343 and wr:
+        gus["reg"] = val
+        r = val & 0x7F if val < 0x90 else val
+        name += " %02Xh %s%s" % (val, "(read) " if 0x80 <= val < 0x90 else "",
+                                 GF1_REG.get(r, "?"))
+    elif port in (0x344, 0x345):
+        r = gus["reg"] & 0x7F if gus["reg"] < 0x90 else gus["reg"]
+        name += ": %02Xh %s%s" % (gus["reg"], GF1_REG.get(r, "?"),
+                                  " of voice %d" % gus["voice"] if r < 0x10 else "")
+        if port == 0x345 and r in GUS_BITS:
+            name += " = " + gus_bits(GUS_BITS[r], val)
+        if port == 0x345 and r == 0x0F and not wr:
+            name += " = voice %d%s%s" % (val & 0x1F, ", wave IRQ" if not val & 0x80 else "",
+                                         ", ramp IRQ" if not val & 0x40 else "")
+    elif port == 0x246 and not wr:
+        name += " = " + gus_bits(("MIDI out", "MIDI in", "timer 1", "timer 2", "SB/AdLib",
+                                  "wave", "ramp", "DMA TC"), val)
+    elif port == 0x240 and wr:
+        name += " = " + gus_bits(("line in off", "line out off", "mic on", "latches on",
+                                  "IRQs combined", "MIDI loopback", "IRQ latch next", ""), val)
+    return name
+
+
 def iot_port(port, val, wr, dsp):
     """A name for the port, and for the byte where it says more."""
+    if 0x240 <= port <= 0x24F or 0x340 <= port <= 0x347:
+        return gus_port(port, val, wr, dsp.setdefault("gus", {"voice": 0, "reg": 0}))
     if port < 0x10 or 0xC0 <= port <= 0xDF:
         hi = port >= 0xC0
         reg = (port - 0xC0) >> 1 if hi else port
@@ -543,6 +608,22 @@ def iot_port(port, val, wr, dsp):
     return name
 
 
+def gus_state():
+    # gus.sv's dbg (mega65.vhd C_DEV_PC_CTL 0x000F); EEEE from a core without it
+    v = dump(0x800F, 0x800F)[0]
+    if v is None or v == 0xEEEE:
+        return "GUS: no state in this core"
+    if not v >> 15 & 1:
+        return "GUS: off (the menu's Sound)"
+    irq = {0: "none", 1: "2 (9)", 2: "5", 3: "3", 4: "7", 5: "11", 6: "12", 7: "15"}[v >> 11 & 7]
+    dma = {0: "none", 1: "1", 2: "3", 3: "5", 4: "6", 5: "7"}.get(v & 7, "?")
+    return ("GUS: latches %s, IRQ latch %s, DMA latch %s; GF1 IRQ1 %d IRQ2 %d, sampling IRQ %d; "
+            "GF1 DMA request %d, ours to dma.v %d; 41h %s%s; sampling %s" % (
+                "on" if v >> 14 & 1 else "OFF", irq, dma, v >> 10 & 1, v >> 9 & 1, v >> 8 & 1,
+                v >> 7 & 1, v >> 6 & 1, "on" if v >> 4 & 1 else "off",
+                " to the PC" if v >> 5 & 1 else "", "on" if v >> 3 & 1 else "off"))
+
+
 def iotrace(opts):
     pc_dev()
     if opts[:1] == ["jump"]:
@@ -554,14 +635,15 @@ def iotrace(opts):
         return
     if opts[:1] in (["start"], ["freeze"]):
         freeze, once, quiet = "freeze" in opts, "once" in opts, "quiet" in opts
-        timer = "timer" in opts
+        timer, gus = "timer" in opts, "gus" in opts
         poke(0x8004, (1 if freeze else 0) | (2 if once else 0) | (4 if quiet else 0) |
-             (8 if timer else 0))
-        print("I/O trace started%s%s%s%s" % (
+             (8 if timer else 0) | (16 if gus else 0))
+        print("I/O trace started%s%s%s%s%s" % (
             ", stops at the Sound Blaster's first 1 ms DMA wait" if freeze else "",
             ", stops when full" if once else "",
             ", without DMA polling" if quiet else "",
-            ", with the timer and port 61h" if timer else ""))
+            ", with the timer and port 61h" if timer else "",
+            ", the GUS mode" if gus else ""))
         return
     if opts[:1] != ["peek"]:
         poke(0x8005, 0)                    # stop it: a running trace changes while it is read
@@ -595,6 +677,8 @@ def iotrace(opts):
             print(head + "W %03X <- %02X  %s" % (port, val, iot_port(port, val, True, dsp)))
         elif kind == 1:
             print(head + "R %03X -> %02X  %s" % (port, val, iot_port(port, val, False, dsp)))
+        elif kind == 2 and w[3] >> 12 & 1:
+            print(head + "--- IRQ %d %s" % (val & 0xF, "rises" if val & 0x80 else "falls"))
         elif kind == 2:
             print(head + "--- Sound Blaster IRQ")
         elif kind == 3:
@@ -878,6 +962,7 @@ elif args and args[0] == "status":
               (", ".join(held) or "centred, no button",
                {0: "none", 1: "8-bit up", 2: "16-bit up", 3: "both up"}[s["sb_req"]]))
     print(pic_8042())
+    print(gus_state())
     print(log(s["logs"]))
 elif args and args[0] == "boot":
     s = boot(int(args[1], 0), float(args[2]) if len(args) > 2 else 3.0)

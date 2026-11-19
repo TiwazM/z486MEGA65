@@ -378,7 +378,12 @@ constant C_MENU_CRT_TRIN      : natural := 51;  -- CRT: a Trinitron, crisp
 constant C_MENU_RF_ORIG       : natural := 58;  -- the VGA's own refresh (57: 60 Hz, the default)
 constant C_MENU_JOY_P5        : natural := 65;  -- the game port's fire 2 on pin 5 (64: pin 9)
 constant C_MENU_JOY_OFF       : natural := 66;  -- no joystick on the game port (201h reads FFh)
-constant C_MENU_RESET         : natural := 71;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_JOY_COUNT     : natural := 71;  -- the game port counts reads (70: timed, the default)
+constant C_MENU_SND_SB        : natural := 77;  -- Sound: the SB16 alone (no Gravis Ultrasound)
+constant C_MENU_SND_GUS       : natural := 78;  -- Sound: the GUS alone (79: both, the default)
+constant C_MENU_GUSV_FULL     : natural := 83;  -- GUS volume: full (84: -6 dB, the default)
+constant C_MENU_GUSV_12       : natural := 85;  -- GUS volume: -12 dB
+constant C_MENU_RESET         : natural := 90;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -403,9 +408,19 @@ signal main_led_req_d         : std_logic := '0';                  -- main_disk_
 signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS time again
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
+signal main_gus_vol           : std_logic_vector(1 downto 0);    -- the menu's GUS volume: dB / 6
 signal main_joy_dig           : std_logic_vector(7 downto 0);    -- the game port's joystick
 signal main_joy_b2            : std_logic := '0';
 signal main_joy_b3            : std_logic := '0';
+-- port 2's fire and directions (4: fire, 3: up, 2: down, 1: left, 0: right; '1' = pressed),
+-- debounced in p_main_joy: a line's new state counts once it has held C_JOY_DEB_MS ms
+constant C_JOY_DEB_MS         : natural := 5;
+type t_joy_cnt is array (0 to 4) of natural range 0 to C_JOY_DEB_MS - 1;
+signal main_joy_ms_div        : natural range 0 to CORE_CLK_SPEED / 1000 - 1 := 0;
+signal main_joy_ms            : std_logic := '0';
+signal main_joy_raw           : std_logic_vector(4 downto 0) := (others => '0');
+signal main_joy_deb           : std_logic_vector(4 downto 0) := (others => '0');
+signal main_joy_cnt           : t_joy_cnt := (others => 0);
 signal main_ddram_rst         : std_logic;
 signal main_pc_roms_ok        : std_logic_vector(0 downto 0);
 signal qnice_pc_roms_ok       : std_logic_vector(0 downto 0) := "0";
@@ -456,6 +471,8 @@ signal main_dbg_sb_out_dif    : std_logic_vector(15 downto 0);   -- by how much,
 signal main_dbg_sb_out_why    : std_logic_vector(1 downto 0);    -- for what
 signal main_dbg_pic           : std_logic_vector(47 downto 0);   -- the PICs' IRR, ISR, IMR
 signal main_dbg_irq           : std_logic_vector(15 downto 0);   -- the IRQ lines into them
+signal main_dbg_gus           : std_logic_vector(15 downto 0);   -- the GUS's IRQ, DMA state
+signal qnice_dbg_gus          : std_logic_vector(15 downto 0);
 signal main_dbg_ps2           : std_logic_vector(15 downto 0);   -- the 8042's state
 signal main_dbg_ps2_fifo      : std_logic_vector(15 downto 0);   -- its FIFOs' bytes
 signal main_dbg_inta_bad      : std_logic_vector(15 downto 0);   -- INTAs acknowledged otherwise
@@ -480,6 +497,9 @@ signal main_iot_stall_req     : std_logic_vector(1 downto 0) := "00";
 signal main_iot_stall_p       : std_logic := '0';
 signal main_iot_freeze_p      : std_logic := '0';
 signal main_iot_imr           : std_logic_vector(7 downto 0) := x"FF";  -- the last write to 21
+signal main_iot_imr2          : std_logic_vector(7 downto 0) := x"FF";  -- and to A1
+signal main_iot_gl_d          : std_logic_vector(15 downto 0) := (others => '0');  -- GUS mode:
+signal main_iot_gl_p          : std_logic_vector(15 downto 0) := (others => '0');  -- IRQ changes
 signal main_iot_cwait         : unsigned(15 downto 0) := (others => '0');  -- us a command waits
 signal main_iot_cdef          : unsigned(15 downto 0) := (others => '0');
 signal main_iot_cdef_p        : std_logic := '0';
@@ -497,11 +517,12 @@ signal main_iot_owhy          : std_logic_vector(1 downto 0) := (others => '0');
 -- mouse's y and x reversed (pc_mouse.vhd's flip_i), 23: its x and y swapped (main_m1351_x),
 -- 24: the Sound Blaster DSP's output stage off (z486_mega65.sv's sb_soft), 25: the trace
 -- quiet: no DMA flip-flop clears (0Ch, D8h) or DMA status reads (08h, D0h), which a driver
--- polling its position writes and reads every few hundred microseconds
-signal main_iot_arm           : std_logic_vector(26 downto 0);
-signal main_iot_arm_d         : std_logic_vector(26 downto 0) := (others => '0');
+-- polling its position writes and reads every few hundred microseconds, 26: the timer too,
+-- 27: the GUS mode (its ports, its IRQ line; not the timer's, keyboard's and mouse's IRQs)
+signal main_iot_arm           : std_logic_vector(27 downto 0);
+signal main_iot_arm_d         : std_logic_vector(27 downto 0) := (others => '0');
 signal main_iot_stat          : std_logic_vector(17 downto 0);
-signal qnice_iot_arm          : std_logic_vector(26 downto 0) := "000" & x"040000";
+signal qnice_iot_arm          : std_logic_vector(27 downto 0) := x"0040000";
 signal qnice_iot_stat         : std_logic_vector(17 downto 0);
 signal qnice_iot_q            : std_logic_vector(63 downto 0);
 
@@ -769,6 +790,10 @@ component z486_mega65 is
       ps2_mouse_data_out : out   std_logic;
       joy_dig            : in    std_logic_vector(7 downto 0);
       joy_off            : in    std_logic;
+      joy_count          : in    std_logic;
+      sb_enable          : in    std_logic;
+      gus_enable         : in    std_logic;
+      gus_vol            : in    std_logic_vector(1 downto 0);
       cpu_slow           : in    std_logic;
       video_f60          : in    std_logic;
       boot_cfg           : in    std_logic_vector(5 downto 0);
@@ -809,6 +834,7 @@ component z486_mega65 is
       inta_hold          : in    std_logic;
       dbg_pic            : out   std_logic_vector(47 downto 0);
       dbg_irq            : out   std_logic_vector(15 downto 0);
+      dbg_gus            : out   std_logic_vector(15 downto 0);
       dbg_ps2            : out   std_logic_vector(15 downto 0);
       dbg_ps2_fifo       : out   std_logic_vector(15 downto 0);
       dbg_inta_bad       : out   std_logic_vector(15 downto 0);
@@ -1106,6 +1132,11 @@ begin
          dst_data_o => qnice_phys_snap
       ); -- i_cdc_phys_snap
 
+   -- the menu's GUS volume as an arithmetic shift of its samples (z486_mega65.sv)
+   main_gus_vol <= "00" when main_osm_control_i(C_MENU_GUSV_FULL) = '1' else
+                   "10" when main_osm_control_i(C_MENU_GUSV_12) = '1' else
+                   "01";
+
    i_z486 : z486_mega65
       generic map (
          CLK_HZ             => CORE_CLK_SPEED
@@ -1188,6 +1219,14 @@ begin
          -- MEGA65 can't tell a released digital stick from an empty port, and DOS Quake, finding
          -- one, stops to calibrate it with its prompts off screen)
          joy_off            => main_osm_control_i(C_MENU_JOY_OFF),
+         -- the menu's joystick "Timing": Count (every 201h read counts the axes down)
+         joy_count          => main_osm_control_i(C_MENU_JOY_COUNT),
+         -- the menu's "Sound": SB16, GUS or both (the default); each card is there unless the
+         -- other one is chosen alone
+         sb_enable          => not main_osm_control_i(C_MENU_SND_GUS),
+         gus_enable         => not main_osm_control_i(C_MENU_SND_SB),
+         -- the menu's "GUS volume": full, -6 dB (the default) or -12 dB
+         gus_vol            => main_gus_vol,
          cpu_slow           => main_cpu_slow,
          -- the menu's "Refresh": 60 Hz (the default) or the VGA's own timing, which analog
          -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
@@ -1236,6 +1275,7 @@ begin
          inta_hold          => not main_iot_arm(20),
          dbg_pic            => main_dbg_pic,
          dbg_irq            => main_dbg_irq,
+         dbg_gus            => main_dbg_gus,
          dbg_ps2            => main_dbg_ps2,
          dbg_ps2_fifo       => main_dbg_ps2_fifo,
          dbg_inta_bad       => main_dbg_inta_bad,
@@ -1399,11 +1439,37 @@ begin
    -- A joystick on port 2 as the PC's game port joystick (201h). Fire is button 1; a second
    -- and third fire button on the paddle lines (main_fire2_pot, main_fire3_pot: the C64 two-
    -- and three-button joysticks connect them to +5 V) are buttons 2 and 3. A pressed one reads near 255 here
-   -- (M2M inverts the paddle values), an open line near 0. The directions and fire come
-   -- debounced, on main_clk, from M2M (the paddle values too).
+   -- (M2M inverts the paddle values), an open line near 0. The directions and fire come from
+   -- M2M raw (its debouncer is two flip-flops since the Amiga mouse's quadrature, which port 1
+   -- needs unfiltered): debounced here, port 2 only. A switch's contacts bounce for a few ms
+   -- as they close and open, and a game that counts presses (Jazz Jackrabbit's menus) took a
+   -- bounce for another press. A line's new state is taken once it has differed from the
+   -- debounced one for C_JOY_DEB_MS millisecond ticks in a row (4 to 5 ms late); a blip back
+   -- restarts the count.
    p_main_joy : process (main_clk)
    begin
       if rising_edge(main_clk) then
+         main_joy_raw <= not (main_joy_2_fire_n_i & main_joy_2_up_n_i & main_joy_2_down_n_i &
+                              main_joy_2_left_n_i & main_joy_2_right_n_i);
+         if main_joy_ms_div = CORE_CLK_SPEED / 1000 - 1 then
+            main_joy_ms_div <= 0;
+            main_joy_ms     <= '1';
+         else
+            main_joy_ms_div <= main_joy_ms_div + 1;
+            main_joy_ms     <= '0';
+         end if;
+         for i in 0 to 4 loop
+            if main_joy_raw(i) = main_joy_deb(i) then
+               main_joy_cnt(i) <= 0;
+            elsif main_joy_ms = '1' then
+               if main_joy_cnt(i) = C_JOY_DEB_MS - 1 then
+                  main_joy_deb(i) <= main_joy_raw(i);
+                  main_joy_cnt(i) <= 0;
+               else
+                  main_joy_cnt(i) <= main_joy_cnt(i) + 1;
+               end if;
+            end if;
+         end loop;
          if unsigned(main_fire2_pot) >= 192 then
             main_joy_b2 <= '1';
          elsif unsigned(main_fire2_pot) < 64 then
@@ -1417,9 +1483,7 @@ begin
       end if;
    end process p_main_joy;
 
-   main_joy_dig <= '0' & main_joy_b3 & main_joy_b2 & not main_joy_2_fire_n_i &
-                   not main_joy_2_up_n_i & not main_joy_2_down_n_i &
-                   not main_joy_2_left_n_i & not main_joy_2_right_n_i;
+   main_joy_dig <= '0' & main_joy_b3 & main_joy_b2 & main_joy_deb;
 
    -- A mouse on joystick port 1 as the PC's PS/2 mouse, always there (the BIOS waits for good
    -- for a mouse that does not answer). Not reset with the PC either.
@@ -1628,6 +1692,13 @@ begin
    -- the first 1024 entries instead of the last). Started with main_iot_arm(26) ("timer"), kinds
    -- 0 and 1 take the timer and port 61h too: writes to 40-43h and 61h, reads of 40-42h and
    -- 61h (a program waiting on the speaker timer's output or the refresh bit, SpeedSys).
+   -- Started with main_iot_arm(27) ("gus"), kinds 0 and 1 are the Gravis Ultrasound's ports
+   -- (240-24F, 340-347; every write, the reads as kind 1), the DMA controllers and the PICs as
+   -- above but for the timer's, keyboard's and mouse's interrupts (specific ends of IRQ 0, 1,
+   -- 12 and the cascade, mask changes of IRQ 0-2 and 12: Windows' VPICD masks, ends and
+   -- unmasks IRQ 0 every tick, 1024 entries would be 18 seconds of it), the 8042, the Sound
+   -- Blaster and the floppy out; kind 2 with bit 12 set is a change of IRQ line 3, 5, 7, 9,
+   -- 10 or 11 (bits 3..0 the line, bit 7 its level).
    -- Bits 63..32 the time, 31..16 the port, 15..13 the kind, 7..0 the byte.
    p_main_iot : process (main_clk)
       function wr_ok (p : std_logic_vector(15 downto 0); tmr : std_logic) return boolean is
@@ -1652,6 +1723,36 @@ begin
                 p = x"00D0" or p = x"0060" or p = x"0064" or
                 p = x"03F5" or p = x"03F7";                -- the floppy's results, DIR
       end function rd_ok;
+      -- the GUS mode (main_iot_arm(27))
+      function gus_port (p : std_logic_vector(15 downto 0)) return boolean is
+      begin
+         return p(15 downto 4) = x"024" or p(15 downto 3) = "0000001101000";   -- 240-24F, 340-347
+      end function gus_port;
+      function dma_port (p : std_logic_vector(15 downto 0)) return boolean is
+      begin
+         return p(15 downto 4) = x"000" or p(15 downto 5) = "00000000110" or
+                (p(15 downto 4) = x"008" and p /= x"0080");
+      end function dma_port;
+      function pic_gus_ok (p : std_logic_vector(15 downto 0);
+                           v, imr, imr2 : std_logic_vector(7 downto 0)) return boolean is
+      begin
+         return (p = x"0020" and v /= x"20" and v(4 downto 3) /= "01" and
+                 v /= x"60" and v /= x"61" and v /= x"62") or
+                (p = x"00A0" and v /= x"20" and v(4 downto 3) /= "01" and v /= x"64") or
+                (p = x"0021" and ((v xor imr) and x"F8") /= x"00") or
+                (p = x"00A1" and ((v xor imr2) and x"EF") /= x"00");
+      end function pic_gus_ok;
+      function lowest (v : std_logic_vector(15 downto 0)) return natural is
+      begin
+         for i in 0 to 15 loop
+            if v(i) = '1' then
+               return i;
+            end if;
+         end loop;
+         return 0;
+      end function lowest;
+      constant C_IOT_GL : std_logic_vector(15 downto 0) := x"0EA8";   -- IRQ 3, 5, 7, 9, 10, 11
+      variable v_gl : natural range 0 to 15;
    begin
       if rising_edge(main_clk) then
          main_iot_tick <= '0';
@@ -1696,6 +1797,9 @@ begin
          if main_dbg_io_wr_stb = '1' and main_dbg_io_wr(23 downto 8) = x"0021" then
             main_iot_imr <= main_dbg_io_wr(7 downto 0);
          end if;
+         if main_dbg_io_wr_stb = '1' and main_dbg_io_wr(23 downto 8) = x"00A1" then
+            main_iot_imr2 <= main_dbg_io_wr(7 downto 0);
+         end if;
          if main_dbg_sb_smp_stb = '1' and
             unsigned(main_dbg_sb_smp_dif(15 downto 8)) >= unsigned(main_iot_arm(19 downto 12)) then
             main_iot_jump_p <= '1';
@@ -1713,14 +1817,24 @@ begin
          -- stopping when full: the 1024th entry may be on its way (main_iot_we)
          if main_iot_run = '1' and (main_iot_arm(11) = '0' or main_iot_cnt < 1023 or
                                     (main_iot_cnt = 1023 and main_iot_we = '0')) then
-            if main_dbg_io_wr_stb = '1' and (wr_ok(main_dbg_io_wr(23 downto 8), main_iot_arm(26)) or
-               pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr)) and
+            if main_dbg_io_wr_stb = '1' and
+               ((main_iot_arm(27) = '0' and
+                 (wr_ok(main_dbg_io_wr(23 downto 8), main_iot_arm(26)) or
+                  pic_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0), main_iot_imr))) or
+                (main_iot_arm(27) = '1' and
+                 (gus_port(main_dbg_io_wr(23 downto 8)) or dma_port(main_dbg_io_wr(23 downto 8)) or
+                  pic_gus_ok(main_dbg_io_wr(23 downto 8), main_dbg_io_wr(7 downto 0),
+                             main_iot_imr, main_iot_imr2)))) and
                not (main_iot_arm(25) = '1' and (main_dbg_io_wr(23 downto 8) = x"000C" or
                                                 main_dbg_io_wr(23 downto 8) = x"00D8")) then
                main_iot_entry <= std_logic_vector(main_iot_us) & main_dbg_io_wr(23 downto 8) &
                                  "000" & "00000" & main_dbg_io_wr(7 downto 0);
                main_iot_we    <= '1';
-            elsif main_dbg_io_rd_stb = '1' and rd_ok(main_dbg_io_rd(23 downto 8), main_iot_arm(26)) and
+            elsif main_dbg_io_rd_stb = '1' and
+                  ((main_iot_arm(27) = '0' and rd_ok(main_dbg_io_rd(23 downto 8), main_iot_arm(26))) or
+                   (main_iot_arm(27) = '1' and (gus_port(main_dbg_io_rd(23 downto 8)) or
+                                               main_dbg_io_rd(23 downto 8) = x"0008" or
+                                               main_dbg_io_rd(23 downto 8) = x"00D0"))) and
                   main_dbg_io_rd /= main_iot_last_rd and
                   not (main_iot_arm(25) = '1' and (main_dbg_io_rd(23 downto 8) = x"0008" or
                                                    main_dbg_io_rd(23 downto 8) = x"00D0")) then
@@ -1732,6 +1846,13 @@ begin
                main_iot_entry <= std_logic_vector(main_iot_us) & x"0000" & "010" & "00000" & x"00";
                main_iot_we    <= '1';
                main_iot_irq_p <= '0';
+            elsif main_iot_gl_p /= x"0000" then
+               v_gl := lowest(main_iot_gl_p);
+               main_iot_entry <= std_logic_vector(main_iot_us) & x"0000" & "010" & "10000" &
+                                 main_dbg_irq(v_gl) & "000" &
+                                 std_logic_vector(to_unsigned(v_gl, 4));
+               main_iot_we    <= '1';
+               main_iot_gl_p(v_gl) <= '0';
             elsif main_iot_stall_p = '1' then
                main_iot_entry   <= std_logic_vector(main_iot_us) & std_logic_vector(main_iot_stall) &
                                    "011" & "00000" & "000000" & main_iot_stall_req;
@@ -1773,6 +1894,12 @@ begin
          if main_iot_arm(11) = '1' and main_iot_cnt >= 1024 then
             main_iot_run <= '0';
          end if;
+         main_iot_gl_d <= main_dbg_irq;
+         for i in 0 to 15 loop
+            if C_IOT_GL(i) = '1' and main_iot_arm(27) = '1' and main_dbg_irq(i) /= main_iot_gl_d(i) then
+               main_iot_gl_p(i) <= '1';
+            end if;
+         end loop;
 
          -- QNICE (re)starts it: empty, running
          main_iot_arm_d <= main_iot_arm;
@@ -1787,6 +1914,7 @@ begin
             main_iot_cdef_p   <= '0';
             main_iot_clong_p  <= '0';
             main_iot_jump_p   <= '0';
+            main_iot_gl_p     <= (others => '0');
             main_iot_last_rd  <= (others => '1');
          end if;
          if main_iot_arm(9) = '1' then
@@ -1816,7 +1944,7 @@ begin
 
    i_cdc_iot_arm : entity work.cdc_stable
       generic map (
-         G_DATA_SIZE    => 27,
+         G_DATA_SIZE    => 28,
          G_REGISTER_SRC => false
       )
       port map (
@@ -1850,6 +1978,18 @@ begin
          dst_clk_i  => qnice_clk_i,
          dst_data_o => qnice_iot_stat
       ); -- i_cdc_iot_stat
+
+   i_cdc_dbg_gus : entity work.cdc_stable
+      generic map (
+         G_DATA_SIZE    => 16,
+         G_REGISTER_SRC => true
+      )
+      port map (
+         src_clk_i  => main_clk,
+         src_data_i => main_dbg_gus,
+         dst_clk_i  => qnice_clk_i,
+         dst_data_o => qnice_dbg_gus
+      ); -- i_cdc_dbg_gus
 
    -- M2M-UPSTREAM vga-polarity: a VGA card tells an analog monitor how many lines its mode has by
    -- the sync polarity, from the misc output register (port 3C2h: bit 6 HSYNC, bit 7 VSYNC, 1 =
@@ -2235,7 +2375,7 @@ begin
    --    0x0004      read: the I/O trace's entries written (p_main_iot); write: start it again
    --                (empty, running; bit 0 = stop at the Sound Blaster's first 1 ms DMA wait,
    --                bit 1 = stop when full, bit 2 = quiet: no DMA flip-flop clears or status
-   --                reads, a polling driver's)
+   --                reads, a polling driver's; bit 3 = the timer too; bit 4 = the GUS mode)
    --    0x0005      read: bit 1 = it is running, bit 0 = it has wrapped (1024 or more);
    --                write: stop it
    --    0x0006      bit 0 = the Sound Blaster takes a new DMA command over a stalled transfer
@@ -2251,6 +2391,7 @@ begin
    --                bit 2 = its x and y swapped (main_m1351_x)
    --    0x000E      bit 0 = the Sound Blaster DSP's output stage (z486_mega65.sv's sb_soft:
    --                its output glides to 0 when it stops or holds it at 0; default on)
+   --    0x000F      read: the Gravis Ultrasound's IRQ and DMA state (gus.sv's dbg, live)
    --    0x0010..17  read: the debug snapshot (p_main_dbg): status (bits 2..0 boot stage, 3 BIOS
    --                copied, 4/5 VGA BIOS signature checked/bad, 6 first instruction, 7 CPU PE,
    --                8 SDRAM busy, 9 PC in reset), POST count:code, CS, EIP low, EIP high,
@@ -2295,6 +2436,7 @@ begin
                qnice_iot_arm(11) <= qnice_dev_data_i(1);
                qnice_iot_arm(25) <= qnice_dev_data_i(2);
                qnice_iot_arm(26) <= qnice_dev_data_i(3);
+               qnice_iot_arm(27) <= qnice_dev_data_i(4);
             elsif qnice_dev_addr_i = x"0000005" then
                qnice_iot_arm(9) <= '1';
             elsif qnice_dev_addr_i = x"0000006" then
@@ -2360,6 +2502,7 @@ begin
       put(v_blk0 and v_low = 12, x"000" & "000" & not qnice_iot_arm(20));
       put(v_blk0 and v_low = 13, x"000" & "0" & qnice_iot_arm(23 downto 21));
       put(v_blk0 and v_low = 14, x"000" & "000" & not qnice_iot_arm(24));
+      put(v_blk0 and v_low = 15, qnice_dbg_gus);
       for k in 0 to 7 loop
          put(v_blk0 and v_low = 16 + k, qnice_dbg_snap(16 * k + 15 downto 16 * k));
          put(v_blk0 and v_low = 24 + k, qnice_dbg_snap(16 * k + 143 downto 16 * k + 128));

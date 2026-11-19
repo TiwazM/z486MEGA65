@@ -266,18 +266,47 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    65    Pin 5 fire 2          C_MENU_JOY_P5: on POT Y, as some sticks have it
 --    66    Off                   C_MENU_JOY_OFF: no joystick on the game port (201h reads FFh)
 --    67    ----
---    68    Back to main menu
---    69  ----
---    70  Help
---    71  Reset the PC            C_MENU_RESET
---    72  ----
---    73  Close Menu
+--    68    Timing                headline: how the game port's axes answer (z486_MiSTer
+--                                joystick.v's timed input)
+--    69    ----
+--    70    Timed                 (default) as a real stick: the IBM formula, 1.1 us steps
+--    71    Count                 C_MENU_JOY_COUNT: every 201h read counts the axes down
+--                                (MiSTer's "Count 6+256"): for games that count their
+--                                reads, as Jazz Jackrabbit (its count ends at ~1000,
+--                                before a timed centre on this fast port)
+--    72    ----
+--    73    Back to main menu
+--    74  Sound: %s               submenu: the sound cards in the PC (options.asm cuts the
+--                                line at OPTM_DX - 2 = 22 characters: the names stay short)
+--    75    Sound cards           headline
+--    76    ----
+--    77    SB16                  C_MENU_SND_SB: the Sound Blaster 16 alone (nothing at 240h)
+--    78    GUS                   C_MENU_SND_GUS: the Gravis Ultrasound alone: nothing answers
+--                                at 220-22F (z486_sources.py sb_enable); AdLib's OPL3 at 388
+--                                and the CD audio stay, through the SB16 mixer's last levels
+--    79    SB16 + GUS            (default) both: the GUS at 240h (gus.sv; DMA 3, its IRQ where
+--                                its latch says, 11 at power-up), the SB16 at 220h
+--    80    ----
+--    81    GUS volume            headline: the Gravis Ultrasound's level in the output
+--                                (z486_mega65.sv gus_vol; it is added after the SB16 mixer,
+--                                which leaves it alone, so its full scale is the output's)
+--    82    ----
+--    83    Full                  C_MENU_GUSV_FULL: as a card's own line out (0 dB)
+--    84    -6 dB                 (default)
+--    85    -12 dB                C_MENU_GUSV_12
+--    86    ----
+--    87    Back to main menu
+--    88  ----
+--    89  Help
+--    90  Reset the PC            C_MENU_RESET
+--    91  ----
+--    92  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change (and MENU_HEAP_SIZE there when the menu grows).
-constant OPTM_SIZE         : natural := 74;
+constant OPTM_SIZE         : natural := 93;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 20;   -- the main menu's lines (0-4, 13-16, 24-25, 37, 45, 54, 61, 69-73):
+constant OPTM_DY           : natural := 21;   -- the main menu's lines (0-4, 13-16, 24-25, 37, 45, 54, 61, 74, 88-92):
                                               -- at most 23: the window (+2) must fit the OSM's 25 rows
                                               -- (VGA_DY / FONT_DY; 25 lines wrapped its bottom to the top)
 
@@ -350,6 +379,25 @@ constant OPTM_ITEMS        : string :=
    " Pin 5 fire 2\n"          &
    " Off\n"                   &
    "\n"                       &
+   " Timing\n"                &
+   "\n"                       &
+   " Timed\n"                 &
+   " Count\n"                 &
+   "\n"                       &
+   " Back to main menu\n"     &
+   " Sound: %s\n"             &
+   " Sound cards\n"           &
+   "\n"                       &
+   " SB16\n"                  &
+   " GUS\n"                   &
+   " SB16 + GUS\n"            &
+   "\n"                       &
+   " GUS volume\n"            &
+   "\n"                       &
+   " Full\n"                  &
+   " -6 dB\n"                 &
+   " -12 dB\n"                &
+   "\n"                       &
    " Back to main menu\n"     &
    "\n"                       &
    " Help\n"                  &
@@ -370,7 +418,10 @@ constant OPTM_G_REFRESH    : integer := 10;
 constant OPTM_G_SOUND      : integer := 11;
 constant OPTM_G_SPEED      : integer := 12;
 constant OPTM_G_BOOT       : integer := 13;
+constant OPTM_G_SNDCARD    : integer := 14;
 constant OPTM_G_CRT        : integer := 17;
+constant OPTM_G_GUSVOL     : integer := 18;
+constant OPTM_G_JOYT       : integer := 19;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -442,12 +493,31 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_JOY,                               -- 65 Pin 5 fire 2
                                              OPTM_G_JOY,                               -- 66 Off
                                              OPTM_G_LINE,                              -- 67
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 68 Back
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 68 Timing
                                              OPTM_G_LINE,                              -- 69
-                                             OPTM_G_HELP,                              -- 70 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 71 Reset the PC
+                                             OPTM_G_JOYT + OPTM_G_STDSEL,              -- 70 Timed
+                                             OPTM_G_JOYT,                              -- 71 Count
                                              OPTM_G_LINE,                              -- 72
-                                             OPTM_G_CLOSE                              -- 73 Close Menu
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 73 Back
+                                             OPTM_G_SUBMENU,                           -- 74 Sound: %s
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 75 Sound cards
+                                             OPTM_G_LINE,                              -- 76
+                                             OPTM_G_SNDCARD,                           -- 77 SB16
+                                             OPTM_G_SNDCARD,                           -- 78 GUS
+                                             OPTM_G_SNDCARD + OPTM_G_STDSEL,           -- 79 SB16 + GUS
+                                             OPTM_G_LINE,                              -- 80
+                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- 81 GUS volume
+                                             OPTM_G_LINE,                              -- 82
+                                             OPTM_G_GUSVOL,                            -- 83 Full
+                                             OPTM_G_GUSVOL + OPTM_G_STDSEL,            -- 84 -6 dB
+                                             OPTM_G_GUSVOL,                            -- 85 -12 dB
+                                             OPTM_G_LINE,                              -- 86
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 87 Back
+                                             OPTM_G_LINE,                              -- 88
+                                             OPTM_G_HELP,                              -- 89 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 90 Reset the PC
+                                             OPTM_G_LINE,                              -- 91
+                                             OPTM_G_CLOSE                              -- 92 Close Menu
                                            );
 
 -- Greyed out (M2M-UPSTREAM menu-rows, as Megamiga's config.vhd): an item of group "grp" whose

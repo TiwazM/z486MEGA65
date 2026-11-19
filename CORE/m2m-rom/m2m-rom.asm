@@ -1105,7 +1105,12 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "21"                   ; 21: HDMI 1280x960 (74 lines); 20:
+CFG_SIG_VAL     .ASCII_W "25"                   ; 25: the joystick's "Timing" (93
+                                                ; lines); 24: "GUS volume" in the "Sound"
+                                                ; submenu (88 lines); 23: the "Sound" submenu: SB16,
+                                                ; GUS or both (82 lines); 22: Gravis
+                                                ; Ultrasound (75 lines);
+                                                ; 21: HDMI 1280x960 (74 lines); 20:
                                                 ; the CRT menu, three modes (73
                                                 ; lines); 19: the CRT menu's presets,
                                                 ; TV scanlines, Soft beam (95 lines);
@@ -1248,9 +1253,13 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 74-line menu: 20 + 804 item characters + 1 + 5 x 74 (the line
-; arrays and the dependency array) + 1 + (7 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1508 words (the 73-line one before 1280x960: 1483; the
+; for this 93-line menu: 20 + 931 item characters + 1 + 5 x 93 (the line
+; arrays and the dependency array) + 1 + (8 submenus + 4 manual loads + 1) x
+; 26 (SCR$OSM_O_DX) = 1756 words (the 88-line one before the joystick's
+; "Timing": 1707; the 82-line one before "GUS volume": 1642;
+; the 75-line one with the Gravis
+; Ultrasound switch: 1532; the 74-line one before it: 1508; the 73-line
+; one before 1280x960: 1483; the
 ; 95-line one with Custom: 1863; the
 ; 85-line one before the CRT presets:
 ; 1675; the 73-line one before the CRT emulation:
@@ -1264,7 +1273,7 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 ; corruption", error code 000D; with 832, the 46-line one 107: 006B; the
 ; 46-line one needed 939 of 960, before the "Refresh" submenu).
 ; The rest of the heap is the file browser's.
-MENU_HEAP_SIZE  .EQU 1536
+MENU_HEAP_SIZE  .EQU 1792
 
 #ifndef RELEASE
 HEAP_SIZE       .EQU 0
@@ -1272,8 +1281,14 @@ HEAP            .BLOCK 1
 #else
 ; HEAP + MENU_HEAP_SIZE + HEAP_SIZE must stay below VAR$STACK_START -
 ; STACK_SIZE (check HEAP and VAR$STACK_START in m2m-rom.lis)
-HEAP_SIZE       .EQU 18075                      ; (18656 before MENU_HEAP_SIZE
-HEAP            .BLOCK 1                        ; grew by 128: the same end;
+HEAP_SIZE       .EQU 17819                      ; (17883 before MENU_HEAP_SIZE
+                                                ; grew by 64 to 1792: the same end;
+                                                ; 17947 before MENU_HEAP_SIZE
+                                                ; grew by 64 to 1728: the same end;
+                                                ; 18075 before MENU_HEAP_SIZE
+HEAP            .BLOCK 1                        ; grew by 128 to 1664: the same
+                                                ; end; 18656 before it grew by
+                                                ; 128: the same end;
                                                 ; 18528 before sd_diag.asm's 389;
                                                 ; 18139 before MENU_HEAP_SIZE grew
                                                 ; by 224; 17915 before it grew by

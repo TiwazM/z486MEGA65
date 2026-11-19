@@ -157,6 +157,92 @@ PATCHES = {
         ("\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)",
          "\t.vga_dac24         (video_dac24),     // MEGA65 (z486_sources.py)\n"
          "\t.vga_dblscan       (video_dblscan),   // MEGA65 (z486_sources.py)"),
+        # The Gravis Ultrasound (CORE/sv/gus.sv around LPC-GUS's gf1.v) at 240-24F and 340-347:
+        # its ports in the I/O read mux, its GF1 cycles hold the adapter (iobus_adapter.sv's
+        # io_hold below), DMA channel 3, and its IRQ line ORed into the PICs' inputs where its
+        # latch puts it; the menu switches it (gus_enable), its samples go to the wrapper's mix.
+# It also takes the writes to AdLib's 388/389 (gus_adl_cs), as a classic card decodes them
+# (Gravis' CARDCHK finds it so); the reads there stay the OPL3's (fm_cs, the read mux).
+        # The menu's "Sound: GUS" takes the Sound Blaster 16 out too (sb_enable): nothing
+        # answers at 220-22F, so its DSP never starts; AdLib's OPL3 at 388 stays (fm_cs)
+        ("    input             fdd_real_speed,   // MEGA65: the images at a real drive's speed",
+         "    input             fdd_real_speed,   // MEGA65: the images at a real drive's speed\n"
+         "    input             sb_enable,        // MEGA65: the Sound Blaster 16 is there at 220h\n"
+         "    input             gus_enable,       // MEGA65: the Gravis Ultrasound is there (gus.sv)\n"
+         "    output     [15:0] sample_gus_l,     // MEGA65: its samples (clk_sys)\n"
+         "    output     [15:0] sample_gus_r,     // MEGA65\n"
+         "    output     [15:0] dbg_gus,          // MEGA65: its IRQ and DMA state (gus.sv's dbg)"),
+        ("wire [7:0] iobus_readdata8 =",
+         "// MEGA65: the Gravis Ultrasound (gus.sv; z486_sources.py)\n"
+         "reg         gus_cs;\n"
+         "reg         gus_adl_cs;                // 388/389: the GF1 takes the writes too\n"
+         "wire  [7:0] gus_readdata;\n"
+         "wire        gus_hold;\n"
+         "wire        gus_dma_req, gus_dma_ack, gus_dma_tc;\n"
+         "wire  [7:0] gus_dma_readdata, gus_dma_writedata;\n"
+         "wire [15:0] gus_irq;\n\n"
+         "gus #(.CLK_HZ(SYS_FREQ)) gus (\n"
+         "    .clk               (clk_sys),\n"
+         "    .reset             (rst[15]),\n"
+         "    .enable            (gus_enable),\n"
+         "    .io_cs             (gus_cs),\n"
+         "    .adl_cs            (gus_adl_cs),\n"
+         "    .io_address        (iobus_address),\n"
+         "    .io_read           (iobus_read),\n"
+         "    .io_write          (iobus_write),\n"
+         "    .io_writedata      (iobus_writedata_byte),\n"
+         "    .io_readdata       (gus_readdata),\n"
+         "    .io_hold           (gus_hold),\n"
+         "    .dma_req           (gus_dma_req),\n"
+         "    .dma_ack           (gus_dma_ack),\n"
+         "    .dma_readdata      (gus_dma_readdata),\n"
+         "    .dma_tc            (gus_dma_tc),\n"
+         "    .dma_writedata     (gus_dma_writedata),\n"
+         "    .irq               (gus_irq),\n"
+         "    .sample_l          (sample_gus_l),\n"
+         "    .sample_r          (sample_gus_r),\n"
+         "    .dbg               (dbg_gus)\n"
+         ");\n\n"
+         "wire [7:0] iobus_readdata8 ="),
+        ("\t( sb_cs|fm_cs                            ) ? sound_readdata    :",
+         "\t( gus_cs                                 ) ? gus_readdata      :  // MEGA65\n"
+         "\t( sb_cs|fm_cs                            ) ? sound_readdata    :"),
+        ("\t\tsb_cs         <= ({iobus_address_next[15:4], 4'd0} == 16'h0220);",
+         "\t\tsb_cs         <= sb_enable && ({iobus_address_next[15:4], 4'd0} == 16'h0220);  // MEGA65\n"
+         "\t\tgus_cs        <= gus_enable && (({iobus_address_next[15:4], 4'd0} == 16'h0240) ||\n"
+         "\t\t                                ({iobus_address_next[15:3], 3'd0} == 16'h0340));  // MEGA65\n"
+         "\t\tgus_adl_cs    <= gus_enable && ({iobus_address_next[15:1], 1'b0} == 16'h0388);  // MEGA65"),
+        ("    .direct_handled    (1'b0)\n);",
+         "    .direct_handled    (1'b0),\n"
+         "    .io_hold           (gus_hold)          // MEGA65 (z486_sources.py): the GUS's GF1 cycles\n"
+         ");"),
+        ("\t.dma_5_writedata   (dma_sb_writedata)\n);",
+         "\t.dma_5_writedata   (dma_sb_writedata),\n\n"
+         "\t.dma_3_req         (gus_dma_req),       // MEGA65 (z486_sources.py): the GUS\n"
+         "\t.dma_3_ack         (gus_dma_ack),\n"
+         "\t.dma_3_tc          (gus_dma_tc),\n"
+         "\t.dma_3_readdata    (gus_dma_readdata),\n"
+         "\t.dma_3_writedata   (gus_dma_writedata)  // its DRAM's bytes, sampling's\n"
+         ");"),
+        ("\tinterrupt[15] = irq_15;\nend",
+         "\tinterrupt[15] = irq_15;\n"
+         "\tinterrupt     = interrupt | gus_irq;   // MEGA65 (z486_sources.py): the GUS's line\n"
+         "end"),
+    ],
+    # iobus_adapter.sv: a byte cycle waits in S_WAITn while io_hold is high (the GUS's GF1
+    # cycles: IOCHRDY on its voice registers and DRAM peek/poke, gus.sv); nothing else holds it
+    "z486_MiSTer/src/iobus_adapter.sv": [
+        ("    input              ide_hold,          // fast-read data port: word not yet from the HPS",
+         "    input              ide_hold,          // fast-read data port: word not yet from the HPS\n"
+         "    input              io_hold,           // MEGA65 (z486_sources.py): a byte cycle waits"),
+        ("            S_WAIT0: state <= is_read ? S_CAP0 : S_ISSUE1;",
+         "            S_WAIT0: if (!io_hold) state <= is_read ? S_CAP0 : S_ISSUE1;"),
+        ("            S_WAIT1: state <= is_read ? S_CAP1 : S_ISSUE2;",
+         "            S_WAIT1: if (!io_hold) state <= is_read ? S_CAP1 : S_ISSUE2;"),
+        ("            S_WAIT2: state <= is_read ? S_CAP2 : S_ISSUE3;",
+         "            S_WAIT2: if (!io_hold) state <= is_read ? S_CAP2 : S_ISSUE3;"),
+        ("            S_WAIT3: state <= is_read ? S_CAP3 : S_DONE;",
+         "            S_WAIT3: if (!io_hold) state <= is_read ? S_CAP3 : S_DONE;"),
     ],
     # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
     # internal drive follows them): the DOR's motor bits, the selected drive and each drive's
