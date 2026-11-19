@@ -39,9 +39,9 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
     over the time the reading before took (at most ~16 ms); what is left when
     the next comes goes with it. `tb_pc_mouse_pot.vhd` 6.: 6 counts every
     10 ms at 40 packets a second, 12 or 18 counts a packet before, 15 each now.
-  - Joysticks that games count by timing (TIE Fighter does not see the stick
-    unless it is held to the upper left while the game starts, on ao486 on
-    MiSTer too; MiSTer has "Count" modes for that).
+  - TIE Fighter does not see the stick unless it is held to the upper left
+    while the game starts (on ao486 on MiSTer too): to try with the
+    Joystick menu's "Timing: Count" (below).
   - Ultima Underworld 2 hangs with its Sound Blaster option (its Pro option
     with `T4` works): the card's blocks and IRQ 5 run, then the CPU stops
     taking interrupts; where it is then is not known. With the Pro option
@@ -404,7 +404,21 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   have it there ("Joystick fire 2" in the menu); the third on the other one.
   A button that grounds pin 9 (Amiga style) is invisible, like the Amiga
   mouse's right button. `qmon.py status` shows what is held, `qmon.py joy`
-  every change.
+  every change. The menu's joystick "Timing" sets `joystick.v`'s `timed`
+  input (2026-11-18): "Timed" (0, the default) counts the axes down by the
+  IBM formula in 1.1 us steps (centre ~0.58 ms); "Count" (3, MiSTer's "Count
+  6+256") one step per read of 201h. Jazz Jackrabbit counts its reads up to
+  about 1000 (a note in `joystick.v`), and this port answers faster than an
+  ISA card: with "Timed" its count ran out before the centre, and the
+  calibration stayed at the lower right; with "Count" any loop speed works.
+  Port 2's directions and fire are debounced in `mega65.vhd`'s `p_main_joy`
+  (2026-11-18): the framework passes the DB9 lines raw (`M2M/vhdl/debouncer.vhd`
+  is two flip-flops, since its 1 ms filter swallowed the Amiga mouse's
+  quadrature on port 1), so a switch's bounce reached the game port as extra
+  presses. A line's new state counts once it has differed for 5 millisecond
+  ticks in a row (4 to 5 ms late), a blip back restarts the count; port 1
+  stays raw. Jazz Jackrabbit's menus still step about every 30 ms while the
+  stick is held: that is the game's own repeat.
 - Disks (`CORE/vhdl/disk_sd.vhd`, `pc_mgmt.vhd`): MiSTer's ARM side, which
   serves z486's floppy and IDE controllers and fills the CMOS through the
   management bus, is in hardware (`pc_mgmt`): at power-up the CMOS
@@ -675,7 +689,116 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   data mostly fits z486's own 8 + 8 KB. Dr. Hardware: average RAM throughput
   24.5 -> 31.4 MB/s (+28%; blocks between the L1's 16 KB and 256 KB), the
   minimum (beyond 256 KB) and maximum (within the L1) unchanged, Hardstones
-  26345 -> 27418 (+4%).
+  26345 -> 27418 (+4%). Off since the 512 KB Ultrasound (2026-11-17,
+  `L2_IDX` 0 in `z486_mega65.sv`: its enable tied off, 4 index bits left):
+  its 69 block RAMs hold the sample RAM's second half, and 64 KB of L2 beside
+  the 512 KB didn't route (the CPU's area congested). Without it (Dr.
+  Hardware, the same setup): Hardstones 27832 -> 27273 (-2%), Softstones
+  8612 the same, RAM minimum -15%, standard -22%, Memory Performance -15%;
+  Quake's `timedemo demo1` 7.9 -> 7.8 fps. z486's L1 caches doubled to
+  16 KB + 16 KB (`DCACHE_SET_BITS` / `ICACHE_SET_BITS` 8 in `z486_mega65.sv`;
+  z486_MiSTer's build has 7, 8 KB + 8 KB) more than make up for it
+  (2026-11-18, v022l1v, 2 more block RAM tiles): Hardstones 28426 (+2% over
+  the L2 build, +4% over 8 + 8 KB without it), Softstones 8612, RAM maximum
+  42.1, minimum 27.2 (+19% / +40%), standard 41.8 (+29% / +65%), Memory
+  Performance 113.3 (80.6 without the L2); Quake's `timedemo demo1` 8.0 fps
+  (7.9 with the L2, 7.8 without it). Placed on the 8 + 8 KB layout
+  (incremental) it met the real 66 MHz by only 0.083 ns, its slowest paths the
+  address unit's as ever; placed fresh, 0.471 ns.
+- Gravis Ultrasound (`CORE/sv/gus.sv`, 2026-11-16): nukeykt's LPC-GUS GF1
+  model (`CORE/sv/gus/gf1.v`, unchanged, GPL-2.0-or-later; built from a die
+  shot) with the card around it, as its `gf1_lpc.v` is for a PC's LPC bus:
+  ports at 240h (the GF1 at 2x6, 2x8, 2x9, 2xA, 2xC, 2xE, 3x2-3x5, 3x7; the mix
+  control 2x0 and the IRQ/DMA latch 2xB; no MIDI; base+106h reads FFh, a
+  classic card before rev 3.7; the writes to AdLib's 388/389 too, as the
+  GF1's 2x8/2x9, the reads there staying the OPL3's: Gravis' CARDCHK.EXE,
+  run by INSTALL 4.11, finds the card by 55h/AAh to 388 read back at 2xA, and
+  reports "cannot determine card type" without it), 512 KB of sample DRAM in
+  block RAM (banks 0 and 1; banks 2-3 read FFh, so the size test finds 512 KB;
+  `RAM_KB` 256 keeps bank 0 alone), the
+  DAC's serial words as 16-bit samples, the GF1's 9.8784 MHz as a phase
+  accumulator on main_clk. A GF1 access is an ISA-like cycle (IOR/IOW, DACK1
+  for the DMA, at least 150 ns and while the GF1 holds WAIT, the byte taken
+  3 clocks after); the CPU waits in `iobus_adapter.sv`, which got an
+  `io_hold` for it (`tools/z486_sources.py`; nothing else holds a byte
+  cycle). DMA channel 3 only: dma.v acknowledges a byte for one clock and
+  gives its TC the clock after, so the wrapper takes byte and TC then (taking
+  TC with the acknowledge missed it: on the board XTC-Play's first upload
+  never ended, no TC IRQ). The DRAM DMA also goes the other way (41h bit 1,
+  the DRAM to the PC: Gravis Setup's playback DMA test reads back): dma.v
+  takes a device's byte as it starts the transfer, so the wrapper fetches
+  the GF1's byte first (DACK1 + IOR when it asks) and then asks the 8237;
+  TC comes after the byte, so one more DACK1 + IOR carries it to the GF1
+  (that byte is dropped), which ends the DMA and raises its IRQ. The
+  wrapper sees the direction in the CPU's 41h writes. Sampling (48h, 49h;
+  the GF1 model has none, its DRQ2 is 0) is the wrapper's: silence (80h,
+  00h with the MSB inverted) every 16 x (48h + 2) GF1 clocks, two bytes in
+  stereo, on the record DMA (the latch's second channel or the first
+  combined: DMA 3 only); its TC ends it, sets 49h bit 6 (read clears it)
+  and with 49h bit 5 raises the GF1's IRQ and 2x6 bit 7. The sample RAM
+  answers each CAS's address until the next CAS: the GF1's DMA read latch
+  stays open to the end of its slot, after the refresh's RAS (row 0) that
+  follows, and with the RAM read at the current row the DMA brought back
+  DRAM 0's bytes. The IRQ goes where the latch puts it, ORed into
+  the PICs' inputs. It starts as after ULTRINIT with
+  `ULTRASND=240,3,3,11,11` (latches on, line out on). Its samples are added
+  after the SB Pro mixer, at their own level: the SB's volumes don't touch
+  it. The menu's "Sound" submenu (SB16, GUS, SB16 + GUS: the default)
+  chooses the cards: `gus_enable` removes the GUS, `sb_enable` the SB16's
+  ports at 220-22F (its `sb_cs`; the DSP then never starts). AdLib's OPL3 at
+  388h (`fm_cs`) and the CD audio stay in every mode, through the SB16
+  mixer's last levels. The summary line is cut at 22 characters (options.asm,
+  OPTM_DX - 2): hence the short names.
+  Out of context the GF1 is 1,191 LUTs, 1,873 FFs, 2.5 block RAMs and a DSP;
+  the sample RAM is 128 block RAMs at 512 KB. `CORE/sim/run_gus.sh` (iverilog; `run_gus.sh 256`
+  for the small RAM) runs the
+  GUS SDK's steps through the adapter: reset, active voices, the size test,
+  poke/peek, a DMA upload through system.sv's dma.v (the 8237 set up as the
+  SDK does; `CORE/sim/hoist_decls.py` makes an iverilog copy of dma.v) with
+  its TC IRQ, a looping voice at the DAC (one
+  sample a frame at 44.1 kHz with 14 voices), a voice register read back,
+  the wave-end IRQ, timer 1 on IRQ 7 through the latch, the menu's off, and
+  CARDCHK's search (it fails without the 388 writes), the DMA from the
+  DRAM back to memory (256 bytes, its TC IRQ) and sampling (64 bytes of
+  silence mono at 308.7 kHz and stereo inverted at 205.8 kHz, its TC IRQ,
+  49h's pending). v022snd (without
+  them) ran on the board: Windows 95's Gravis driver gets past its
+  card check with its resources set to 240h, IRQ 11, DMA 3 (then wants
+  ULTRADIR); INSTALL couldn't find the card. v022dma (the 388 writes, the
+  TC fix): XTC-Play plays 4- to 20-channel modules, CONSCAN and INSTALL
+  find the card, Gravis Setup's IRQ and memory tests pass, its DMA tests
+  failed (no DMA to the PC, no sampling then). v022rec (both added): all
+  of Custom Setup's tests pass (IRQ 11 for both lines, playback and record
+  DMA 3); DMA 6 and 7 fail there, as only DMA 3 is wired.
+  Since (2026-11-17/18): 16-bit voices played their samples byte-swapped
+  (Quake's sound "just a mess"): gf1.v latches a voice's first CAS (the even
+  byte) as the high byte, while its DMA stores 16-bit data low byte first;
+  gf1.v now swaps the two at `mul_val_a_l` for 16-bit voices (its header
+  notes the change). The sample RAM holds 16-bit words, so a 16-bit voice's
+  second CAS reads the word its first one fetched, a clock after its CAS (at
+  512 KB, with one more output register, the second byte otherwise missed
+  the GF1's latch now and then). 2xF (register controls, rev 3.4 cards):
+  a 2xB write reaches the latches only with 2xF bits 2..0 at 0 (ULTRINIT
+  writes the board's jumpers to 2xB with 2xF = 6, which had set the DMA latch
+  to 6: no DMA after ULTRINIT), and the IRQ latch keeps 7 bits: channel 1,
+  channel 2 and bit 6 (combine), as Gravis' Windows driver sets it (68h:
+  channel 2 on IRQ 11, combined; with bits 2..0 alone that was "none", and
+  Windows 3.11 hung at exit waiting for the end of the exit sound's IRQ).
+  The menu's "GUS volume" (Full, -6 dB: the default, -12 dB) shifts the
+  card's samples before the mix (`gus_vol`, synchronized into clk_audio):
+  at full scale the GUS is far louder than the SB16, whose mixer starts at
+  -14 dB.
+  Reading 8Fh (the IRQ source) now clears the pending IRQ of the voice it
+  reports (2026-11-19, gf1.v's second change): the model's delayed clear
+  (`wave/ramp_irq_clear_l5`) reached the voice write-back two slots after the
+  compare stage, i.e. the voice below, so a voice whose handler only reads
+  8Fh interrupted again every ~80 us. Gabriel Knight's speech (Sierra's
+  GUSDAC.DRV for its 32-bit games) streams through a looping 16-bit voice with
+  its IRQ on and a silent non-looping timer voice that ends 99 samples before
+  the loop; the storm restarted the timer voice without end and the speech
+  stopped after a syllable. Every other driver here rewrites the voice in its
+  handler, which hid it. `tb_gus` checks the voice numbers with 25, 32 and 14
+  voices and one IRQ per pass of a looping voice (109 in 10 ms before).
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
   of the PC's state (boot stage, POST code, CS:EIP, VGA frame count, the L2's
   counters) and a 4096-entry log of the BIOS's debug port 0x402, z486's

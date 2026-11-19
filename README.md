@@ -5,14 +5,17 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 66 MHz, boots DOS, Windows 3.11 to 98, OS/2 Warp 4 and Linux, and
-plays games from the CD era. The current version is **v0.2.2.5** (see
+plays games from the CD era. The current version is **v0.3** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
 
 **PC**
-- z486 486DX2-class CPU at 66 MHz, with L1 caches and an x87 FPU
-- 256 KB L2 cache in block RAM, as on a 486 board
+- z486 486DX2-class CPU at 66 MHz, with 16 KB + 16 KB L1 caches (instructions
+  and data) and an x87 FPU. There is no L2 cache (its block RAM holds the
+  Gravis Ultrasound's samples): the larger L1 is faster than the 8 KB + 8 KB
+  with a 256 KB L2 of earlier versions (Dr. Hardware: Hardstones +2 %, memory
+  throughput up to +29 %; Quake 8.0 fps against 7.9)
 - 64 MB RAM (the R6's SDRAM)
 - Turbo switch: CAPS LOCK slows the CPU to 33 MHz for games that run too fast
 
@@ -40,6 +43,8 @@ plays games from the CD era. The current version is **v0.2.2.5** (see
 **Sound**
 - Sound Blaster 16 with OPL3 FM music
 - CD audio, played in hardware and mixed through the Sound Blaster's CD volume
+- Gravis Ultrasound with 512 KB at 240h, DMA 3, IRQ 11 (see
+  [Gravis Ultrasound](#gravis-ultrasound))
 
 **Disks**
 - IDE hard disk from an image file on the SD card
@@ -107,9 +112,13 @@ from its CD), OS/2 Warp 4 (installed from its CD, its desktop at 640x480),
 Linux (TinyCore with CorePlus, Damn Small Linux installed onto the hard disk),
 DOOM, SimCity 2000, Wing Commander III, King's Quest VI, Phantasmagoria, The
 7th Guest, Ultima Underworld 1 and 2, Day of the Tentacle (CD talkie), The
-Secret of Monkey Island (CD, with its CD music), and Quake (slowly: 8.0 fps in
+Secret of Monkey Island (CD, with its CD music), Gabriel Knight (CD), Jazz
+Jackrabbit, and Quake (slowly: 8.0 fps in
 `timedemo demo1` and `demo2`, its CD music playing from a BIN/CUE while it
 loads from the hard disk; 486Quake, a build tuned for 486s, 8.5 fps at 64 MHz).
+On the Gravis Ultrasound: Second Reality, DOOM, Wing Commander III, Gabriel
+Knight (music and speech), XTC-Play and Open Cubic Player in DOS, MOD4WIN in
+Windows 95.
 Benchmarks: Chris's 3D Benchmark 43.3 (25.9 fps), SpeedSys 4.78 (CPU 23.19,
 hard drive 1902), PC Player Benchmark 13.7 fps, Superscape 49.5 fps.
 
@@ -117,10 +126,21 @@ Ultima Underworld 2 wants its Sound Blaster Pro option with a Pro in
 `BLASTER` (`SET BLASTER=A220 I5 D1 T4` before it starts): with its Sound
 Blaster option it hangs. Wing Commander III runs best without EMM386
 (`HIMEM.SYS` only): with it, a video can hang the game on a black screen.
+For music on the Gravis Ultrasound, start its install and the game with
+`WC3GRAV.BAT` from the first CD (`WC3GRAV -I` for the install): it loads the
+game's instruments into the card first (`WC3GPATS`, from `ULTRADIR`'s patches),
+and without them the install says it "could not startup your music sound
+card".
 King's Quest VI's intro movie tears (the lower part of the picture an older
 frame) and judders in the boat scene with the game's own VGA driver: the VGA
 driver from a later Sierra game (the Gabriel Knight demo's), a known fix for
 KQ6, cures both.
+Gabriel Knight on the Gravis Ultrasound, with Gravis' Sierra patch installed:
+its `RESOURCE.CFG` names the Gravis drivers, `soundDrv = GUSMIDI.DRV` and
+`audioDrv = GUSDAC.DRV` (for a CD installation with the game folder's full
+path, such as `C:\SIERRA\GKCD\GUSMIDI.DRV`), and `LOADPATS -IGK1.INI` runs in
+the game folder before every start: it loads the music's instruments into the
+card, and they're gone after a reset. A few speech lines end with a click.
 DOS Quake (and 486Quake) calibrates the joystick on port 2 as it starts,
 after "Playing registered version.", with its prompts on a console that isn't
 on screen yet, so it seems to hang. Set "Joystick: Off" in the menu (HELP)
@@ -235,13 +255,66 @@ printed on the MEGA65's keycaps:
 - **Joystick on port 2** is the PC's game port joystick. Fire is button 1. A C64
   two- or three-button stick's extra buttons are buttons 2 and 3: the second on
   pin 9 (POT X, as the C64GS), or on pin 5 if your stick has it there ("Joystick
-  fire 2" in the menu).
+  fire 2" in the menu). The Joystick menu's "Timing" chooses how the stick's
+  position is measured: "Timed" (the default) answers as a real stick does, by
+  time; "Count" answers by the number of reads, for games that count them in a
+  loop and on this fast PC run out before the stick answers. Jazz Jackrabbit
+  needs "Count" (set it before starting the game, then calibrate in Jazz's
+  options): with "Timed" its calibration doesn't follow the stick.
+  A calibration made with "Timed" leaves Jazz reading the centred stick as
+  pushed, so its menus ignore the keys: set the Joystick menu to "Off", answer
+  Jazz's questions with the keys, set it back, and calibrate again with "Count".
+
+## Gravis Ultrasound
+
+The core has a classic Gravis Ultrasound with 512 KB of sample memory, beside
+the Sound Blaster. Its GF1 chip is nukeykt's model from LPC-GUS, built from a
+die shot. Set it up in `AUTOEXEC.BAT`:
+
+```
+SET ULTRASND=240,3,3,11,11
+```
+
+That is port 240h, DMA 3 (DMA 1 is the Sound Blaster's), IRQ 11. Most games
+and players set the card up themselves from that line. The card starts as if
+Gravis' ULTRINIT had run with these settings, so ULTRINIT isn't needed; if you
+run it (it comes on the Gravis install disks, not with the core), give it the
+same settings. Only DMA 3 is wired; the IRQ follows what the software sets.
+DMA works both ways (into the card and back to the PC). Recording records
+silence, since the core has no audio input. There is no MIDI port. The card has its own level: the Sound Blaster's mixer
+doesn't change it. Gravis' INSTALL (4.11) finds the card the way a classic
+one is found, through the AdLib port 388h. In Windows 95, set the Gravis
+driver's resources by hand to 240h, IRQ 11 and DMA 3, and set `ULTRADIR` to
+the folder INSTALL made. In Gravis' Setup choose Custom Setup with 240h,
+IRQ 11 for both lines and DMA 3 for playback and recording: its tests pass
+there (DMA 6 and 7 fail, since only DMA 3 is wired). Its final "NMI test"
+fails: the card has no NMI, which only Gravis' Sound Blaster emulation
+(SBOS, MEGA-EM) uses; choose Ignore. The core's own SB16 does that job.
+Gravis' installation can also leave a `BLASTER` line in `AUTOEXEC.BAT` that
+points at the Ultrasound (such as `A240 I11 D1 T1`, for that emulation):
+games that read it then look for a Sound Blaster on the Ultrasound's port
+and fail to find their sound card or crash. Set it back to the SB16's,
+`SET BLASTER=A220 I5 D1 H5 T6`.
+
+The menu's "Sound" chooses the cards in the PC: "SB16", "GUS" or
+"SB16 + GUS" (the default). With "GUS" alone nothing answers at 220h, so
+software finds no Sound Blaster and uses the Ultrasound; AdLib's FM at 388h
+and the CD audio stay. With "SB16" alone there is no card at 240h. Reset the
+PC after a change, as after taking a card out.
+
+Below it, "GUS volume" sets the Ultrasound's level in the output: "Full",
+"-6 dB" (the default) or "-12 dB". A real card has its own line out; here
+both cards share one, and the Ultrasound at full scale is much louder than
+the Sound Blaster, whose mixer starts at -14 dB. If the GUS sounds harsh or
+too loud even with the speakers turned down, lower it here. The change is
+heard at once.
 
 ## Known limits
 
 - A 486 at 66 MHz with a microcoded FPU: Pentium-era 3D games are slow.
 - Some games don't detect the joystick. TIE Fighter does when the stick is
-  held to the upper left while it starts (as on ao486 on MiSTer).
+  held to the upper left while it starts (as on ao486 on MiSTer); try the
+  Joystick menu's "Timing: Count" for such games.
 - The core fixes z486_MiSTer's `boot0.rom` as it loads it, so the mouse can't
   get stuck out of step. With another system BIOS, the pointer can start
   jumping between the screen edges when a program starts or quits while the
@@ -256,6 +329,17 @@ printed on the MEGA65's keycaps:
   640x480 in 16 colours.
 - Windows draws the mouse pointer itself (the ET4000AX has no hardware
   cursor), so it can flicker when the picture under it changes.
+- The Gravis Ultrasound has 512 KB of sample memory (a classic card takes up
+  to 1 MB). Module players fit a song's samples into it: on the biggest songs
+  they store some samples at lower quality (XTC-Play and Open Cubic Player mark
+  those with ½), so those songs can sound duller than on a card with 1 MB.
+- Quake's sound through the Gravis Ultrasound crackles: Quake's buffer holds
+  53 ms, and at 8 fps it refills it in time only just. Clear `ULTRASND`
+  (`SET ULTRASND=`) before starting Quake and it uses the Sound Blaster.
+- The MPU-401 at 330h (UART mode, from z486_MiSTer) has no MIDI port to send
+  to on the MEGA65: Windows 95 finds it as "MPU-401 Compatible", and music
+  sent there is silent. Choose the Gravis or the Sound Blaster's FM synth for
+  MIDI instead (in Windows 95: Control Panel, Multimedia, MIDI).
 - In native HDMI mode the picture is measured one line short: the top line
   can be missing.
 - The MEGA65's own software can leave the SD cards in SPI mode before the core
@@ -286,6 +370,8 @@ printed on the MEGA65's keycaps:
   Smolinski (the framework, the shell's starting point).
 - PCXT-EGA-MEGA65 by silent-command, for the approaches to storage, keyboard
   and mouse on the MEGA65.
+- The Gravis Ultrasound's GF1: LPC-GUS by nukeykt (`CORE/sv/gus/gf1.v`), a
+  model of the chip built from John McMaster's die shot.
 
 ## Licence
 
@@ -298,6 +384,7 @@ submodules keep their own licences:
 - QNICE-FPGA: BSD-3-Clause.
 - z486_MiSTer: the notices in its files (the MiSTer framework's files are GPL
   version 2 or later).
+- `CORE/sv/gus/gf1.v` (LPC-GUS): GPL version 2 or later.
 
 The core built from this repository (the `.bit` and `.cor` files) contains
 z486's microcode image, which none of these licences cover. The BIOS images

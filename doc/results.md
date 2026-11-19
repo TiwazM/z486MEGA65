@@ -241,6 +241,45 @@ end of DOS text lines in 1024x768 on the ASUS, just below bright characters. tb_
 1024x768 with a real line length, slow memory against fast) gives the same lines, so not the
 scaler's line fetch as far as its memory model goes; not found yet.
 
+Gravis Ultrasound test cores (2026-11-16 to 11-19), each incremental from the one before unless
+noted, every clock met, every net routed: v022gus (256 KB of sample RAM beside the 256 KB L2;
+main_clk +0.391 ns, block RAM 328/364, the GUS 66.5 tiles, 1,281 LUTs, 2,087 registers), v022snd
+(the Sound menu; +0.409), v022dma (the card found through 388h, the DMA's terminal count taken a
+clock later; +0.324: XTC-Play plays, CONSCAN finds the card), v022rec (DMA from the card to the PC,
+sampling as silence; +0.358: Gravis Setup's Custom Setup passes IRQ 11 and DMA 3 both ways),
+v022gtr (the I/O trace's GUS mode; +0.463), v022g512n (512 KB, no L2; +0.445, block RAM 323),
+v022g16 (512 KB, 16-bit samples in the right byte order, the sample RAM as 16-bit words, the 2xF
+register and the IRQ latch's combine bit; +0.388: ULTRINIT leaves IRQ 11 and DMA 3, Windows 3.11
+exits, Quake plays through the card), v022vol (the GUS volume menu; +0.388), v022l1 (16 KB + 16 KB
+L1, incremental: +0.083, -0.217 at the implementation target), v022l1v (the same placed fresh:
++0.471, +0.171 at the target, hold +0.057, 92.1K LUTs, 83.35 % slices, block RAM 325), v022joy
+(the joystick's Timing; +0.426), v022deb (port 2 debounced; +0.433), v022gk (the GF1's 8Fh IRQ
+clear on the voice that asked; +0.433, +0.133 at the target, hold +0.059, 83.57 % slices): released
+as v0.3. A 512 KB GUS beside a 64 KB L2 did not route (12 and 13 nets unrouted in two layouts,
+congested around the CPU).
+
+The caches on the board (Dr. Hardware after its start-up test, without EMM386; Quake's
+`timedemo demo1`); Softstones 8,612 in each:
+
+| Caches | Hardstones | RAM min | RAM Std | Memory Performance | Quake |
+|---|---|---|---|---|---|
+| 8 KB + 8 KB L1, 256 KB L2 (v0.2.1; Quake: v022rec) | 27,832 | 22.8 | 32.4 | - | 7.9 fps |
+| 8 KB + 8 KB L1, no L2 (v022g512n) | 27,273 | 19.4 | 25.3 | 80.6 | 7.8 fps |
+| 16 KB + 16 KB L1, no L2 (v022l1v) | 28,426 | 27.2 | 41.8 | 113.3 | 8.0 fps |
+
+On the board with v022l1v to v022gk (2026-11-18 and 11-19): Second Reality (it requires 512 KB),
+DOOM and module players (XTC-Play, Open Cubic Player) through the GUS; Windows 3.11 exits after
+Gravis' Windows driver plays its sounds; Windows 95's Add New Hardware finds the SB16, the Gravis
+Ultrasound Classic, the MPU-401 and the game port without a conflict, and MOD4WIN plays a 20-channel
+XM; Gravis' PLAYMIDI plays General MIDI with its patches; Wing Commander III with GUS music and
+effects (started through `WC3GRAV.BAT`); Jazz Jackrabbit's joystick with "Count" after a new
+calibration, and with port 2 debounced (v022deb, v022gk) its menus step one entry a tap (before, a
+tap down could skip an entry). Gabriel Knight's speech (Gravis' GUSDAC.DRV) stopped within a word until v022gk: the
+driver reads only 8Fh for its looping speech voice, and gf1.v cleared the IRQ of the voice two slots
+below, so the speech voice's IRQ came back every 75 us and the refills stopped. With v022gk, speech,
+effects and GUSMIDI music play together; a few speech lines end with a click. Quake's sound through
+the GUS crackles: its ring holds 53 ms, and at 8 fps Quake refills it in time only just.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard
