@@ -383,7 +383,8 @@ constant C_MENU_SND_SB        : natural := 77;  -- Sound: the SB16 alone (no Gra
 constant C_MENU_SND_GUS       : natural := 78;  -- Sound: the GUS alone (79: both, the default)
 constant C_MENU_GUSV_FULL     : natural := 83;  -- GUS volume: full (84: -6 dB, the default)
 constant C_MENU_GUSV_12       : natural := 85;  -- GUS volume: -12 dB
-constant C_MENU_RESET         : natural := 90;  -- momentary: m2m-rom.asm resets through the CSR
+constant C_MENU_NET           : natural := 88;  -- the NE2000 and the Ethernet port (default off)
+constant C_MENU_RESET         : natural := 91;  -- momentary: m2m-rom.asm resets through the CSR
 
 -- The internal floppy drive as a PC drive writes (fdd_phys.vhd); false: a read-only build
 constant C_FDD_WRITE          : boolean := true;
@@ -409,6 +410,25 @@ signal main_rtc_sync          : std_logic := '0';   -- the PC restarts: its CMOS
 signal main_hr_rst            : std_logic;
 signal main_cpu_slow          : std_logic := '0';
 signal main_gus_vol           : std_logic_vector(1 downto 0);    -- the menu's GUS volume: dB / 6
+-- The Ethernet port (eth_port.vhd) behind the NE2000 (ne2000_z486.sv in system.sv): its
+-- streams and its clock (eth_clk50, its own MMCM)
+signal eth_clk50              : std_logic;
+signal eth_rst50              : std_logic;
+signal eth_mac                : std_logic_vector(47 downto 0);   -- from the DNA, quasi-static
+signal eth_link               : std_logic_vector(2 downto 0);
+signal eth_mdio_out           : std_logic;
+signal eth_mdio_oe            : std_logic;
+signal eth_rx_start           : std_logic;
+signal eth_rx_valid           : std_logic;
+signal eth_rx_byte            : std_logic_vector(7 downto 0);
+signal eth_rx_end             : std_logic;
+signal eth_rx_ok              : std_logic;
+signal eth_tx_start           : std_logic;
+signal eth_tx_len             : std_logic_vector(10 downto 0);
+signal eth_tx_addr_u          : unsigned(10 downto 0);
+signal eth_tx_addr            : std_logic_vector(10 downto 0);
+signal eth_tx_data            : std_logic_vector(7 downto 0);
+signal eth_tx_busy            : std_logic;
 signal main_joy_dig           : std_logic_vector(7 downto 0);    -- the game port's joystick
 signal main_joy_b2            : std_logic := '0';
 signal main_joy_b3            : std_logic := '0';
@@ -794,6 +814,20 @@ component z486_mega65 is
       sb_enable          : in    std_logic;
       gus_enable         : in    std_logic;
       gus_vol            : in    std_logic_vector(1 downto 0);
+      ne2k_enable        : in    std_logic;
+      ne2k_mac           : in    std_logic_vector(47 downto 0);
+      eth_clk50          : in    std_logic;
+      eth_rst50          : in    std_logic;
+      eth_rx_start       : in    std_logic;
+      eth_rx_valid       : in    std_logic;
+      eth_rx_byte        : in    std_logic_vector(7 downto 0);
+      eth_rx_end         : in    std_logic;
+      eth_rx_ok          : in    std_logic;
+      eth_tx_start       : out   std_logic;
+      eth_tx_len         : out   std_logic_vector(10 downto 0);
+      eth_tx_addr        : in    std_logic_vector(10 downto 0);
+      eth_tx_data        : out   std_logic_vector(7 downto 0);
+      eth_tx_busy        : in    std_logic;
       cpu_slow           : in    std_logic;
       video_f60          : in    std_logic;
       boot_cfg           : in    std_logic_vector(5 downto 0);
@@ -881,14 +915,7 @@ begin
    pmod1_en_o           <= '0';
    pmod2_en_o           <= '0';
 
-   -- M2M-UPSTREAM eth-pins: PHY held idle
-   eth_clock_o          <= '0';
-   eth_led2_o           <= '0';
-   eth_mdc_o            <= '0';
-   eth_mdio_io          <= 'Z';
-   eth_reset_o          <= '1';
-   eth_txd_o            <= (others => '0');
-   eth_txen_o           <= '0';
+   -- M2M-UPSTREAM eth-pins: driven by i_eth (eth_port.vhd) for the NE2000
 
    -- M2M-UPSTREAM sd-host: the engine port belongs to the disks (disk_sd.vhd, below)
 
@@ -1227,6 +1254,21 @@ begin
          gus_enable         => not main_osm_control_i(C_MENU_SND_SB),
          -- the menu's "GUS volume": full, -6 dB (the default) or -12 dB
          gus_vol            => main_gus_vol,
+         -- the menu's "Network card": the NE2000 at 300h, IRQ 10, on the Ethernet port
+         ne2k_enable        => main_osm_control_i(C_MENU_NET),
+         ne2k_mac           => eth_mac,
+         eth_clk50          => eth_clk50,
+         eth_rst50          => eth_rst50,
+         eth_rx_start       => eth_rx_start,
+         eth_rx_valid       => eth_rx_valid,
+         eth_rx_byte        => eth_rx_byte,
+         eth_rx_end         => eth_rx_end,
+         eth_rx_ok          => eth_rx_ok,
+         eth_tx_start       => eth_tx_start,
+         eth_tx_len         => eth_tx_len,
+         eth_tx_addr        => eth_tx_addr,
+         eth_tx_data        => eth_tx_data,
+         eth_tx_busy        => eth_tx_busy,
          cpu_slow           => main_cpu_slow,
          -- the menu's "Refresh": 60 Hz (the default) or the VGA's own timing, which analog
          -- VGA monitors recognise (DOS text 720x400 at 70 Hz, 31.5 kHz; 60 Hz text has
@@ -1283,6 +1325,45 @@ begin
          cd_l               => main_cd_l,
          cd_r               => main_cd_r
       ); -- i_z486
+
+   -- The Ethernet port behind the NE2000 (eth_port.vhd: Megamiga's RMII MAC with its own MMCM
+   -- from the board's 100 MHz, the PHY's reset and management, the station address from the
+   -- FPGA's DNA). The menu's "Network card" off holds the PHY in reset: no link, no frames.
+   -- RMII phases 1/1 (Megamiga's, the MEGA65 network loader's).
+   i_eth : entity work.eth_port
+      port map (
+         sys_clk_i     => clk_i,
+         clk50_o       => eth_clk50,
+         rst50_o       => eth_rst50,
+         phy_rxd_i     => eth_rxd_i,
+         phy_crsdv_i   => eth_rxdv_i,
+         phy_txd_o     => eth_txd_o,
+         phy_txen_o    => eth_txen_o,
+         phy_mdc_o     => eth_mdc_o,
+         phy_mdio_i    => eth_mdio_io,
+         phy_mdio_o    => eth_mdio_out,
+         phy_mdio_oe_o => eth_mdio_oe,
+         phy_reset_n_o => eth_reset_o,
+         phase_i       => "0101",
+         enable_i      => main_osm_control_i(C_MENU_NET),   -- main clock, quasi-static
+         mac_o         => eth_mac,
+         mac_valid_o   => open,
+         link_o        => eth_link,
+         rx_start_o    => eth_rx_start,
+         rx_valid_o    => eth_rx_valid,
+         rx_byte_o     => eth_rx_byte,
+         rx_end_o      => eth_rx_end,
+         rx_ok_o       => eth_rx_ok,
+         tx_start_i    => eth_tx_start,
+         tx_len_i      => unsigned(eth_tx_len),
+         tx_addr_o     => eth_tx_addr_u,
+         tx_data_i     => eth_tx_data,
+         tx_busy_o     => eth_tx_busy
+      ); -- i_eth
+   eth_tx_addr <= std_logic_vector(eth_tx_addr_u);
+   eth_clock_o <= eth_clk50;                     -- the PHY's RMII reference
+   eth_mdio_io <= eth_mdio_out when eth_mdio_oe = '1' else 'Z';
+   eth_led2_o  <= eth_link(0);                   -- link
 
    -- The management bus: MiSTer's ARM side in hardware (CMOS, floppy, hard disk). Not reset
    -- with the PC: it configures the CMOS while the PC still waits for its ROMs.

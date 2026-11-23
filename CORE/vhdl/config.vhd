@@ -296,17 +296,20 @@ constant OPTM_S_SAVING     : string := "<Saving>";
 --    85    -12 dB                C_MENU_GUSV_12
 --    86    ----
 --    87    Back to main menu
---    88  ----
---    89  Help
---    90  Reset the PC            C_MENU_RESET
---    91  ----
---    92  Close Menu
+--    88  Network card            C_MENU_NET (default off): the NE2000 at 300h, IRQ 10
+--                                (ne2000_z486.sv) on the Ethernet port (eth_port.vhd); off:
+--                                nothing at 300h, the PHY in reset
+--    89  ----
+--    90  Help
+--    91  Reset the PC            C_MENU_RESET
+--    92  ----
+--    93  Close Menu
 --
 -- The settings file keeps one byte per line: change CFG_SIG_VAL in m2m-rom.asm with every
 -- layout change (and MENU_HEAP_SIZE there when the menu grows).
-constant OPTM_SIZE         : natural := 93;
+constant OPTM_SIZE         : natural := 94;
 constant OPTM_DX           : natural := 24;
-constant OPTM_DY           : natural := 21;   -- the main menu's lines (0-4, 13-16, 24-25, 37, 45, 54, 61, 74, 88-92):
+constant OPTM_DY           : natural := 22;   -- the main menu's lines (0-4, 13-16, 24-25, 37, 45, 54, 61, 74, 88-93):
                                               -- at most 23: the window (+2) must fit the OSM's 25 rows
                                               -- (VGA_DY / FONT_DY; 25 lines wrapped its bottom to the top)
 
@@ -399,6 +402,7 @@ constant OPTM_ITEMS        : string :=
    " -12 dB\n"                &
    "\n"                       &
    " Back to main menu\n"     &
+   " Network card\n"          &
    "\n"                       &
    " Help\n"                  &
    " Reset the PC\n"          &
@@ -422,6 +426,7 @@ constant OPTM_G_SNDCARD    : integer := 14;
 constant OPTM_G_CRT        : integer := 17;
 constant OPTM_G_GUSVOL     : integer := 18;
 constant OPTM_G_JOYT       : integer := 19;
+constant OPTM_G_NET        : integer := 20;
 
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
 
@@ -513,11 +518,12 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_GUSVOL,                            -- 85 -12 dB
                                              OPTM_G_LINE,                              -- 86
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- 87 Back
-                                             OPTM_G_LINE,                              -- 88
-                                             OPTM_G_HELP,                              -- 89 Help
-                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 90 Reset the PC
-                                             OPTM_G_LINE,                              -- 91
-                                             OPTM_G_CLOSE                              -- 92 Close Menu
+                                             OPTM_G_NET + OPTM_G_SINGLESEL,            -- 88 Network card
+                                             OPTM_G_LINE,                              -- 89
+                                             OPTM_G_HELP,                              -- 90 Help
+                                             OPTM_G_RESET + OPTM_G_SINGLESEL,          -- 91 Reset the PC
+                                             OPTM_G_LINE,                              -- 92
+                                             OPTM_G_CLOSE                              -- 93 Close Menu
                                            );
 
 -- Greyed out (M2M-UPSTREAM menu-rows, as Megamiga's config.vhd): an item of group "grp" whose

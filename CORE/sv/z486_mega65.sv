@@ -174,6 +174,23 @@ module z486_mega65 #(
     output wire [15:0] dbg_inta_bad,       // INTAs the PIC acknowledged with another vector
     output wire [15:0] dbg_inta_last,      // the last one: the CPU's vector, the PIC's
 
+    // The NE2000 (ne2000_z486.sv in system.sv: 300h, IRQ 10) and eth_port.vhd's MAC streams
+    // (eth_clk50); the menu's "Network card" switches it
+    input  wire        ne2k_enable,
+    input  wire [47:0] ne2k_mac,           // the station address (from the FPGA's DNA)
+    input  wire        eth_clk50,
+    input  wire        eth_rst50,
+    input  wire        eth_rx_start,
+    input  wire        eth_rx_valid,
+    input  wire  [7:0] eth_rx_byte,
+    input  wire        eth_rx_end,
+    input  wire        eth_rx_ok,
+    output wire        eth_tx_start,
+    output wire [10:0] eth_tx_len,
+    input  wire [10:0] eth_tx_addr,
+    output wire  [7:0] eth_tx_data,
+    input  wire        eth_tx_busy,
+
     // CD audio (pc_cdrom.vhd's cd_audio, clk_sys, 44.1 kHz): mixed with the SB Pro mixer's CD
     // volume, as z486_mister.sv mixes cdda.v's
     input  wire [15:0] cd_l,
@@ -650,7 +667,21 @@ system #(
     .dbg_ps2             (dbg_ps2),
     .dbg_ps2_fifo        (dbg_ps2_fifo),
     .dbg_inta_bad        (dbg_inta_bad),
-    .dbg_inta_last       (dbg_inta_last)
+    .dbg_inta_last       (dbg_inta_last),
+    .ne2k_enable         (ne2k_enable),
+    .ne2k_mac            (ne2k_mac),
+    .eth_clk50           (eth_clk50),
+    .eth_rst50           (eth_rst50),
+    .eth_rx_start        (eth_rx_start),
+    .eth_rx_valid        (eth_rx_valid),
+    .eth_rx_byte         (eth_rx_byte),
+    .eth_rx_end          (eth_rx_end),
+    .eth_rx_ok           (eth_rx_ok),
+    .eth_tx_start        (eth_tx_start),
+    .eth_tx_len          (eth_tx_len),
+    .eth_tx_addr         (eth_tx_addr),
+    .eth_tx_data         (eth_tx_data),
+    .eth_tx_busy         (eth_tx_busy)
 );
 
 // ------------------------------------------------------------------------------------------

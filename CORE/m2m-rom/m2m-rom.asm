@@ -1105,7 +1105,8 @@ CFG_SIGSET      SYSCALL(enter, 1)
 ; The menu's layout version (config.vhd): change it with every change of the
 ; menu lines. At most 3 characters (CFG_SIGCHECK's buffer).
 CFG_SIG_KEY     .ASCII_W "menu"
-CFG_SIG_VAL     .ASCII_W "25"                   ; 25: the joystick's "Timing" (93
+CFG_SIG_VAL     .ASCII_W "26"                   ; 26: "Network card" (94 lines);
+                                                ; 25: the joystick's "Timing" (93
                                                 ; lines); 24: "GUS volume" in the "Sound"
                                                 ; submenu (88 lines); 23: the "Sound" submenu: SB16,
                                                 ; GUS or both (82 lines); 22: Gravis
@@ -1253,9 +1254,10 @@ SDD_DEVSEL      .BLOCK  2                       ; SAVE_DEVSEL's
 #include "cdimage_vars.asm"
 
 ; The menu heap (Megamiga hard rule 11): the menu structure plus OPTM_HEAP;
-; for this 93-line menu: 20 + 931 item characters + 1 + 5 x 93 (the line
+; for this 94-line menu: 20 + 945 item characters + 1 + 5 x 94 (the line
 ; arrays and the dependency array) + 1 + (8 submenus + 4 manual loads + 1) x
-; 26 (SCR$OSM_O_DX) = 1756 words (the 88-line one before the joystick's
+; 26 (SCR$OSM_O_DX) = 1775 words (the 93-line one before "Network card":
+; 1756; the 88-line one before the joystick's
 ; "Timing": 1707; the 82-line one before "GUS volume": 1642;
 ; the 75-line one with the Gravis
 ; Ultrasound switch: 1532; the 74-line one before it: 1508; the 73-line

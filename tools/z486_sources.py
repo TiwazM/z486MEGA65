@@ -228,6 +228,76 @@ PATCHES = {
          "\tinterrupt[15] = irq_15;\n"
          "\tinterrupt     = interrupt | gus_irq;   // MEGA65 (z486_sources.py): the GUS's line\n"
          "end"),
+        # The NE2000 (CORE/sv/ne2000_z486.sv: georgemog's ao486 port of apolkosnik's Minimig
+        # model, its network side in hardware) at 300-31F, IRQ 10: its ports in the read mux,
+        # its accesses hold the adapter (with the GUS's), the adapter's byte enables tell it a
+        # word from a byte at its data port, and the MAC's streams (eth_port.vhd, clk50) pass
+        # through; the menu switches it (ne2k_enable)
+        ("    output     [15:0] dbg_gus,          // MEGA65: its IRQ and DMA state (gus.sv's dbg)",
+         "    output     [15:0] dbg_gus,          // MEGA65: its IRQ and DMA state (gus.sv's dbg)\n"
+         "    input             ne2k_enable,      // MEGA65: the NE2000 is there (ne2000_z486.sv)\n"
+         "    input      [47:0] ne2k_mac,         // MEGA65: its station address (eth_port.vhd)\n"
+         "    input             eth_clk50,        // MEGA65: eth_port.vhd's MAC streams (clk50)\n"
+         "    input             eth_rst50,\n"
+         "    input             eth_rx_start,\n"
+         "    input             eth_rx_valid,\n"
+         "    input       [7:0] eth_rx_byte,\n"
+         "    input             eth_rx_end,\n"
+         "    input             eth_rx_ok,\n"
+         "    output            eth_tx_start,\n"
+         "    output     [10:0] eth_tx_len,\n"
+         "    input      [10:0] eth_tx_addr,\n"
+         "    output      [7:0] eth_tx_data,\n"
+         "    input             eth_tx_busy,"),
+        ("wire [7:0] iobus_readdata8 =",
+         "// MEGA65: the NE2000 (ne2000_z486.sv; z486_sources.py)\n"
+         "reg         ne2k_cs;\n"
+         "wire  [7:0] ne2k_readdata;\n"
+         "wire        ne2k_hold;\n"
+         "wire        ne2k_irq;\n"
+         "wire  [3:0] iobus_cpu_be;\n\n"
+         "ne2000_z486 #(.CLK_HZ(SYS_FREQ)) ne2k (\n"
+         "    .clk               (clk_sys),\n"
+         "    .reset             (rst[15]),\n"
+         "    .enable            (ne2k_enable),\n"
+         "    .io_cs             (ne2k_cs),\n"
+         "    .io_address        (iobus_address),\n"
+         "    .io_read           (iobus_read),\n"
+         "    .io_write          (iobus_write),\n"
+         "    .io_writedata      (iobus_writedata_byte),\n"
+         "    .io_cpu_be         (iobus_cpu_be),\n"
+         "    .io_readdata       (ne2k_readdata),\n"
+         "    .io_hold           (ne2k_hold),\n"
+         "    .irq               (ne2k_irq),\n"
+         "    .mac               (ne2k_mac),\n"
+         "    .clk50             (eth_clk50),\n"
+         "    .rst50             (eth_rst50),\n"
+         "    .rx_start          (eth_rx_start),\n"
+         "    .rx_valid          (eth_rx_valid),\n"
+         "    .rx_byte           (eth_rx_byte),\n"
+         "    .rx_end            (eth_rx_end),\n"
+         "    .rx_ok             (eth_rx_ok),\n"
+         "    .tx_start          (eth_tx_start),\n"
+         "    .tx_len            (eth_tx_len),\n"
+         "    .tx_addr           (eth_tx_addr),\n"
+         "    .tx_data           (eth_tx_data),\n"
+         "    .tx_busy           (eth_tx_busy)\n"
+         ");\n\n"
+         "wire [7:0] iobus_readdata8 ="),
+        ("\t( gus_cs                                 ) ? gus_readdata      :  // MEGA65\n",
+         "\t( ne2k_cs                                ) ? ne2k_readdata     :  // MEGA65\n"
+         "\t( gus_cs                                 ) ? gus_readdata      :  // MEGA65\n"),
+        ("\t\tgus_adl_cs    <= gus_enable && ({iobus_address_next[15:1], 1'b0} == 16'h0388);  // MEGA65",
+         "\t\tgus_adl_cs    <= gus_enable && ({iobus_address_next[15:1], 1'b0} == 16'h0388);  // MEGA65\n"
+         "\t\tne2k_cs       <= ne2k_enable && ({iobus_address_next[15:5], 5'd0} == 16'h0300);  // MEGA65"),
+        ("    .io_hold           (gus_hold)          // MEGA65 (z486_sources.py): the GUS's GF1 cycles\n);",
+         "    .io_hold           (gus_hold | ne2k_hold), // MEGA65 (z486_sources.py): the GUS's GF1 cycles,\n"
+         "                                           // the NE2000's accesses\n"
+         "    .io_cpu_be         (iobus_cpu_be)      // MEGA65: the NE2000's word or byte\n"
+         ");"),
+        ("\tinterrupt     = interrupt | gus_irq;   // MEGA65 (z486_sources.py): the GUS's line\n",
+         "\tinterrupt     = interrupt | gus_irq;   // MEGA65 (z486_sources.py): the GUS's line\n"
+         "\tinterrupt[10] = interrupt[10] | ne2k_irq;  // MEGA65 (z486_sources.py): the NE2000\n"),
     ],
     # iobus_adapter.sv: a byte cycle waits in S_WAITn while io_hold is high (the GUS's GF1
     # cycles: IOCHRDY on its voice registers and DRAM peek/poke, gus.sv); nothing else holds it
@@ -243,6 +313,14 @@ PATCHES = {
          "            S_WAIT2: if (!io_hold) state <= is_read ? S_CAP2 : S_ISSUE3;"),
         ("            S_WAIT3: state <= is_read ? S_CAP3 : S_DONE;",
          "            S_WAIT3: if (!io_hold) state <= is_read ? S_CAP3 : S_DONE;"),
+        # ... and the CPU access's byte enables go out with its byte cycles: the NE2000's data
+        # port (ne2000_z486.sv) makes a word of a 16-bit IN/OUT's two bytes
+        ("    input              io_hold,           // MEGA65 (z486_sources.py): a byte cycle waits",
+         "    input              io_hold,           // MEGA65 (z486_sources.py): a byte cycle waits\n"
+         "    output      [3:0]  io_cpu_be,         // MEGA65 (z486_sources.py): the access's byte enables"),
+        ("always @(posedge clk) if (io_address_load) io_address <= io_address_next;",
+         "always @(posedge clk) if (io_address_load) io_address <= io_address_next;\n\n"
+         "assign io_cpu_be = active_be;   // MEGA65 (z486_sources.py): set with the access (S_IDLE)"),
     ],
     # floppy.v: the drives' state for the drive sounds (mega65.vhd's fdd_sound.vhd: the MEGA65's
     # internal drive follows them): the DOR's motor bits, the selected drive and each drive's

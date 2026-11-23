@@ -24,8 +24,12 @@ CORE_VHDL = ["vhdl/globals.vhd", "vhdl/config.vhd", "vhdl/clk.vhd", "vhdl/ps2_de
              "vhdl/pc_keyboard.vhd", "vhdl/pc_mouse.vhd", "vhdl/cd_audio.vhd", "vhdl/pc_cdrom.vhd",
              "vhdl/pc_mgmt.vhd",
              "vhdl/disk_sd.vhd", "vhdl/xadc_mon.vhd", "vhdl/fdd_sound.vhd",
-             "vhdl/fdd_mfm_rx.vhd", "vhdl/fdd_mfm_tx.vhd", "vhdl/fdd_phys.vhd", "vhdl/mega65.vhd"]
-CORE_SV = ["sv/guest_l2.sv", "sv/sb_soft.sv", "sv/gus/gf1.v", "sv/gus.sv", "sv/z486_mega65.sv"]
+             "vhdl/fdd_mfm_rx.vhd", "vhdl/fdd_mfm_tx.vhd", "vhdl/fdd_phys.vhd",
+             "vhdl/eth_clk.vhd", "vhdl/eth_dna.vhd", "vhdl/eth_mac.vhd", "vhdl/eth_port.vhd",
+             "vhdl/mega65.vhd"]
+CORE_SV = ["sv/guest_l2.sv", "sv/sb_soft.sv", "sv/gus/gf1.v", "sv/gus.sv",
+           "sv/ne2000/ne2000_packet_ram.v", "sv/ne2000/ne2000_core.v", "sv/ne2000/ne2000_isa.v",
+           "sv/ne2k_host.sv", "sv/ne2000_z486.sv", "sv/z486_mega65.sv"]
 
 # Verilog include directories, relative to CORE/
 INCLUDE_DIRS = ["../z486", "../z486/x87", "../z486_MiSTer/src"]

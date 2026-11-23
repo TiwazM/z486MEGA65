@@ -81,3 +81,19 @@ set_property IOB TRUE [get_ports {sdram_a_o[*] sdram_ba_o[*] sdram_ras_n_o sdram
 ## slots. Port names are the SPI ones of the board XDCs: mosi = CMD, miso = DAT0, reset = DAT3.
 set_property -dict {PULLUP TRUE} [get_ports {sd_mosi_o sd_miso_i sd_d1_i sd_d2_i sd_reset_o}]
 set_property -dict {PULLUP TRUE} [get_ports {sd2_mosi_o sd2_miso_i sd2_d1_i sd2_d2_i sd2_reset_o}]
+
+## The NE2000's Ethernet port (eth_port.vhd: Megamiga's eth_mac.vhd / eth_clk.vhd, as MegaMac's
+## mac_eth.vhd): the RMII clocks from their own MMCM (100 MHz -> 50 MHz reference, also driven
+## to the PHY, and 200 MHz, phase aligned).
+create_generated_clock -name eth_clk50  [get_pins CORE/i_eth/i_clk/i_mmcm/CLKOUT0]
+create_generated_clock -name eth_clk200 [get_pins CORE/i_eth/i_clk/i_mmcm/CLKOUT1]
+## core clock <-> MAC side (50 MHz): only ne2k_host.sv crosses, through request/acknowledge
+## toggles with two-FF synchronizers and values held steady while they cross; its buffers are
+## dual-clock block RAM; the station address (eth_dna.vhd) is static after start-up.
+set_max_delay -datapath_only -from [get_clocks main_clk]  -to [get_clocks eth_clk50] 10.000
+set_max_delay -datapath_only -from [get_clocks eth_clk50] -to [get_clocks main_clk]  10.000
+## RMII: RX is oversampled at 200 MHz at a selectable phase and TX leaves through a 200 MHz delay
+## line (as in the MEGA65 core), so the pins have no fixed timing to check; MDC/MDIO and the PHY
+## reset are slow (about 1.5 MHz) and static.
+set_false_path -from [get_ports {eth_rxd_i[*] eth_rxdv_i eth_rxer_i eth_mdio_io}]
+set_false_path -to   [get_ports {eth_txd_o[*] eth_txen_o eth_mdc_o eth_mdio_io eth_reset_o eth_led2_o}]
