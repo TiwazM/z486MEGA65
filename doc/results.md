@@ -282,6 +282,25 @@ stopped. With v022gk, speech, effects and GUSMIDI music play together; a few spe
 click. Quake's sound through the GUS crackles: its ring holds 53 ms, and at 8 fps Quake refills it
 in time only just.
 
+The NE2000 network card, v04ne (2026-11-23, synthesized and placed fresh): the first placement
+stopped on Place 30-575 (the board's 100 MHz pin already feeds three MMCMs and the QNICE PLL, as
+many as its dedicated route reaches); with the Ethernet MMCM fed through a BUFG, every clock met and
+every net routed: main_clk +0.392 ns (+0.092 at the implementation target), eth_clk50 +2.829 ns,
+eth_clk200 +2.689 ns, hdmi_clk +0.407 ns, qnice_clk +0.801 ns, hold +0.024 ns; 96.6K LUTs (72.2 %),
+88.24 % slices (v0.3: 83.57 %), block RAM 335/364, 16 of 32 BUFGs. The card with its hardware
+mailbox (`ne2000_z486`, `ne2k_host`) takes 3,679 LUTs and 10 block RAM tiles, the MAC and PHY
+setup (`eth_port`) 276 LUTs. Released as v0.4.
+
+On the board with v04ne (2026-11-23): in FreeDOS, Crynwr's `NE2000.COM` (`0x60 10 0x300`) finds the
+card with its DNA address; mTCP's DHCP gets an address at the first attempt; PING reaches the router
+in 3.7-7.5 ms and google.com in 16-19 ms, nothing lost; HTGET fetches a web page, and with an MTU of
+1500 a 702,100-byte file arrives at exactly its size. Windows 95 with its own "NE2000 Compatible"
+and TCP/IP: DHCP works once the card's IRQ 10 is set by hand (Windows listed only its I/O range);
+mIRC joins EFnet and takes its 3,462-channel list; Internet Explorer 3 and RetroZilla 2.3 (https)
+load web pages, and IE 3 downloads files from a plain-http server on the LAN. With Client for
+Microsoft Networks, NetBEUI and IPX/SPX installed, IE 3 stopped with a fatal exception 0E in
+IFSMGR; with only the NE2000 and TCP/IP it runs.
+
 ## Builds
 
 The whole core at **64 MHz** with the disks (floppies A: and B:, the IDE hard

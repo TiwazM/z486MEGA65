@@ -5,7 +5,7 @@ A port of [z486_MiSTer](https://github.com/nand2mario/z486_MiSTer), nand2mario's
 to the MEGA65 R6.
 
 It runs at 66 MHz, boots DOS, Windows 3.11 to 98, OS/2 Warp 4 and Linux, and
-plays games from the CD era. The current version is **v0.3** (see
+plays games from the CD era. The current version is **v0.4** (see
 [Releases](https://github.com/TiwazM/z486MEGA65/releases)).
 
 ## Features
@@ -45,6 +45,10 @@ plays games from the CD era. The current version is **v0.3** (see
 - CD audio, played in hardware and mixed through the Sound Blaster's CD volume
 - Gravis Ultrasound with 512 KB at 240h, DMA 3, IRQ 11 (see
   [Gravis Ultrasound](#gravis-ultrasound))
+
+**Network**
+- NE2000 network card at 300h, IRQ 10, on the MEGA65's Ethernet port (see
+  [Network](#network))
 
 **Disks**
 - IDE hard disk from an image file on the SD card
@@ -310,6 +314,39 @@ the Sound Blaster, whose mixer starts at -14 dB. If the GUS sounds harsh or
 too loud even with the speakers turned down, lower it here. The change is
 heard at once.
 
+## Network
+
+The menu's "Network card" (off by default) puts an NE2000 in the PC, at port
+300h and IRQ 10, on the MEGA65's Ethernet jack (100 Mbit/s). Reset the PC
+after switching it on. Its address comes from the FPGA's own ID: it starts
+with 02 and stays the same on the same MEGA65.
+
+- DOS: load a packet driver, such as Crynwr's `NE2000.COM`, then mTCP
+  (`DHCP`, `PING`, `FTP`, `HTGET` and the rest):
+
+  ```
+  NE2000 0x60 10 0x300
+  SET MTCPCFG=C:\NET\MTCP.CFG
+  DHCP
+  ```
+
+  mTCP's configuration file needs at least `PACKETINT 0x60`; `DHCP` writes
+  the address it gets into it, and `MTU 1500` there speeds up transfers.
+
+- Windows 95: Control Panel, Network, Add, Adapter: "Novell/Anthem",
+  "NE2000 Compatible"; then Add, Protocol, Microsoft, "TCP/IP" (Windows 95
+  doesn't add it by itself), with DHCP. Check the card in Device Manager,
+  Resources: I/O 0300-031F and Interrupt Request 10. Windows may give it no
+  interrupt at all; then "Set Configuration Manually" and set IRQ 10, or
+  DHCP gets no address. Remove what Windows adds along with the card
+  ("Client for Microsoft Networks", NetBEUI, IPX/SPX) and keep only the
+  NE2000 and TCP/IP: with them, Internet Explorer 3 stopped with a fatal
+  exception 0E in IFSMGR.
+
+The card is georgemog's NE2000 for ao486 on MiSTer, a model of the RTL8019AS
+from apolkosnik's Minimig Ethernet work. On MiSTer a Linux service passes
+its frames to the network; here the core does that itself.
+
 ## Known limits
 
 - A 486 at 66 MHz with a microcoded FPU: Pentium-era 3D games are slow.
@@ -342,6 +379,9 @@ heard at once.
   to on the MEGA65: Windows 95 finds it as "MPU-401 Compatible", and music
   sent there is silent. Choose the Gravis or the Sound Blaster's FM synth for
   MIDI instead (in Windows 95: Control Panel, Multimedia, MIDI).
+- The NE2000 receives frames to its own address and broadcasts: no multicast
+  and no promiscuous mode (a network monitor sees only those). The link is
+  100 Mbit/s.
 - In native HDMI mode the picture is measured one line short: the top line
   can be missing.
 - The MEGA65's own software can leave the SD cards in SPI mode before the core
@@ -374,6 +414,9 @@ heard at once.
   and mouse on the MEGA65.
 - The Gravis Ultrasound's GF1: LPC-GUS by nukeykt (`CORE/sv/gus/gf1.v`), a
   model of the chip built from John McMaster's die shot.
+- The NE2000: georgemog's port for ao486 on MiSTer (`CORE/sv/ne2000/`) of
+  apolkosnik's RTL8019AS model from the Minimig-AGA Ethernet work; the
+  Ethernet MAC from Megamiga, its RMII sampling after the MEGA65 core's.
 
 ## Licence
 

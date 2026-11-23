@@ -799,6 +799,50 @@ Part of [z486MEGA65](../README.md). How the core is put together: the plan, then
   stopped after a syllable. Every other driver here rewrites the voice in its
   handler, which hid it. `tb_gus` checks the voice numbers with 25, 32 and 14
   voices and one IRQ per pass of a looping voice (109 in 10 ms before).
+- NE2000 (`CORE/sv/ne2000_z486.sv`, 2026-11-23, v0.4): georgemog's ao486
+  NE2000 (`CORE/sv/ne2000/`, unchanged, GPL-3; github.com/georgemog/ao486_MiSTer
+  branch `ne2000` a3d5953), a model of the RTL8019AS from apolkosnik's Minimig
+  Ethernet work, at 300h (32 ports), IRQ 10 (free: the SB16 drives 10 only if
+  software moves it there; the GUS is on 11). Out of context it is 3,070 LUTs,
+  1,221 FFs, 4 block RAMs (its 16 KB packet RAM), +3.8 ns at 64 MHz. On MiSTer
+  the card reaches the network through a 64 KB mailbox in DDR that a Linux
+  service (ne2000d, Main_MiSTer) bridges to eth0; here `ne2k_host.sv` is that
+  service in hardware: it answers the card's mailbox port (`eth_dma_*`: a
+  request held until a one-clock ready, 64-bit transfers as four 16-bit RAM
+  accesses) from block RAM and moves the frames to and from the MAC on the
+  50 MHz RMII clock. The card needs a signature (CAFEBABEh) and a non-zero
+  heartbeat there or it aborts every transmit (TXE); it takes the station
+  address from the mailbox only if it is unicast and locally administered
+  (eth_dna's 02:...), and the address is read-only there (the card writes its
+  register mirror over it). It filters nothing, so the host takes frames to
+  its address and broadcasts (as ne2000d). RX: 16 logical slots, 4 physical
+  (2 KB each, at most 4 waiting); TX: all 8 slots (the card never waits for a
+  frame to be sent: a write into a slot still waiting holds its transfer).
+  The card reads the station address at every reset: the host empties its RX
+  queue then (else old frames came again), and the slot on offer becomes the
+  first (an epoch that dropped the frame in flight lost the first frame after
+  every driver start). Across the clocks: request/acknowledge toggles, never
+  reset. z486's adapter splits a 16-bit IN/OUT into byte cycles; the card
+  wants a word in one access (ao486's `io_32`), so `ne2000_z486.sv` pairs the
+  data port's bytes by the CPU's byte enables (the adapter's `io_cpu_be`, a
+  `z486_sources.py` patch): the low byte's cycle reads the word, the high
+  byte's takes the kept half; a doubleword is two words. The MAC is
+  `eth_port.vhd`, MegaMac's `mac_eth.vhd` (Megamiga's `eth_mac.vhd`,
+  `eth_clk.vhd`: a 4th MMCM, 50 + 200 MHz from the board's 100 MHz through a
+  BUFG, since the pin's dedicated route already feeds three MMCMs and the
+  QNICE PLL and a fourth stopped the placer, Place 30-575;
+  `eth_dna.vhd`; eth_card's PHY reset and MDIO), with the DNA's own address
+  and the PHY set up again when the menu's "Network card" (default off)
+  comes on; off holds the PHY in reset and nothing answers at 300h.
+  `CORE/sim/run_ne2000.sh` (iverilog) drives the card as Crynwr's packet
+  driver does through the patched adapter with a stream-level MAC model: the
+  PROM, frames out by words and doublewords, frames in (filter, bad FCS),
+  the ring wrapping, byte mode, OVW, 4 frames waiting while stopped, no old
+  frames after a reset, 10 frames through 8 slots behind a slow MAC, the
+  menu's off; `run_ne2000_eth.sh` (xsim) loops the real `eth_mac.vhd`'s RMII
+  pins back (padding, FCS, the filter). On the board (v04ne, 2026-11-23):
+  DOS with Crynwr's packet driver and mTCP, and Windows 95's own NE2000
+  driver with TCP/IP (see [results](results.md)).
 - Debug: `C_DEV_PC_CTL` also holds the SDRAM clock's fine phase, a snapshot
   of the PC's state (boot stage, POST code, CS:EIP, VGA frame count, the L2's
   counters) and a 4096-entry log of the BIOS's debug port 0x402, z486's
